@@ -126,7 +126,8 @@ V2_TOOLS: List[dict] = [
         "name": "tend",
         "description": (
             "The maintenance queue: re-consent, broken baselines, contradictions, merged-in "
-            "duplicates, captures, memories whose cited code moved, broken links, floor "
+            "duplicates, captures, memories whose cited code moved, lessons another trusted project "
+            "also keeps (promote, or a drifted rule), broken links, floor "
             "overflow, citation re-derivation. action list (default) | next | show (id) | apply "
             "(id, verdict: ONE item, after the user agrees) | snooze | skip | hold (kind or id, "
             "reason) | release. Also: add_decision (text) records a decision the user made for "
