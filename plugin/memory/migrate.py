@@ -73,6 +73,7 @@ def check(memory_dir: str) -> dict:
         "policy_keys": [],
         "no_frontmatter": [],
         "unparseable": [],
+        "citation_binding": None,
         "error": None,
     }
     try:
@@ -113,6 +114,9 @@ def check(memory_dir: str) -> dict:
         report["no_frontmatter"] = _names(nofm)
         report["unparseable"] = _names(bad)
         report["legacy_keys"] = {k: _names(v) for k, v in legacy.items()}
+        from .citation_binding import compare  # FMT-2: what the index already derives
+
+        report["citation_binding"] = {k: v for k, v in compare(memory_dir).items() if k != "disagree_names"}
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
     return report
@@ -151,6 +155,12 @@ def render(report: dict, label: Optional[str] = None) -> str:
     if report["derived_fields"]:
         lines.append(f"  derived citation fields in frontmatter: {len(report['derived_fields'])} "
                      "file(s); format 6 derives them in the index instead")
+    ib = report.get("citation_binding") or {}
+    if ib.get("state") == "current":
+        lines.append(f"  bindings the index already derives: {ib['derived']} of {ib['memories']}"
+                     + (f" ({ib['disagree']} differ from frontmatter cited_paths)" if ib["disagree"] else ""))
+    elif ib:
+        lines.append(f"  bindings the index already derives: none yet (index binding {ib['state']})")
     if report["policy_keys"]:
         lines.append(f"  policy keys in .format that move to hippo.json: "
                      f"{', '.join(report['policy_keys'])}")

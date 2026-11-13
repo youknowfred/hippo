@@ -43,6 +43,7 @@ from memory import atomic as A
 
 from .crash_scenarios_conventions import scenarios as _conventions_scenarios
 from .crash_scenarios_floor_diet import scenarios as _floor_diet_scenarios
+from .crash_scenarios_binding import scenarios as _binding_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
 from .crash_scenarios_rollup import scenarios as _rollup_scenarios
@@ -139,6 +140,7 @@ CRASH_CONTRACT = {
     ("promote_tend", "_adopt"): ("detected",),  # OWN-2: adopt names the miss; the memory keeps its bytes
     ("index_sections", "_write_matrix"): ("intact",),  # HOT-11: derived sub-index; prior kept, the build returns
     ("index_sections", "_write_manifest"): ("intact",),  # HOT-11: same; the prior manifest names its own matrix
+    ("citation_binding", "_write_doc"): ("intact",),  # FMT-2: derived sidecar; the build returns, the prior sidecar stays
 }
 
 
@@ -1063,6 +1065,7 @@ _SCENARIOS = [
     *_ledger_scenarios(_arm, _snap, _assert_unchanged),  # LDG-1 (tests/crash_scenarios_ledger.py)
     *_floor_diet_scenarios(_arm, _snap, _assert_unchanged),  # NAT-3 (tests/crash_scenarios_floor_diet.py)
     *_sections_scenarios(_arm, _snap, _assert_unchanged),  # HOT-11 (tests/crash_scenarios_sections.py)
+    *_binding_scenarios(_arm, _snap, _assert_unchanged),  # FMT-2 site (tests/crash_scenarios_binding.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
