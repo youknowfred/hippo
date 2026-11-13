@@ -4,6 +4,8 @@ Starting at **v1.0.0**, hippo commits to a frozen compatibility surface and a su
 is what "1.0" means here: the things below won't change under you without a major-version bump or a
 deprecation window. (Resolves ROADMAP.v1 **OQ-8**.)
 
+The draft of the v2 policy, [STABILITY.v2.md](STABILITY.v2.md), takes effect at v2.0.0 and replaces this file then; until then, this file is the contract.
+
 ## Versioning
 
 hippo follows semantic versioning. The version lives in lockstep in `plugin/.claude-plugin/plugin.json`
