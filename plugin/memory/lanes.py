@@ -13,8 +13,14 @@ ACT only in the prompt hook, and only for a corpus whose ``hippo.json`` declares
 ``journals`` as a list (``[]`` included):
 
   - a journal is admitted only when the prompt names its id, or (GP-S4) when it cites a
-    tracker id the prompt names and the corpus declares a ledger (``LaneRequest``); a withheld
-    journal takes no pool slot, seeds no expansion and cannot enter by one;
+    tracker id the prompt names and the corpus declares a ledger, or (HOT-13) by its own
+    signal: it is the FIRST of all the fused candidates, the ranker's own best answer to the
+    prompt, and the count rule finds evidence of its own for it (``recall_count``'s
+    ``earned``). At most one journal per prompt enters that way, and it is served BESIDE the
+    prompt's rows: it stays out of the candidate walk like every withheld journal (no pool
+    slot, no expansion seed, no part in the knee or the diversity pass), and recall adds its
+    row to the ones the walk produced (``LaneRequest``); a withheld journal takes no pool
+    slot, seeds no expansion and cannot enter by one;
   - the admitted rows are then picked by lane, behavior first (``select``), and the
     prompt's char budget follows the same shares (``fit_lanes``).
 
@@ -49,6 +55,20 @@ _BEHAVIOR_TYPES = frozenset({"user", "feedback"})
 _BEHAVIOR_SHARE = 0.4
 # Prompt-named journals admitted per prompt before the rest of the slots go to facts.
 _JOURNAL_SLOTS = 2
+# HOT-13, measured on three corpora (hook mode, dense; see the commit body). Of the hard-set
+# rows whose expected memory is a journal, the ones any admission can serve have that journal
+# at the very top of the fusion; the rest rank past the fifteenth candidate, which no lane
+# rule reaches. "First fused candidate, with evidence of its own" recovered the most rows per
+# added row of every rule tried (best dense row, top three of both lanes, a description
+# sharing three terms, a cosine near the best within the top ten or twenty). Letting the
+# journal into the candidate walk instead cost expected facts: it took a slot under the row
+# cap, became the row served whatever its evidence, and reseeded the graph expansion.
+
+
+def journal_signal() -> bool:
+    """False only for ``HIPPO_JOURNAL_SIGNAL`` set to 0/false/off/no."""
+    raw = (os.environ.get("HIPPO_JOURNAL_SIGNAL") or "").strip().lower()
+    return raw not in ("0", "false", "off", "no")
 
 
 def behavior_share() -> float:
@@ -197,13 +217,16 @@ class LaneRequest:
         self.active = False
         self.withheld: Set[str] = set()
         self.admitted: Set[str] = set()
-        # GP-S4: why each admitted journal passed — "named" (the prompt names it) or
-        # "issue" (it cites an issue id the prompt names). The hook copies it onto the row,
-        # so the recall event and the rollup count each admission by cause.
+        # GP-S4: why each admitted journal passed — "named" (the prompt names it), "issue"
+        # (it cites an issue id the prompt names) or, HOT-13, "signal" (the first fused
+        # candidate, with evidence of its own). The hook copies it onto the row, so the
+        # recall event and the rollup count each admission by cause.
         self.admitted_by: Dict[str, str] = {}
         self.join = join  # the ledger cache (ledger.load) or None
         self._named: Optional[Set[str]] = None
         self._issue: Optional[Dict[str, str]] = None
+        # HOT-13: None until decided on the fused candidates; then () or (entry index, score).
+        self._signal: Optional[tuple] = None
 
     def start(self, manifest: Optional[dict]) -> int:
         self.active = active(manifest)
@@ -227,11 +250,53 @@ class LaneRequest:
             return "issue"
         return None
 
-    def withhold(self, rows: List[tuple], entries: List[dict], record=None) -> List[tuple]:
+    def by_signal(self) -> frozenset:
+        """The journal (at most one) recall served beside this prompt's rows."""
+        return frozenset(n for n, why in self.admitted_by.items() if why == "signal")
+
+    def _first_by_signal(self, rows: List[tuple], entries: List[dict], signals) -> tuple:
+        """HOT-13: ``(entry index, fused score)`` of the first fused candidate when it is a
+        journal nothing else admits and the count rule finds evidence of its own for it,
+        else ``()``. ``signals`` is ``recall_count.Signals``; a row it cannot judge (no
+        cosine) is not admitted."""
+        try:
+            if not rows or not journal_signal():
+                return ()
+            i = rows[0][0]
+            e = entries[i]
+            name = e.get("name") or ""
+            if e.get("lane") != JOURNAL or not name or name in self.floor or self._admit(name):
+                return ()
+            sig = signals.row(i)
+            return (i, rows[0][1]) if sig and sig.get("earned") else ()
+        except Exception:
+            return ()
+
+    def beside(self, entries: List[dict], servable) -> List[tuple]:
+        """HOT-13: ``[(entry index, fused score)]`` for the journal admitted by its own signal
+        when ``servable(index)`` holds (recall's own checks: live, consented, not retired),
+        marking it admitted as ``signal``; ``[]`` otherwise. Called once, after the walk."""
+        try:
+            if not self._signal or not servable(self._signal[0]):
+                return []
+            name = entries[self._signal[0]].get("name") or ""
+            self.withheld.discard(name)
+            self.admitted.add(name)
+            self.admitted_by[name] = "signal"
+            return [self._signal]
+        except Exception:
+            return []
+
+    def withhold(self, rows: List[tuple], entries: List[dict], record=None, signals=None) -> List[tuple]:
         """``rows`` (tuples whose first item is an entry index) minus every journal the
-        prompt did not name. Recorded once per memory as ``journal_lane``."""
+        prompt did not name. Recorded once per memory as ``journal_lane``. ``signals``
+        (the fused candidates' evidence; None without a dense lane) lets the first call
+        that has it pick one journal by its own signal. That journal is withheld from the
+        walk like the rest; ``beside`` hands it back to recall afterwards."""
         if not self.active:
             return rows
+        if self._signal is None and signals is not None:
+            self._signal = self._first_by_signal(rows, entries, signals)
         kept: List[tuple] = []
         for row in rows:
             e = entries[row[0]]
@@ -258,16 +323,24 @@ class LaneRequest:
 # --------------------------------------------------------------------------- #
 # Lane shares: slots, then chars
 # --------------------------------------------------------------------------- #
-def select(rows: List[dict], k: int, share: float) -> Tuple[List[dict], List[dict]]:
+def select(
+    rows: List[dict], k: int, share: float, extra: Iterable[str] = ()
+) -> Tuple[List[dict], List[dict]]:
     """Pick ``k`` of ``rows`` (non-collapsed, in recall's order) by lane: behavior up to
     ``behavior_slots(k, share)``, journals up to ``_JOURNAL_SLOTS``, facts the rest, and any
     slot a lane leaves unused goes to the next rows in recall order whatever their lane.
-    Returns ``(picked, cut)``: picked is behavior rows first, then the rest, each in recall
-    order; cut is every row not picked, in recall order. Pure."""
+    A row named in ``extra`` (HOT-13: the journal admitted by its own signal) is picked on
+    top of the ``k``: it takes no slot from a behavior or fact row. Returns
+    ``(picked, cut)``: picked is behavior rows first, then the rest, each in recall order;
+    cut is every row not picked, in recall order. Pure."""
     k = max(0, int(k))
     caps = {BEHAVIOR: behavior_slots(k, share), JOURNAL: _JOURNAL_SLOTS}
     by: Dict[str, List[int]] = {BEHAVIOR: [], JOURNAL: [], FACT: []}
+    beside = frozenset(extra or ())
+    held = {pos for pos, r in enumerate(rows) if r.get("name") in beside} if beside else set()
     for pos, r in enumerate(rows):
+        if pos in held:
+            continue
         by.setdefault(row_lane(r), []).append(pos)
     take: Set[int] = set()
     for lane in (BEHAVIOR, JOURNAL):
@@ -275,8 +348,9 @@ def select(rows: List[dict], k: int, share: float) -> Tuple[List[dict], List[dic
     rest = [p for lane, ps in by.items() if lane not in caps for p in ps]
     take.update(sorted(rest)[: max(0, k - len(take))])
     if len(take) < k:  # unused slots flow on, in recall order
-        spare = [p for p in range(len(rows)) if p not in take]
+        spare = [p for p in range(len(rows)) if p not in take and p not in held]
         take.update(spare[: k - len(take)])
+    take |= held
     picked = [rows[p] for p in sorted(take) if row_lane(rows[p]) == BEHAVIOR]
     picked += [rows[p] for p in sorted(take) if row_lane(rows[p]) != BEHAVIOR]
     cut = [rows[p] for p in range(len(rows)) if p not in take]

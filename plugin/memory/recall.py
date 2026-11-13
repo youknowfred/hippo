@@ -171,6 +171,7 @@ from .recall_tiers import (
     _RULES_SOURCE,
     _USER_TIER,
     _ensure_index,
+    _entry_gate,
     _extra_recall_tiers,
     _fuse_recall_tiers,
     _merge_loaded_indexes,
@@ -789,11 +790,11 @@ def recall(
         sig = None
         if lanes is not None:  # HOT-7: an unnamed journal takes no pool slot and seeds nothing
             k += lanes.start(idx.manifest)
-            fused = lanes.withhold(fused, entries, _record_drop)
             if sims_out:  # HOT-8: the hook judges each row on its own evidence
                 sig = _count.signals(
                     bm25_terms(q_tokens), idx, sims_out[0], bm25, bm25_body, _dense_floor(idx.model or DEFAULT_MODEL)
                 )
+            fused = lanes.withhold(fused, entries, _record_drop, sig)  # HOT-13: sig may pick one
         # backend label reflects the PRIMARY (description) signals only -- body rankings are
         # a backstop, not a third backend a user needs to reason about at the display layer.
         backend = "dense+bm25" if (dense and bm25) else ("dense" if dense else "bm25")
@@ -939,6 +940,10 @@ def recall(
         # (below), because there the graph is the sole reason the line exists at all.
         graph_admitted: set = set(graph_injected)
         pool_cut_from: Optional[int] = None
+
+        def _gate(e: dict) -> Optional[str]:  # COR-4 / SEC-6: dangling_file, withheld or None
+            return _entry_gate(e, memory_dir, consented_hashes, trust.file_sha256)
+
         for pos, (i, adj_score, state) in enumerate(penalized):
             if len(admissible) >= pool_n:
                 pool_cut_from = pos  # MSR-4: everything from here was pool-overflow cut
@@ -955,33 +960,11 @@ def recall(
                 )
                 continue
             e = entries[i]
-            # Deleted/renamed since the index was built (COR-4): drop it from THIS
-            # session's output immediately rather than keep injecting a dangling path.
-            # TEA-1/TEA-3: resolve against the entry's own corpus ``root`` (project / user /
-            # private) — a single-corpus entry has none and falls back to ``memory_dir``.
-            e_root = e.get("root") or memory_dir
-            e_path = os.path.join(e_root, e["file"]) if e_root else None
-            if e_path and not os.path.isfile(e_path):
-                _record_drop(e.get("name"), "dangling_file", adj_score)
+            gate = _gate(e)
+            if gate:
+                if gate == "dangling_file":
+                    _record_drop(e.get("name"), gate, adj_score)
                 continue
-            # SEC-6 quarantine: a PROJECT-tier candidate whose file bytes drifted from the
-            # consent-time baseline is SKIPPED — content that arrived outside hippo's own
-            # per-item write path (a `git pull` from a trusted-then-changed upstream, a
-            # hand edit) must not inject until the user re-reviews it. Fail CLOSED: a file
-            # that can't be hashed, or a stem absent from the baseline (new since
-            # consent), is withheld too. User/private tiers are the user's own machine
-            # state and are never quarantined; this is deliberately NOT silent — the
-            # SessionStart trust-drift producer and /hippo:doctor name the withheld files
-            # and the re-consent path (KPI-5).
-            if (
-                consented_hashes is not None
-                and e_path
-                and e.get("corpus") in (None, _PROJECT_TIER)
-                and not e.get("outbox")  # OUT-1: the outbox gate already checked its own record
-            ):
-                live_hash = trust.file_sha256(e_path)
-                if live_hash is None or live_hash != consented_hashes.get(e.get("digest") or e["name"]):
-                    continue  # drifted, new-since-consent, or unhashable — withheld
             # RET-1: the knee compares PRIMARY-SIGNAL-ONLY relevance (`primary_relevance`,
             # see its construction above), never the display/sort score -- an entry with NO
             # primary ranking of its own (a pure body-backstop hit) has nothing in
@@ -1077,7 +1060,12 @@ def recall(
         for j, why, sc in _expansion_drops(graph_notes, {t[0] for t in final}, cut):
             _record_drop(entries[j].get("name"), why, sc)  # HOT-9 (no-op without drop_log)
         results: List[dict] = []
-        for i, adj_score, state in admissible[:k]:
+        # HOT-13: one journal by its own signal, emitted beside the walk's rows (it took no
+        # part in the walk); the same row shape, after the walk's own liveness checks.
+        beside = [] if lanes is None else lanes.beside(
+            entries, lambda j: _invalidation_state(entries[j]) is None and j not in superseded_by
+            and entries[j].get("confidence") != "draft" and _gate(entries[j]) is None)
+        for i, adj_score, state in admissible[:k] + [(j, sc, None) for j, sc in beside]:
             e = entries[i]
             results.append(
                 {
@@ -1175,6 +1163,10 @@ def recall(
                     **_sections.result_keys(e),  # HOT-11: a section row's digest and line
                 }
             )
+        if beside:  # it led the fused candidates: first, with the ranks renumbered
+            results.insert(0, results.pop())
+            for n, r in enumerate(results):
+                r["rank"] = n + 1
         # DRM-6 quarantine, leg 2 — excluded from ABSTENTION-SENSITIVE answering: a
         # result set consisting ONLY of confidence:draft memories is not an answer, it
         # is an abstention with speculation attached, so it collapses back to the

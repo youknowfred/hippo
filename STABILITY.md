@@ -109,6 +109,8 @@ These may change at any release without a major bump — do not build on them:
   arming is unchanged either way until a replay of past verdicts clears their gate),
   `HIPPO_SIGNAL_COUNT` (the prompt hook's count-by-evidence rule; 0 turns it off) with
   `HIPPO_COUNT_BAND` and `HIPPO_COUNT_WIDE` (its two cosine margins),
+  `HIPPO_JOURNAL_SIGNAL` (a journal that leads the fused candidates is served beside the
+  prompt's rows on a corpus that declares `journals`; 0 turns it off),
   `HIPPO_SECTION_ROWS` (how many folded-section rows explicit recall lists after the memories;
   0 turns them off),
   `HIPPO_INDEX_BINDING` (readers prefer the citation binding the index derives; 0 means
@@ -138,7 +140,8 @@ These may change at any release without a major bump — do not build on them:
   `· <ID> <status> (snapshot <date>)` row suffix, the derived `.hippo/index/ledger.json`
   (its schema, its `prev` map and its id-to-journals map), the `build-index` line, the doctor
   line, `hippo recall --for-issue` (its output, JSON and exit codes), the issue admission of a
-  journal and the `admitted` / `journal_admitted` telemetry fields. An opt-in
+  journal and the `admitted` / `journal_admitted` telemetry fields (their values name the
+  admission: `named`, `issue`, and from v1.46 `signal`). An opt-in
   addition; STABILITY v2 classifies it. That it never calls the network, never writes to a
   tracker or a memory file, and reads nothing for an untrusted corpus will not loosen.
 - **The outbox** — the `write_path` key in `hippo.json`, `.claude/memory.outbox/` and its
