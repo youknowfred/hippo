@@ -467,3 +467,29 @@ def test_json_output_names_classes_and_counts(repo, memory_dir, monkeypatch, cap
     assert _ship(memory_dir, "--json") == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["counts"].startswith("1 to ship") and doc["new"][0]["name"] == "fresh_note.md"
+
+
+# --------------------------------------------------------------------------- #
+# 10. A promote's floor remove replays, bare pointer or link
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("line", ["- tabs_pref — tabs, never spaces", "- [Tabs](tabs_pref.md) — tabs"],
+                         ids=["bare", "link"])
+def test_a_promoted_memorys_floor_pointer_removal_ships(repo, memory_dir, monkeypatch, tmp_path, line):
+    """The promote takes the memory out of the corpus and its pointer out of the outbox floor
+    copy; the plan reads that as a pointer remove, a bare line too, though the memory is no
+    longer in the corpus or the outbox (the base ref still holds it)."""
+    _corpus(repo, memory_dir, monkeypatch, {"tabs_pref": _mem("tabs_pref", "tabs please", mtype="user")})
+    write_file(memory_dir, "MEMORY.md", _FLOOR.replace("## User\n", f"## User\n{line}\n"))
+    git_commit(repo, "floor", 1_700_000_050)
+    _origin(repo)
+    assert T.mark_trusted(T.gate_repo_root(memory_dir, repo), memory_dir=memory_dir, origin="init")
+    assert PC.acknowledge(memory_dir, repo)["ok"]
+    monkeypatch.setenv("HIPPO_USER_MEMORY_DIR", str(tmp_path / "user-tier"))
+    r = N.promote_memory("tabs_pref", memory_dir=memory_dir, repo_root=repo)
+    assert r["promoted"] and r["floor_removed"]["status"] == "removed", r
+    fl = S.build_plan(memory_dir, repo)["floor"]
+    assert fl["state"] == "new", fl.get("why")
+    assert (fl["adds"], fl["removes"]) == (0, 1) and fl["replayed"] == _FLOOR
+    assert _ship(memory_dir, "--yes") == 0
+    (branch,) = _branches(repo)
+    assert _git(repo, "show", f"{branch}:.claude/memory/MEMORY.md") + "\n" == _FLOOR

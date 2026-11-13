@@ -372,7 +372,12 @@ def _floor_plan(memory_dir, top, rel, b, at_base, manifest, d) -> Optional[dict]
     base_text = open(base_path, encoding="utf-8").read() if os.path.isfile(base_path) else None
     from .lint_floor import memory_exists
 
-    changes = (floor_changes(base_text, copy_bytes.decode("utf-8"), memory_exists(memory_dir))
+    here = memory_exists(memory_dir)
+
+    def is_memory(name: str) -> bool:  # a promote removed the file; the base ref still has it
+        return here(name) or f"{name}.md" in at_base
+
+    changes = (floor_changes(base_text, copy_bytes.decode("utf-8"), is_memory)
                if base_text is not None else None)
     if target_bytes is None or changes is None:
         fp["state"] = "stale"
