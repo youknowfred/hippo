@@ -344,8 +344,9 @@ def test_draft_confidence_excluded_as_endpoint(dirs):
 # The apply-eligibility bar (the calibrated θ/mutuality gate DRM-2 consumes)
 # --------------------------------------------------------------------------- #
 def test_apply_eligible_calibrated_bar():
-    # completion: θ-exempt (text evidence).
-    assert dream.apply_eligible({"kind": "completion", "cofire": 0.0}, theta=0.9)
+    # completion: θ-exempt, but it needs any observed co-recall (tests/test_dream_cofire_floor.py).
+    assert dream.apply_eligible({"kind": "completion", "cofire": 0.05}, theta=0.9)
+    assert not dream.apply_eligible({"kind": "completion", "cofire": 0.0}, theta=0.9)
     # refines: cofire ≥ θ.
     assert dream.apply_eligible({"kind": "refines", "cofire": 0.91}, theta=0.9)
     assert not dream.apply_eligible({"kind": "refines", "cofire": 0.89}, theta=0.9)
