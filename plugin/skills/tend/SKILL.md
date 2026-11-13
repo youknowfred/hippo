@@ -67,6 +67,11 @@ What each kind needs before its verdict:
 - **contradiction** — read both. `keep_one` or `merge` take `--winner` and `--loser` (merge
   after you folded the loser's unique content into the winner); `scope_both` after you
   edited both to name their scopes; `not_conflicting` when they are both right.
+  An item whose second side is `rule:<file>#<section>` is a memory that disagrees with a
+  CLAUDE.md or `.claude/rules` section (the two sentences are in its evidence). hippo
+  never edits the rule: `keep_one --winner rule --loser <memory>` demotes the memory; if
+  the memory is right, edit the rule file yourself and the item leaves the queue;
+  `not_conflicting` or `scope_both` keeps it down until either text changes.
 - **merge** — a merged-in memory looks like a duplicate. `supersede --winner <name>`,
   `updated` after you folded it into the existing memory, or `distinct`.
 - **baseline** — confirm the memory still holds, then `rebaseline`.

@@ -546,7 +546,10 @@ def check_rules_conflicts(ctx: DoctorContext) -> Dict[str, str]:
     Joins governance-plane citations (CLAUDE.md/AGENTS.md/.claude/rules|agents|skills)
     against the corpus: a cited memory another memory ``supersedes``/``contradicts`` is a
     live conflict; a cited memory no session recalls (strength < 0.15, once the 5-session
-    soak gate is met) is an authority-evidence gap. Read-only; findings route to a per-item
+    soak gate is met) is an authority-evidence gap. RUL-8's text leg adds behavior memories
+    whose sentence shares a rule sentence's words but not its directive (ask / run, always /
+    never, step order, whose act), minus the ones tend already skipped, snoozed or held.
+    Read-only; findings route to a per-item
     decision via /hippo:consolidate — nothing auto-resolves. ``ok`` when the planes agree;
     never raises.
     """
@@ -554,9 +557,21 @@ def check_rules_conflicts(ctx: DoctorContext) -> Dict[str, str]:
         from .rules_plane import conflict_radar
         from .soak import SOAK_GATE_SESSIONS
 
+        from .rules_conflict import pending as text_pending, where
+
         radar = conflict_radar(ctx.memory_dir, ctx.repo_root)
         conflicts = radar["edge_conflicts"]
         gaps = radar["authority_gaps"]
+        text = text_pending(ctx.memory_dir, ctx.repo_root)  # RUL-8: the text leg
+        if text:
+            t = text[0]
+            return {
+                "status": "warn",
+                "message": f"rule↔memory conflicts: {len(text)} text conflict(s) + "
+                f"{len(conflicts)} typed-edge conflict(s) + {len(gaps)} authority gap(s) — "
+                f"top: `{t['memory']}` disagrees with {where(t)}. Decide per item via "
+                "/hippo:tend.",
+            }
         if not conflicts and not gaps:
             if radar["gate_met"]:
                 return {

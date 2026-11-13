@@ -166,7 +166,9 @@ def _src_contradiction(memory_dir: str, repo_root: str) -> List[dict]:
             "contradiction", f"{a}|{b}", f"these two memories contradict ({who})",
             "read both; supersede one, scope both, merge, or mark them not conflicting",
         ))
-    return out
+    from .rules_conflict import queue_entries  # RUL-8: a memory against a rule section
+
+    return out + queue_entries(memory_dir, repo_root)
 
 
 def merge_entry(pair: dict) -> dict:

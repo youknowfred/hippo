@@ -727,6 +727,10 @@ def discover(
             )
             result["candidates"] = candidates + contra["candidates"]
             result["stats"]["contradictions"] = contra["stats"]
+            from .rules_conflict import confirm_candidates, repo_root_of  # RUL-8: confirm only
+
+            contra["stats"]["rule_text"] = confirm_candidates(
+                memory_dir, repo_root_of(memory_dir), td, pass_id=pass_id)
         except Exception:
             pass
     return result

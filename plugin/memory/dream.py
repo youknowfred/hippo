@@ -212,6 +212,13 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
                 else ""
             )
         )
+        rt = contra.get("rule_text") or {}
+        if rt.get("attempts"):
+            lines.append(
+                f"   ⚡ memory-vs-rule candidates checked: {rt['attempts']} → "
+                f"{rt.get('confirmed', 0)} confirmed (confirm-only: every candidate stays in "
+                "/hippo:tend either way)"
+            )
     if stats.get("unaged_dream_pairs_firewalled"):
         lines.append(
             f"   aging firewall: {stats['unaged_dream_pairs_firewalled']} un-aged dream edge(s) "
