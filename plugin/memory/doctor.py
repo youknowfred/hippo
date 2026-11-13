@@ -151,6 +151,7 @@ from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_r
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
 from .doctor_checks_user_tier import check_user_tier  # OWN-1
 from .dream_deprecated import check_dream_tiers  # SRF-7
+from .doctor_checks_pins import check_hard_set_pins  # OBS-5
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -434,6 +435,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
     ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
     ("update_eval", check_update_eval),  # TMB-4: outrank failures from the latest persisted run
+    ("hard_set_pins", check_hard_set_pins),  # OBS-5: hard-set rows pinning a memory that no longer resolves; no line when none
     ("evidence_fences", check_evidence_fences),  # CLB-3: quoted-evidence coverage + cited-code drift
     ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
     ("team_coverage", check_team_coverage),  # CLB-2: last_verified lit up + verified_by coverage (suppressed solo)
