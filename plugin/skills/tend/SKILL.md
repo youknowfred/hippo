@@ -35,7 +35,10 @@ hippo tend
 ```
 
 Tell the user the count by kind in one line, and anything held or failed. An empty queue is
-a fine answer.
+a fine answer. When the summary ends with the scheduled-sleep line (a backlog of ten or more
+and no sleep run here in a week; it shows once a day), pass it on as it is: it offers the
+report-only schedule `hippo sleep --print-schedule` prints. Never install a schedule
+yourself, and never suggest the write-capable sleep tier in its place.
 
 ## 2. One item at a time
 

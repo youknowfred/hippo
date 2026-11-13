@@ -272,6 +272,10 @@ def _run_report(memory_dir: str, repo_root: str, telemetry_dir: str) -> Tuple[st
     header = [f"# hippo sleep report — {_iso(now)}", stamp]
     if resume_note:
         header.append(resume_note)
+    from .sleep_sweep import run_pass  # TND-7: before the doctor section, which reads its report
+
+    sweep_outcome, sweep_line = run_pass(memory_dir, repo_root, state)
+    header.append(sweep_line)
 
     # SLP-3 first: when it applied anything, the report's FIRST line is the undo.
     lead: Optional[str] = None
@@ -321,6 +325,7 @@ def _run_report(memory_dir: str, repo_root: str, telemetry_dir: str) -> Tuple[st
         one = (
             f"hippo sleep report {_iso(now)}: nothing to do — queues empty; {plumbing} "
             f"({stamp}{'; ' + resume_note if resume_note else ''})"
+            + ("" if sweep_outcome in ("none", "current") else f" {sweep_line}")
         )
         return one + "\n", warnings
 
