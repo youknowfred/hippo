@@ -686,3 +686,34 @@ def _ensure_index(
             os.environ.pop("HIPPO_DISABLE_DENSE", None)
         else:
             os.environ["HIPPO_DISABLE_DENSE"] = prev
+
+
+def _entry_gate(e: dict, memory_dir: Optional[str], consented_hashes: Optional[dict], file_sha256) -> Optional[str]:
+    """Why recall may not serve candidate ``e`` (``dangling_file`` / ``withheld``), or None.
+    The one definition: the admission walk and the journal served beside it both ask here."""
+    # Deleted/renamed since the index was built (COR-4): drop it from THIS session's output
+    # immediately rather than keep injecting a dangling path. TEA-1/TEA-3: resolve against
+    # the entry's own corpus ``root`` (project / user / private) — a single-corpus entry has
+    # none and falls back to ``memory_dir``.
+    e_root = e.get("root") or memory_dir
+    e_path = os.path.join(e_root, e["file"]) if e_root else None
+    if e_path and not os.path.isfile(e_path):
+        return "dangling_file"
+    # SEC-6 quarantine: a PROJECT-tier candidate whose file bytes drifted from the
+    # consent-time baseline is SKIPPED — content that arrived outside hippo's own per-item
+    # write path (a `git pull` from a trusted-then-changed upstream, a hand edit) must not
+    # inject until the user re-reviews it. Fail CLOSED: a file that can't be hashed, or a
+    # stem absent from the baseline (new since consent), is withheld too. User/private tiers
+    # are the user's own machine state and are never quarantined; this is deliberately NOT
+    # silent — the SessionStart trust-drift producer and /hippo:doctor name the withheld
+    # files and the re-consent path (KPI-5).
+    if (
+        consented_hashes is not None
+        and e_path
+        and e.get("corpus") in (None, _PROJECT_TIER)
+        and not e.get("outbox")  # OUT-1: the outbox gate already checked its own record
+    ):
+        live_hash = file_sha256(e_path)
+        if live_hash is None or live_hash != consented_hashes.get(e.get("digest") or e["name"]):
+            return "withheld"  # drifted, new-since-consent, or unhashable
+    return None

@@ -394,8 +394,10 @@ def run_recall(
         # HOT-8: the count scales with signal. A servable row with no evidence of its own
         # (recall_count) is not served and not named; the slot it held goes to the next row
         # that has some. Judged before the lane shares pick, so a share is filled by earned rows.
+        beside = lane_req.by_signal() if lane_req is not None else frozenset()  # HOT-13
         low = low_signal_rows(
-            r for r in results if r["name"] not in floor and r["name"] not in already_injected
+            r for r in results
+            if r["name"] not in floor and r["name"] not in already_injected and r["name"] not in beside
         )
         if low and lane_req is not None:  # a memory the prompt names is served, evidence or not
             low -= lane_req.admitted | {n for n in low if n.lower() in lane_req.named()}
@@ -420,7 +422,8 @@ def run_recall(
             else:
                 _record_main_drop(r, past_k)
         if lane_share is not None:
-            picked, cut = select_lanes(pending, k_rows, lane_share)
+            # HOT-13: a journal admitted by its own signal rides beside the k_rows, not in one.
+            picked, cut = select_lanes(pending, k_rows, lane_share, extra=beside)
             for r in cut:
                 _record_main_drop(r, "lane_share" if k_rows >= k else REASON_CAP)
             walked = picked + walked

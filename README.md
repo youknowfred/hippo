@@ -399,8 +399,12 @@ hippo's settings now live in three places, and the first one that answers wins:
 **fact** (`project`, `reference`, anything else) or **journal** (a file matching
 `fold_digests` or a `journals` glob). A corpus whose `hippo.json` declares `journals` as a
 list (`[]` counts) changes what the prompt hook injects, and only that: a journal is injected
-only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`) or, with a ledger
-declared, an issue id it cites (below), and the hook
+only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`), when, with a
+ledger declared, the prompt names an issue id it cites (below), or when it earns its place
+by its own signal: it leads every candidate the ranker fused for the prompt and has evidence
+of its own under the count rule. At most one journal per prompt enters that last way, and it
+is an extra row beside the others, never in place of one (`HIPPO_JOURNAL_SIGNAL=0` turns it
+off; it needs the dense model). The hook
 picks behavior memories first, up to 4 of its 10 slots and 40% of the prompt's character
 budget, then facts, with any lane's unused room going to the others. `hippo recall` and the
 `recall` tool are unchanged and still return journals. Nothing is withheld from a corpus that
