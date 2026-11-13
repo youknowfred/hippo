@@ -21,6 +21,10 @@
 #   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency, bounded
 #               output, and build/refresh time. NIGHTLY only (schedule trigger). `scale`-marked
 #               so it never runs on the hermetic or dense lanes.
+#   scale-dense — OBS-8's generated 1,000-memory corpus with a REAL dense index (the dense
+#               lane's model cache) and 8 concurrent recall processes: p50/p95 and no BM25
+#               fallback, gated against the trailing 7 nights kept in the actions cache.
+#               NIGHTLY only, `scale`-marked like the lane above.
 #   linear-history — CON-5: after a push to `main`, fails if the pushed range holds a merge
 #               commit. The ruleset below already requires linear history; this catches the one
 #               way around it (`--admin`), which nothing else looks at afterwards.
@@ -40,7 +44,7 @@
 #         dense (cached model + eval_recall CLI)
 #         shellcheck (hooks + launcher)
 #         secret-scan (SEC-8 — shipped packs + repo)
-#     (the `resolution`, nightly `scale`, and PR-only `memory-review` lanes are
+#     (the `resolution`, nightly `scale` and `scale-dense`, and PR-only `memory-review` lanes are
 #     intentionally NOT required.)
 #   - Require branches to be up to date before merging; require linear history.
 #   - Do not allow force pushes or deletions of `main`. enforce_admins stays OFF:
@@ -248,3 +252,48 @@ jobs:
         run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
       - name: PRF-3 500-memory scale lane (scale-marked; latency + bounded output + build/refresh budgets)
         run: python -m pytest -m scale tests/test_scale.py
+
+  scale-dense:
+    name: scale-dense (1,000-memory dense-under-load lane, nightly)
+    # NIGHTLY ONLY (OBS-8), beside the 500-memory BM25 lane: a 1,000-memory corpus, a REAL dense
+    # index from the model cache the dense lane keeps, and 8 concurrent recall processes, timed
+    # for p50/p95; every recall must stay on the dense lane. The regression rule needs the
+    # trailing nights, so a small JSON of past p95s rides in the actions cache: restore the
+    # newest `dense-load-history-` entry, let the test compare and append, save it under a new
+    # key (a cache entry is immutable, so each night writes its own and restore-keys picks the
+    # newest). Seven nights only record; after that a p95 over 1.25x their median fails. An
+    # evicted cache restarts the record; the test's absolute ceiling still holds that night.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      FASTEMBED_CACHE_PATH: /home/runner/.cache/fastembed-ci
+      HIPPO_DENSE_LOAD_HISTORY: /home/runner/.cache/hippo-dense-load/history.json
+      HIPPO_DENSE_LOAD_REQUIRE: "1"  # a cold model cache fails the night instead of skipping it
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: plugin/requirements.txt
+      - name: Install deps
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
+      - name: Restore fastembed model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.cache/fastembed-ci
+          key: fastembed-bge-small-en-v1.5-v1
+      - name: Restore the trailing nights' p95
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.cache/hippo-dense-load
+          key: dense-load-history-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: dense-load-history-
+      - name: OBS-8 1,000-memory dense-under-load lane (scale-marked; p50/p95 + no BM25 fallback)
+        run: python -m pytest -m scale tests/test_scale_dense_load.py
+      - name: Save the trailing nights' p95
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.cache/hippo-dense-load
+          key: dense-load-history-${{ github.run_id }}-${{ github.run_attempt }}

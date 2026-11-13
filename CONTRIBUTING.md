@@ -44,7 +44,7 @@ airplane-safe:
 |---|---|---|
 | `network` | may download the ~130 MB embedding model on a cold cache | CI dense lane (`-m network`) |
 | `slow` | real wall-clock assertions (timing-sensitive, not slow to run) | CI dense lane (`-m "network or slow"`) |
-| `scale` | the ~500-memory scale-envelope lane (genuinely slow to build) | CI nightly (`-m scale`) |
+| `scale` | the ~500-memory BM25 scale-envelope lane and the 1,000-memory dense-under-load lane (genuinely slow to build) | CI nightly (`-m scale`, one job per file) |
 
 If you add a test that makes a real wall-clock assertion, mark it `slow` so a loaded runner can't
 flake it red. If it downloads the model, mark it `network`.
@@ -75,7 +75,8 @@ Every PR to `main` runs (`.github/workflows/ci.yml`):
   a user through a release). Run it locally before you push: `PYTHONPATH=plugin python -m memory.secrets --repo .`
 
 Plus two non-blocking lanes: **resolution** (dependency resolution + bootstrap smoke on
-`{py3.11, 3.13, 3.14}`) and the nightly **scale** lane.
+`{py3.11, 3.13, 3.14}`) and the nightly **scale** lanes (500 memories BM25-only; 1,000 memories
+dense with 8 concurrent recalls, gated against the trailing 7 nights).
 
 ## How we ship changes
 
