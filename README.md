@@ -393,6 +393,10 @@ and doctor says the acknowledgement no longer matches. Locally an acknowledgemen
 on a corpus you trust, for the exact bytes you consented to; the review packet and
 `hippo review --ci` count only acknowledgements already present at the base of the range, so a
 change can never acknowledge its own finding. The release secret scan ignores the list.
+A floor line that an always-loaded rule already says (`hippo lint-floor` lists these, and they
+never fail anything) is acknowledged the same way with `"file": "MEMORY.md"` and
+`"rule": "restates-rule"`; `MEMORY.md` is outside the consent baseline, so that one entry needs
+only a matching hash.
 
 ### Saving without touching the working tree (opt-in)
 

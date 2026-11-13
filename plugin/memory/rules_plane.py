@@ -605,19 +605,30 @@ _RULE_DUP_MAX_CANDIDATES = 3
 _RULE_DUP_PREVIEW_CHARS = 100
 
 
-def _gov_blocks(text: str) -> List[str]:
+def _gov_blocks(text: str, items: bool = False) -> List[str]:
     """Blank-line-separated blocks of one governance file's BODY (frontmatter stripped —
-    ``paths:`` globs are scoping, not rule content)."""
+    ``paths:`` globs are scoping, not rule content). ``items`` (RUL-10) also splits each
+    block at its list items, so a one-line draft is scored against ONE rule, not a whole
+    list's vocabulary."""
     try:
         from .provenance import split_frontmatter
 
         _fm, body = split_frontmatter(text)
-        return [b.strip() for b in re.split(r"\n\s*\n", body) if b.strip()]
+        blocks = [b.strip() for b in re.split(r"\n\s*\n", body) if b.strip()]
+        if items:
+            blocks = [i.strip() for b in blocks for i in _LIST_ITEM_RE.split(b) if i.strip()]
+        return blocks
     except Exception:
         return []
 
 
-def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dict]:
+_LIST_ITEM_RE = re.compile(r"\n(?=[ \t]*(?:[-*+]|\d+[.)])[ \t])")
+
+
+def rule_dup_candidates(
+    description: str, body: str, repo_root: str, files: Optional[List[str]] = None,
+    items: bool = False,
+) -> List[dict]:
     """RUL-3: governance blocks a draft memory RESTATES — "this duplicates rule X; link,
     don't copy."
 
@@ -632,7 +643,9 @@ def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dic
     Returns ``[{"file", "score", "preview"}]`` best-first, capped at 3. Warn-only by
     contract: callers surface the candidates and the AGENT decides (link / rewrite / keep)
     — nothing here rejects a write (inv4). Never raises; ``[]`` on any failure or when the
-    draft is too short to judge (< 5 content tokens).
+    draft is too short to judge (< 5 content tokens). ``files`` (RUL-10) narrows the scan
+    to those absolute paths — the floor lint passes only the always-loaded ones — and
+    ``items`` scores list items one by one (``_gov_blocks``).
     """
     try:
         from .build_index import tokenize
@@ -641,7 +654,7 @@ def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dic
         if len(draft) < _RULE_DUP_MIN_DRAFT_TOKENS:
             return []
         out: List[dict] = []
-        for path in gov_files(repo_root):
+        for path in gov_files(repo_root) if files is None else files:
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
@@ -649,7 +662,7 @@ def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dic
                 continue
             rel = _rel(repo_root, path)
             best_score, best_block = 0.0, ""
-            for block in _gov_blocks(text):
+            for block in _gov_blocks(text, items):
                 btoks = set(tokenize(block))
                 if len(btoks) < _RULE_DUP_MIN_BLOCK_TOKENS:
                     continue

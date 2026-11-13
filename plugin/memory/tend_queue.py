@@ -296,6 +296,14 @@ def _src_derivation(memory_dir: str, repo_root: str) -> List[dict]:
     return out
 
 
+def _src_floor_with_rules(memory_dir: str, repo_root: str) -> List[dict]:
+    """RUL-10: the floor kind's findings, then one item per floor line that restates an
+    always-loaded rule (``floor_rules``; target ``rule:<memory>.md``, never raises)."""
+    from .floor_rules import tend_entries
+
+    return _src_floor(memory_dir, repo_root) + tend_entries(memory_dir, repo_root)
+
+
 SOURCES: Dict[str, Callable[[str, str], List[dict]]] = {
     "trust": _src_trust,
     "baseline": _src_baseline,
@@ -304,7 +312,7 @@ SOURCES: Dict[str, Callable[[str, str], List[dict]]] = {
     "capture": _src_capture,
     "reverify": _src_reverify,
     "link": _src_link,
-    "floor": _src_floor,
+    "floor": _src_floor_with_rules,
     "derivation": _src_derivation,
 }
 
