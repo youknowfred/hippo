@@ -115,9 +115,12 @@ def _decide(w, sid, pid, *, plugin_root=_PLUGIN_ROOT, prompt=_PROMPT) -> str:
         "CLAUDE_PLUGIN_ROOT": plugin_root,
         "CLAUDE_PROJECT_DIR": w["project"],
     }
+    # The payload goes in on stdin, the way the hook itself receives it. As an argument to
+    # /bin/bash it is capped by the kernel (128 KB for one argument on Linux), which a
+    # large-prompt test would hit before the decider ran.
     proc = subprocess.run(
-        ["/bin/bash", "-c", '. "$1"; hippo_warm_route "$2"', "decider", _RESOLVE,
-         _payload(sid, pid, prompt, w["project"])],
+        ["/bin/bash", "-c", '. "$1"; hippo_warm_route "$(cat)"', "decider", _RESOLVE],
+        input=_payload(sid, pid, prompt, w["project"]),
         env=env, cwd=w["project"], capture_output=True, text=True, timeout=30,
     )
     assert proc.returncode in (0, 1), proc.stderr
@@ -292,6 +295,40 @@ def test_served_telemetry_is_keyed_by_the_hooks_session_id(warm):
     surface = TR.read_rollups(warm["td"])[-1]["surface"]
     assert surface.get("hook:user_prompt:warm") == 2
     assert "hook:user_prompt:spawn" not in surface
+
+
+# The decider's duplicate-key check ran ${p//key/} and ${p/key/}, which bash 3.2 does in time
+# quadratic in the payload: with warm recall on, a 60 KB pasted prompt spent about 6 s there
+# and a 180 KB one about 90 s. It is now a glob with the same meaning (the quoted key twice:
+# spawn), which bash matches in linear time, as the PostToolUse fast path already did.
+
+def test_a_prompt_that_ends_in_a_quoted_key_makes_the_hook_spawn(warm):
+    """Inside the JSON string every quote is escaped, so the prompt can hold a quoted key only
+    where its last escaped quote meets the string's own closing quote. That reads as the key
+    twice, and the decider spawns rather than guess which one is the id."""
+    _prime(warm, "s1")
+    assert _decide(warm, "s1", "p2", prompt='what does this mean: "session_id') == "spawn"
+    assert _decide(warm, "s1", "p3", prompt='and this one: "prompt_id') == "spawn"
+    # A quoted key anywhere else in the prompt is escaped on both sides and is not a key.
+    assert _decide(warm, "s1", "p4", prompt='the "session_id" and "prompt_id" keys') == "warm"
+
+
+def test_the_decider_checks_keys_without_pattern_substitution():
+    sh = open(_RESOLVE, encoding="utf-8").read()
+    body = sh.split("hippo_warm_route() {", 1)[1].split("\n}\n", 1)[0]
+    assert "${p//" not in body, "bash 3.2 runs ${p//key/} in quadratic time on a large prompt"
+
+
+@pytest.mark.slow
+def test_a_large_pasted_prompt_decides_far_under_the_hook_timeout(warm):
+    """180 KB of prompt. Before the fix the duplicate-key check alone took about 90 s here
+    under /bin/bash 3.2; the decider's own subprocess timeout in ``_decide`` is 30 s."""
+    _prime(warm, "s1")
+    prompt = "x = 1\n" * 30000  # 180,000 bytes
+    t0 = time.perf_counter()
+    assert _decide(warm, "s1", "big", prompt=prompt) == "warm"
+    took = time.perf_counter() - t0
+    assert took < 2.5, f"{took:.2f}s to route a 180 KB prompt"
 
 
 def test_ids_that_are_not_file_safe_never_handshake(warm):

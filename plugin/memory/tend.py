@@ -255,7 +255,10 @@ def _apply_merge(entry, verdict, memory_dir, repo_root, winner):
         if winner not in (a, b):
             return _refused(f"supersede needs --winner naming {a} or {b}")
         loser = b if winner == a else a
-        return _apply_reverify(loser, "demote", memory_dir, repo_root, winner)
+        r = _apply_reverify(loser, "demote", memory_dir, repo_root, winner)
+        if r["ok"]:  # cleared like the other verdicts, only once the demote landed
+            _mark_done(memory_dir, entry)
+        return r
     _mark_done(memory_dir, entry)
     return _ok(f"{a} ⇄ {b}: recorded as {verdict}.")
 
