@@ -115,9 +115,12 @@ def _decide(w, sid, pid, *, plugin_root=_PLUGIN_ROOT, prompt=_PROMPT) -> str:
         "CLAUDE_PLUGIN_ROOT": plugin_root,
         "CLAUDE_PROJECT_DIR": w["project"],
     }
+    # The payload goes in on stdin, the way the hook itself receives it. As an argument to
+    # /bin/bash it is capped by the kernel (128 KB for one argument on Linux), which a
+    # large-prompt test would hit before the decider ran.
     proc = subprocess.run(
-        ["/bin/bash", "-c", '. "$1"; hippo_warm_route "$2"', "decider", _RESOLVE,
-         _payload(sid, pid, prompt, w["project"])],
+        ["/bin/bash", "-c", '. "$1"; hippo_warm_route "$(cat)"', "decider", _RESOLVE],
+        input=_payload(sid, pid, prompt, w["project"]),
         env=env, cwd=w["project"], capture_output=True, text=True, timeout=30,
     )
     assert proc.returncode in (0, 1), proc.stderr
