@@ -102,13 +102,19 @@ releases:
       - "emgl chars per injecting prompt at or under 1,000 (1,399 on the replay)"
   - version: v1.46.0
     theme: "Recall that reaches its memories (added by amendment 2 under the owner's delegation of 2026-11-13: OUT-5, HOT-13, HOT-14, OWN-4, HOT-15; and six fixes with no roadmap item). OWN-5 is not shipped: its gate missed"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "HOT-13 on a second, later copy of emgl's corpus: hard-set recall@10 0.495 against 0.52 (0.524 on the copy the gates are measured on)"
       - "HOT-15's cold-hook comparison: within noise both ways under load; not re-measured quiet"
       - "OUT-5's hook-cost bound measured only under load (p95 +72 and +101 ms against 20 ms, base p95 over 1.2 s); not re-measured quiet"
       - "OWN-5: siblings gained 0 of the ten probe answers against 5 (6 of the ten qualify under the rule; none was among the first twelve proposed)"
+  - version: v1.46.1
+    theme: "Follow-ups from the estate install (two fixes found installing v1.45.0 across the estate: DRM-7, a memory deleted outside the archive retires its dream edges; GAT-4, the conventions refresh lands where the corpus's write path says). No new roadmap item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "NAT-3's floor diet at emgl's size: 95 one-at-a-time demotions reach an 8,192-byte budget (22,140 to 8,120 bytes on a copy); measured, not changed. A reviewed batch is a ruling the owner has not made"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
@@ -473,7 +479,7 @@ items:
 threads:
   - id: LDG-1
     title: "External-ledger read-time join (LDG-1.spec.md)"
-    status: built
+    status: done
     release: "v1.45.0"
     note: "V2Q-10 answered its Q1: direction A, a derived cache. V2Q-21 (2026-11-12) answered the rest: the line-window contract over the committed snapshot, a cap of 2 ids per row with recall rows first, and LDG-2 chartered for v2.x. Built in v1.45.0: the `ledgers` key, the derived `ledger.json`, and a dated status suffix on recall rows"
   - id: LDG-2
@@ -483,7 +489,7 @@ threads:
     note: "chartered by V2Q-21: the trigger for retiring a memory about finished work."
   - id: GP-S4
     title: "recall --for-issue: an issue-id join beside recall --for-diff"
-    status: built
+    status: done
     release: "v1.45.0"
     note: "growing-pains slate (2026-08-27) S4, pulled forward by V2Q-21 as one of HOT-7's three admissions for journals. Built in v1.45.0 with LDG-1. Measured: the issue admission recovers none of the hard-set rows HOT-7 lost, because none of the journal-only rows names an issue id"
   - id: GP-S5
@@ -718,7 +724,7 @@ amendment_1:
       size: S
       release: "v1.45.0"
       status: done
-      note: "built in v1.45.0: the asset carries a version stamp, doctor classifies a corpus's copy, `hippo setup --conventions` refreshes it, and local rules go in `CONVENTIONS.local.md`"
+      note: "built in v1.45.0: the asset carries a version stamp, doctor classifies a corpus's copy, `hippo setup --conventions` refreshes it, and local rules go in `CONVENTIONS.local.md`. v1.46.1: the refresh lands where the corpus's write path says (the outbox, carried by `hippo ship`; from a linked worktree, that worktree's own corpus dir); before it, all four estate repos that took v1.45.0 had the tracked file in the main checkout written"
     - id: NAT-3
       title: "A floor diet before a floor channel"
       size: M
@@ -876,7 +882,7 @@ amendment_2:
       title: "Consent for bytes a session wrote on this machine"
       size: L
       release: "v1.46.0"
-      status: built
+      status: done
       deps: [OUT-1, GAT-1]
       ruling: V2Q-29
       note: "built in v1.46.0 as an opt-in (consent.session_writes, honoured after hippo trust policy --accept). Gate on scratch copies of emgl: 0 of 4 withheld after native-path and repo-path Writes and Edits of consented files; the trust file byte-identical with the key off; pulled bytes and an Edit of an unconsented file still withheld. The hook-cost bound was measured only under load (missed as measured). An adversarial pass bound the note to its tool call, excluded subagent writes and held lint-flagged bytes"
@@ -884,7 +890,7 @@ amendment_2:
       title: "Journals admitted by their own signal"
       size: M
       release: "v1.46.0"
-      status: built
+      status: done
       deps: [HOT-7, HOT-8]
       ruling: V2Q-28
       note: "built in v1.46.0: the first fused candidate, when it is a journal with evidence of its own, is served beside the prompt's rows (at most one). emgl 52/105 -> 55/105 (gate 0.52; 0.495 on a later copy), Skyline 15/25 -> 17/25, hippo unchanged; journals 1.2% / 3.1% of served rows. HIPPO_JOURNAL_SIGNAL=0 turns it off"
@@ -892,7 +898,7 @@ amendment_2:
       title: "Characters per prompt"
       size: M
       release: "v1.46.0"
-      status: built
+      status: done
       deps: [HOT-8]
       ruling: V2Q-32
       note: "built in v1.46.0, hook only: emgl 1,455 -> 982 characters per injecting prompt (gate 1,000), Skyline 1,296 -> 888, hippo 1,456 -> 989; hard sets unchanged; no visible name lost. HIPPO_HOOK_COMPACT=0 restores the block"
@@ -900,7 +906,7 @@ amendment_2:
       title: "A promoted lesson keeps its place at home"
       size: S
       release: "v1.46.0"
-      status: built
+      status: done
       deps: [OWN-2]
       ruling: V2Q-28
       note: "built in v1.46.0: the fused index laid its dense rows out wrong for every tier after the first (a promoted lesson's description vector was scored as a body chunk), and a promote put an on-demand lesson on the user tier's floor. After the fix, ten promoted probe lessons keep their explicit rank and fused score at home (10/10, was 3/10)"
@@ -916,7 +922,7 @@ amendment_2:
       title: "Speed on the largest corpus"
       size: M
       release: "v1.46.0"
-      status: built
+      status: done
       deps: [HOT-11]
       ruling: V2Q-28
       note: "built in v1.46.0: one query embedding per explicit recall, one bounded history walk per staleness scan (emgl 67-210 s -> 1-12 s cold, the same 659-660 verdicts) and per-process memos for the hook. Explicit recall p50 on emgl, interleaved, quiet machine: v1.44.0 249 ms, v1.45.0 447 ms, v1.46.0 261 ms (gate: within 20 ms of v1.44.0; under heavy load the same pair read 105-157 ms apart). Warm hook p50 278 -> 150 ms. Results byte-identical on three corpora"
