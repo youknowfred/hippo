@@ -362,6 +362,11 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    is deliberately NOT a memory itself: `memory.provenance._is_memory_filename` excludes it
    from every corpus-membership scan (indexing, floor lint, staleness, archive) the same
    canonical way `MEMORY.md` is already excluded, so it is never indexed or recalled.
+   An existing copy is never overwritten here. When it is behind the plugin's version or
+   edited (setup's output and `/hippo:doctor` name which), offer `hippo setup --conventions`:
+   it previews the diff and the copy's own lines; on the user's yes, `--yes` moves those
+   lines into `CONVENTIONS.local.md` (append-only, never overwritten) and then refreshes
+   the copy.
 3. **Create the cross-machine symlink**. The encoding is the harness's actual rule (
    every non-alphanumeric character becomes a literal `-`, one-for-one, no collapsing, no
    stripping), and the create-or-confirm logic itself is ONE tested Python helper

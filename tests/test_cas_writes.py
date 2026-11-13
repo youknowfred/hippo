@@ -115,6 +115,8 @@ CORPUS_RMW_SITES = {
     ("outbox", "copy_up"),  # create-only-while-absent (expected=None)
     ("outbox", "_record_floor_base"),  # OUT-2: the floor copy's base text, create-only
     ("ship", "_edit_manifest"),  # OUT-2: the shipped stamp, --drop, --mine
+    ("conventions", "_append_local"),  # GAT-4: append-only to CONVENTIONS.local.md
+    ("conventions", "_write_copy"),  # GAT-4: the asset over the copy whose bytes were read
 }
 
 # Plain atomic writers that are NOT corpus read-modify-writes, each with why.

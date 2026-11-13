@@ -333,6 +333,21 @@ machine-local memory reads "machine-local on another machine" in `hippo lint-lin
 `/hippo:doctor` prints the tier's posture in one line, from local state only: "as of your last
 fetch" means exactly that.
 
+## Keeping CONVENTIONS.md current
+
+Setup seeds `.claude/memory/CONVENTIONS.md`, the reference for how a memory file is shaped. Its
+first line is the text's version. `/hippo:doctor` says whether the corpus's copy is the
+plugin's current version, an earlier one, or edited, and:
+
+```
+hippo setup --conventions        # preview: the diff, and any lines of your own it would move
+hippo setup --conventions --yes  # move your own lines into CONVENTIONS.local.md, then refresh the copy
+```
+
+Keep a corpus's own rules in `CONVENTIONS.local.md` beside it. hippo never requires that file,
+never overwrites it, and adds to it only on that `--yes` (the lines of an edited copy that are
+in no version hippo shipped). Neither file is a memory: neither is indexed or recalled.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:

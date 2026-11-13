@@ -194,6 +194,12 @@ git plumbing against a temporary index, and the branch is created create-only; a
 between the branch and the stamp is read on the next run from the branch itself (its tree
 holds the bytes), so the files count as in flight, not as new.
 
+`hippo setup --conventions --yes` adds two sites, both **detected** and both compare-and-swap:
+the append of a copy's own lines to `CONVENTIONS.local.md` (its prior bytes kept when torn,
+and the copy is not replaced), then the replace of `CONVENTIONS.md` with the plugin's asset
+(the copy's prior bytes kept, "NOT finished" named; a re-run finds the lines already in the
+local file and does not add them twice).
+
 ## Support policy
 
 - **Marketplace = latest-only.** The supported version is whatever is currently published to the
