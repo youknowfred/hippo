@@ -107,12 +107,11 @@ def test_fastembed_model_cached_true_when_onnx_present(tmp_path):
     assert B._fastembed_model_cached(cache) is True
 
 
-def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, monkeypatch):
-    """OSP-4 acceptance: with NO fastembed model cache present, the dense path bails in
-    well under the hook's timeout budget WITHOUT importing fastembed at all -- a pure stat,
-    not a bounded-but-attempted load. Numpy/yaml/rank_bm25 are pre-warmed (their FIRST-ever
-    import in a process is ~1-2s, unrelated to this item) so the timing isolates the cost of
-    OSP-4's own pre-check rather than incidental interpreter warm-up."""
+def _cold_cache_build(tmp_path, monkeypatch):
+    """A forced build against an empty fastembed cache -> ``(manifest, seconds)``.
+    Numpy/yaml/rank_bm25 are pre-warmed (their FIRST-ever import in a process is ~1-2s,
+    unrelated to this item) so the timing isolates the cost of OSP-4's own pre-check rather
+    than incidental interpreter warm-up."""
     import rank_bm25  # noqa: F401
     import yaml  # noqa: F401
 
@@ -128,11 +127,27 @@ def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, mon
 
     t0 = time.monotonic()
     manifest = B.build_index(md, idx, allow_download=False, force=True)
-    elapsed = time.monotonic() - t0
+    return manifest, time.monotonic() - t0
+
+
+def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, monkeypatch):
+    """OSP-4 acceptance: with NO fastembed model cache present, the dense path bails WITHOUT
+    importing fastembed at all -- a pure stat, not a bounded-but-attempted load. That the
+    import never happened is the proof it was fast; the wall-clock bound itself lives in the
+    ``slow``-marked test below, because a loaded hermetic runner missed 0.1 s with nothing
+    wrong (it failed for three sessions in one day while four suites ran side by side)."""
+    manifest, _elapsed = _cold_cache_build(tmp_path, monkeypatch)
 
     assert manifest["dense_ready"] is False
-    assert elapsed < 0.1  # generous CI-safe bound; a real fastembed import alone is ~0.5s+
     assert "fastembed" not in sys.modules
+
+
+@pytest.mark.slow
+def test_cold_cache_degrade_stays_well_under_the_hook_timeout(tmp_path, monkeypatch):
+    manifest, elapsed = _cold_cache_build(tmp_path, monkeypatch)
+
+    assert manifest["dense_ready"] is False
+    assert elapsed < 0.1  # generous on a quiet runner; a real fastembed import alone is ~0.5s+
 
 
 # --------------------------------------------------------------------------- #
@@ -150,12 +165,7 @@ def test_cross_encoder_cached_true_when_onnx_present(tmp_path):
     assert B._cross_encoder_cached(cache) is True
 
 
-def test_get_cross_encoder_offline_raises_in_microseconds_on_cold_cache(tmp_path, monkeypatch):
-    """The load-bearing reason for the pre-check: fastembed's OWN model loader wraps a cache
-    MISS in a retry-with-backoff sleep loop regardless of why the load failed (confirmed
-    empirically -- HF_HUB_OFFLINE=1 correctly blocks the network reach but does nothing to
-    skip fastembed's retry wrapper, ~40s of sleep-and-retry). This pre-check must raise
-    BEFORE fastembed is ever imported, so a cold cache degrades in microseconds instead."""
+def _cold_cross_encoder_seconds(tmp_path, monkeypatch) -> float:
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "empty-cross-encoder-cache"))
     B._CROSS_ENCODER_CACHE.clear()
     sys.modules.pop("fastembed", None)
@@ -163,10 +173,26 @@ def test_get_cross_encoder_offline_raises_in_microseconds_on_cold_cache(tmp_path
     t0 = time.monotonic()
     with pytest.raises(RuntimeError, match="not cached offline"):
         B._get_cross_encoder(allow_download=False)
-    elapsed = time.monotonic() - t0
+    return time.monotonic() - t0
+
+
+def test_get_cross_encoder_offline_raises_in_microseconds_on_cold_cache(tmp_path, monkeypatch):
+    """The load-bearing reason for the pre-check: fastembed's OWN model loader wraps a cache
+    MISS in a retry-with-backoff sleep loop regardless of why the load failed (confirmed
+    empirically -- HF_HUB_OFFLINE=1 correctly blocks the network reach but does nothing to
+    skip fastembed's retry wrapper, ~40s of sleep-and-retry). This pre-check must raise
+    BEFORE fastembed is ever imported, so a cold cache degrades in microseconds instead.
+    The wall-clock bound is the ``slow``-marked test below (same reason as OSP-4's above)."""
+    _cold_cross_encoder_seconds(tmp_path, monkeypatch)
+
+    assert "fastembed" not in sys.modules
+
+
+@pytest.mark.slow
+def test_cold_cross_encoder_check_is_nowhere_near_the_retry_loop(tmp_path, monkeypatch):
+    elapsed = _cold_cross_encoder_seconds(tmp_path, monkeypatch)
 
     assert elapsed < 0.1  # microseconds in practice; nowhere near fastembed's ~40s retry loop
-    assert "fastembed" not in sys.modules
 
 
 def test_get_cross_encoder_caches_by_allow_download_key(monkeypatch):
