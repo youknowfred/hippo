@@ -34,6 +34,7 @@ import os
 import time
 from typing import Dict, List, Optional, Tuple
 
+from .episode_names import served
 from .provenance import ensure_self_ignoring_dir, resolve_dirs
 
 # --------------------------------------------------------------------------- #
@@ -588,7 +589,7 @@ def draft_livedin_fixtures(
         q = (e.get("query_preview") or "").strip()
         if not q:
             continue
-        names = [n for n in (e.get("recalled_names") or []) if n and (sid, n) in hits]
+        names = [n for n in served(e) if n and (sid, n) in hits]  # a prompt that served it
         if not names:
             continue
         hit_pairs += len(names)

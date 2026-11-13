@@ -511,8 +511,12 @@ def log_episode(
     session_id: Optional[str] = None,
     injected_chars: Optional[int] = None,
     expanded: Optional[List[str]] = None,
+    served_names: Optional[List[str]] = None,
 ) -> bool:
     """Append ONE episode to the gitignored ``episode_buffer.jsonl``. Fire-and-forget.
+
+    ``served_names``: the served rows alone (``recalled_names`` also holds the collapsed
+    floor/cooldown pool); additive, read through ``episode_names.served``.
 
     HOT-9 ``expanded``: the names that entered this prompt's results by graph expansion, so
     the next prompt of the session can refuse them a second expansion entry. Additive; absent
@@ -547,6 +551,8 @@ def log_episode(
             "recalled_names": [n for n in (recalled_names or []) if n],
             "head_commit": head_commit,
         }
+        if served_names is not None:
+            event["served_names"] = [n for n in served_names if n]
         if injected_chars:
             event["injected_chars"] = int(injected_chars)
         if expanded:

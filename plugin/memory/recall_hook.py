@@ -544,6 +544,8 @@ def run_recall(
                     session_id=session_id or None,
                     injected_chars=len(out) if out else None,
                     expanded=[r.get("name") for r in results if r.get("via") == "graph"],
+                    served_names=[r.get("name") for r in results  # the recall row's `names`
+                                  if not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))],
                 )
             except Exception:
                 pass

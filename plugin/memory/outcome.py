@@ -1,6 +1,7 @@
 """SIG-4: PostToolUse read-signal — the KPI-2 injection-precision MEASUREMENT.
 
-hippo has always recorded what it INJECTED (the episode buffer's ``recalled_names``) but never
+hippo has always recorded what it INJECTED (the episode buffer's ``served_names``; on records
+before v1.46.0 ``recalled_names``, which also held the collapsed floor pool) but never
 whether the injection HELPED, so "frequently recalled" was indistinguishable from "frequently
 correct." KPI-2 (ROADMAP.yaml) names the missing PostToolUse read-signal outright.
 
@@ -40,6 +41,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from .episode_names import served
 from .outcome_opened import format_opened_report, note_open, opened_memory, tier_path
 from .provenance import launch_root, resolve_dirs
 from .telemetry import default_telemetry_dir, log_outcome, read_episodes, read_outcomes
@@ -276,7 +278,7 @@ def _injection_join(
             sid = e.get("session_id")
             ts = e.get("ts")
             ts = ts if isinstance(ts, (int, float)) else 0
-            for n in e.get("recalled_names") or []:
+            for n in served(e):  # the served rows; the collapsed pool was never injected
                 if not n:
                     continue
                 key = (sid, n)
