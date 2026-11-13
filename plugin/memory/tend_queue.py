@@ -277,7 +277,9 @@ def _src_derivation(memory_dir: str, repo_root: str) -> List[dict]:
     if not os.path.isdir(memory_dir):
         return []  # MIG-3: no corpus, so nothing to re-derive and no marker to stamp
     have = read_cite_derivation(memory_dir)
-    work = rederive_worklist(memory_dir, repo_root)
+    from .citation_binding import drop_index_bound  # FMT-2: readers already use the index's
+
+    work, index_bound = drop_index_bound(memory_dir, rederive_worklist(memory_dir, repo_root))
     out = []
     for r in work:
         gained, lost = r.get("gained") or [], r.get("lost") or []
@@ -286,7 +288,7 @@ def _src_derivation(memory_dir: str, repo_root: str) -> List[dict]:
             f"citations re-derive differently ({len(gained)} gained, {len(lost)} lost)",
             "read the citation diff, then apply it",
         ))
-    if not out and have < CITATION_DERIVATION_VERSION:
+    if not out and not index_bound and have < CITATION_DERIVATION_VERSION:
         out.append(_entry(
             "derivation", "corpus",
             f"citations were derived by extractor {have}; this plugin derives {CITATION_DERIVATION_VERSION} "

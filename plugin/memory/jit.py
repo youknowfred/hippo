@@ -142,16 +142,19 @@ def build_touch_cache(memory_dir: str) -> dict:
             floor = floor_memory_names(memory_dir)
         except Exception:
             floor = set()
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
             except Exception:
                 continue
-            cited_paths = read_provenance(text)[0]
+            name = os.path.splitext(os.path.basename(path))[0]
+            cited_paths = binding.cited(name, text, read_provenance(text)[0])
             if not cited_paths:
                 continue
-            name = os.path.splitext(os.path.basename(path))[0]
             for p in cited_paths:
                 cited.setdefault(p, set()).add(name)
             fm = parse_frontmatter(text)

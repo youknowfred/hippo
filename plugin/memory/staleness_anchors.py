@@ -316,6 +316,9 @@ def memory_anchor_verdict(
         if not text:
             return {**base, "reason": "unreadable"}
         cited, sc = read_provenance(text)
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        cited = bound(memory_dir).cited(name, text, cited)
         root = repo_root or _repo_toplevel(memory_dir)
         if not sc or not root:
             return {**base, "source_commit": sc, "reason": "no_baseline" if not sc else "no_repo"}

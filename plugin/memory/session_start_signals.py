@@ -662,19 +662,22 @@ def relevant_to_work_producer(
         from .staleness import _iter_memory_files, read_provenance
 
         matches: List[Tuple[str, str, List[str]]] = []  # (name, description, matched_paths)
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
             except Exception:
                 continue
-            cited, _sc = read_provenance(text)
+            name = os.path.splitext(os.path.basename(path))[0]
+            cited = binding.cited(name, text, read_provenance(text)[0])
             if not cited:
                 continue
             matched = [p for p in cited if p in changed]
             if not matched:
                 continue
-            name = os.path.splitext(os.path.basename(path))[0]
             matches.append((name, extract_description(text), matched))
         if not matches:
             return None
@@ -733,13 +736,16 @@ def _corpus_cited_union(memory_dir: str) -> set:
 
     union: set = set()
     try:
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
             except Exception:
                 continue
-            cited, _sc = read_provenance(text)
+            cited = binding.cited(os.path.splitext(os.path.basename(path))[0], text, read_provenance(text)[0])
             for c in cited:
                 union.add(c)
     except Exception:
