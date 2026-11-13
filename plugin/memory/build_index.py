@@ -1241,6 +1241,9 @@ def build_index(
         write_links_cache(index_dir, LinkGraph(memory_dir, texts=texts), sigs)
     except Exception:
         pass
+    from .citation_binding import write_binding  # FMT-2: derived citation binding sidecar
+
+    write_binding(index_dir, memory_dir, texts)  # never raises; the manifest never sees it
 
     old_manifest = None if force else _load_manifest(index_dir)
     old_dense = _load_dense(index_dir, old_manifest) if old_manifest else None
@@ -1555,6 +1558,9 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                     pass
                 # HOT-11: a section edit changes no main row; the sub-index catches up alone.
                 write_sections(index_dir, sections, allow_download=False, deadline=started + DENSE_REFRESH_TIMEOUT_SECS)
+                from .citation_binding import write_binding  # FMT-2: bodies and the file list move
+
+                write_binding(index_dir, memory_dir, texts)
                 return old  # corpus unchanged + already as good as it can be -> no-op
         return build_index(
             memory_dir, index_dir, allow_download=False, preserve_on_dense_fail=True

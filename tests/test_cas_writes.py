@@ -160,6 +160,7 @@ NON_CORPUS_SITES = {
     ("promote_tend", "_write_cache"): "gitignored derived cross-corpus scan, keyed by a stat fingerprint (OWN-2)",
     ("index_sections", "_write_matrix"): "gitignored derived index matrix under a fresh name no other build uses (IDX-1)",
     ("index_sections", "_write_manifest"): "gitignored derived sub-index manifest, rebuilt whole by every index build",
+    ("citation_binding", "_write_doc"): "gitignored derived citation-binding sidecar, rebuilt by every index build",
 }
 
 
