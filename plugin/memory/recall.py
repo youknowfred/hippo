@@ -45,6 +45,7 @@ from .build_index import (
 )
 from . import archive, trust
 from . import lanes as _lanes  # HOT-7 (the recall() keyword below is the hook's request)
+from . import recall_count as _count  # HOT-8 (rows gain ``signal`` under the same keyword)
 from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
@@ -543,6 +544,8 @@ def recall(
     HOT-7 ``lanes``: the prompt hook's ``lanes.LaneRequest`` (None everywhere else — explicit
     recall never withholds). On a corpus declaring ``journals`` it withholds unnamed journals
     before expansion (reason ``journal_lane``) and over-fetches the behavior slots; rows gain ``lane``.
+    HOT-8: under the same keyword each row gains ``signal`` (``recall_count``: its own cosine
+    and lane ranks), which the hook uses to decide how many rows to serve.
     Detection only (ED-1): nothing here feeds ranking. The SEC-6 drift-quarantine skip
     is deliberately NOT recorded — a withheld file already has its own loud surfaces
     (the SessionStart trust-drift producer + doctor), and a per-query ledger row naming
@@ -777,9 +780,14 @@ def recall(
                 rules_index_dir = default_index_dir(memory_dir)
             return _rules_source_hits(q_tokens, rules_index_dir, repo_root)
         fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
+        sig = None
         if lanes is not None:  # HOT-7: an unnamed journal takes no pool slot and seeds nothing
             k += lanes.start(idx.manifest)
             fused = lanes.withhold(fused, entries, _record_drop)
+            if sims_out:  # HOT-8: the hook judges each row on its own evidence
+                sig = _count.signals(
+                    bm25_terms(q_tokens), idx, sims_out[0], bm25, bm25_body, _dense_floor(idx.model or DEFAULT_MODEL)
+                )
         # backend label reflects the PRIMARY (description) signals only -- body rankings are
         # a backstop, not a third backend a user needs to reason about at the display layer.
         backend = "dense+bm25" if (dense and bm25) else ("dense" if dense else "bm25")
@@ -1157,6 +1165,7 @@ def recall(
                     # "indexed @sha" mark; identical across every hit in one recall() call.
                     "head_commit": idx.manifest.get("head_commit"),
                     **({"lane": e.get("lane") or "fact"} if lanes is not None else {}),  # HOT-7
+                    **({"signal": sig.row(i)} if sig is not None else {}),  # HOT-8
                 }
             )
         # DRM-6 quarantine, leg 2 — excluded from ABSTENTION-SENSITIVE answering: a

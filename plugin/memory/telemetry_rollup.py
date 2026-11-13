@@ -251,6 +251,7 @@ def record_prompt(
     backend_reason: Optional[str] = None,
     injected_by_lane: Optional[Dict[str, int]] = None,
     rendered_by_lane: Optional[Dict[str, int]] = None,
+    served_rows: Optional[int] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
@@ -266,7 +267,11 @@ def record_prompt(
     recall event's ``names``: floor- and cooldown-collapsed rows, which ``injected_memories``
     does count, are left out) and the rows it rendered as full pointer lines, counted by
     lane (``behavior``/``fact``/``journal``, rule pointers as ``rule``) — K14's instrument.
-    Additive dicts beside ``injected_memories``; a row from before them reads as absent."""
+    Additive dicts beside ``injected_memories``; a row from before them reads as absent.
+
+    HOT-8 ``served_rows``: the memory rows an injecting prompt served (collapsed rows and
+    rule pointers left out), counted in ``hook.served_rows_hist`` under ``"0"``..``"9"`` and
+    ``"10+"`` so the median per injecting prompt can be read after the raw events rotate."""
 
     def fold(acc: dict) -> None:
         _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
@@ -294,6 +299,9 @@ def record_prompt(
             for key, counts in (("injected_by_lane", injected_by_lane), ("rendered_by_lane", rendered_by_lane)):
                 for lane, n in (counts or {}).items():
                     _bump(hook.setdefault(key, {}), str(lane), int(n))
+            if served_rows is not None:
+                n_rows = max(0, int(served_rows))
+                _bump(hook.setdefault("served_rows_hist", {}), "10+" if n_rows >= 10 else str(n_rows))
         if session_id:
             _bump(hook["session_chars"], str(session_id), int(injected_chars or 0))
         if wall_ms is not None:
@@ -523,6 +531,7 @@ def summarize(rows: List[dict]) -> dict:
         "injected_memories": hook_total("injected_memories"),
         "injected_by_lane": _merge(rows, "hook", "injected_by_lane"),  # HOT-7
         "rendered_by_lane": _merge(rows, "hook", "rendered_by_lane"),
+        "served_rows_hist": _merge(rows, "hook", "served_rows_hist"),  # HOT-8
         "opens": sum(int((r.get("opened") or {}).get("opens") or 0) for r in rows),
         "opens_after_recall": sum(int((r.get("opened") or {}).get("after_recall") or 0) for r in rows),
         "chars_per_injected_prompt": (hook_total("injected_chars") / injected_prompts) if injected_prompts else None,

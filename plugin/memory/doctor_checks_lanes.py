@@ -21,6 +21,23 @@ def _pct(n: int, d: int) -> str:
     return f"{100.0 * n / d:.1f}%" if d else "n/a"
 
 
+def _median_rows(hist: Dict[str, int]):
+    """``(median label, prompts)`` of the rollup's served-rows histogram (keys ``"0"``..``"9"``
+    and ``"10+"``); ``(None, 0)`` when nothing was counted."""
+    counts = sorted(
+        (10 if key == "10+" else int(key), int(n))
+        for key, n in (hist or {}).items()
+        if (key == "10+" or str(key).isdigit()) and int(n) > 0
+    )
+    total = sum(n for _, n in counts)
+    seen = 0
+    for rows, n in counts:
+        seen += n
+        if 2 * seen >= total:
+            return ("10 or more" if rows >= 10 else str(rows)), total
+    return None, 0
+
+
 def check_recall_lanes(ctx: DoctorContext) -> Dict[str, str]:
     try:
         from .build_index import _load_manifest, default_index_dir
@@ -60,6 +77,9 @@ def check_recall_lanes(ctx: DoctorContext) -> Dict[str, str]:
             )
         else:
             parts.append("Hook-injected by lane: nothing counted yet (recorded from this release on).")
+        median, prompts = _median_rows(k.get("served_rows_hist") or {})
+        if median is not None:  # HOT-8: the count rule's field reading
+            parts.append(f"Rows per injecting prompt ({prompts} prompts): median {median}.")
         return {"status": "ok", "message": " ".join(parts)}
     except Exception as exc:
         return {"status": "warn", "message": f"recall-lanes check failed: {exc}."}

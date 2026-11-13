@@ -699,6 +699,16 @@ dismisses it on this machine.
   Ask `/hippo:why` about the prompt to see which memory matched and why;
   `HIPPO_DISABLE=abstain-gate` turns the gate off. `/hippo:doctor` reports the measured
   per-corpus rate when you supply an off-topic fixture.
+- **Recall shows fewer memories per prompt than it used to.** The prompt hook used to serve
+  ten rows whenever it served any. Now the count follows the evidence. When the prompt's best
+  match clears the dense floor by a wide margin, up to ten rows are served as before.
+  Otherwise at most five are, and each has to have evidence of its own: a cosine close to the
+  prompt's best, a place in the top ten of both the dense and a lexical lane, or a description
+  that shares several of the prompt's terms. The best-ranked row is always served. A row cut
+  this way is not named on the overflow line; `hippo recall` and the recall tool are
+  unchanged and still return the full ranking. The rule needs the dense model, so a BM25-only
+  install serves as before. `HIPPO_SIGNAL_COUNT=0` turns it off, and `/hippo:doctor` reports
+  the median rows per injecting prompt.
 - **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
   They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and
   the `resolved corpus:` doctor line says which tree it used. If that line reads `tree: LINKED
