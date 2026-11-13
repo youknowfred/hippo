@@ -570,6 +570,18 @@ floor is also held to the read limit (25,000 bytes or 200 lines, or a lower decl
 with no `budgets` and no `floor_lint` is not checked. The budgets are read from the side being
 committed, so raising one deliberately in the same change is judged by the new number.
 
+A declared `floor_bytes` also puts the floor on a diet: `hippo tend` lists one demotion per
+floor line until the floor would fit, lines whose memory is not a user or feedback memory
+first, the least used first (injected or opened in the last 30 days, as far back as the local
+ledgers reach). Each item says whether a replay of recent prompts shows the memory reaching a
+prompt only through its floor line; such a line is listed last and never proposed as safe.
+The replay ranks at most 50 prompts per `hippo tend` call and keeps each ranking in a
+gitignored cache, so later calls read it back; a line whose prompts are not all replayed yet
+says "wait". `hippo doctor` never runs the replay.
+`--verdict demote` removes that one line and nothing else: the memory file stays, and recall
+still finds it. `hippo doctor` shows the floor against the budget and how to start, and
+suggests 8,192 bytes when a floor without a budget is over the warn line.
+
 `hippo gate --install` shows the pre-commit hook it would write and where (it follows
 `core.hooksPath` and linked worktrees); `--install --yes` writes it. It never overwrites a
 pre-commit hook it did not write (it prints the two lines to add by hand instead), it exits 0

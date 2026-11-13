@@ -80,6 +80,13 @@ What each kind needs before its verdict:
   always-loaded rule (`CLAUDE.md`, or a `.claude/rules` file with no `paths:`) already says:
   remove the line from `MEMORY.md` (the memory stays and recall still finds it), or, when the
   user wants it kept, `skip` it or acknowledge it (`hippo lint-floor` prints the entry to add).
+- **floor**, a `floor:diet:<name>` item (a corpus that declares `budgets.floor_bytes`) — the
+  floor is over its budget and this line is the next one to move out. Read the evidence (its
+  type, how often it was used, and the trim-safety replay), then `demote`: tend removes that
+  one line from `MEMORY.md` (the outbox's floor copy in outbox mode) and nothing else; the
+  memory file stays and recall still finds it. An item that says "keep it" loses a recall hit
+  if removed; demote it only if the user accepts that, or `skip` it. An item that says
+  "wait" is not judged yet: list the queue again (each call replays more recent prompts).
 - **rule** — a feedback memory whose recorded file touches concentrate under one path glob
   (the evidence gives the share). `hippo tend show` prints the `.claude/rules/<name>.md` it
   would write, scoped to that glob; on the user's yes, `write` creates that one file and

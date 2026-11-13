@@ -135,13 +135,18 @@ def floor_memory_names(memory_dir: str) -> set:
     / ``MEMORY.md`` restore links are excluded (not memory entries). Read-only; never raises;
     empty set on any failure.
     """
-    names: set = set()
     try:
         with open(_floor_path(memory_dir), "r", encoding="utf-8") as fh:
             text = fh.read()
     except Exception:
-        return names
-    sections = _floor_sections(memory_dir)
+        return set()
+    return floor_names_in(text, _floor_sections(memory_dir))
+
+
+def floor_names_in(text: str, sections: tuple) -> set:
+    """``floor_memory_names``' section walk over floor ``text`` (NAT-3 weighs the floor copy a
+    floor edit lands in, which may be the outbox's). Never raises."""
+    names: set = set()
     current = "(preamble)"
     for raw in text.split("\n"):
         stripped = raw.strip()
@@ -215,6 +220,9 @@ def trim_safety_report(
     telemetry_dir: Optional[str] = None,
     k: int = 10,
     max_queries: int = 200,
+    floor_text: Optional[str] = None,
+    names: Optional[set] = None,
+    pools_for=None,
 ) -> dict:
     """CLM-7: would removing a floor pointer lose a recall hit? Read-only; never raises.
 
@@ -223,47 +231,137 @@ def trim_safety_report(
     floor pointer how many prompts surfaced its memory in the top ``k`` on its own. A pointer
     whose memory recall carries is a trim candidate (those prompts keep the hit); one recall
     never surfaced has the floor as its only channel. Rows are biggest line first, so the
-    safest bytes to trim read off the top. ``{"queries", "rows": [{line, name, bytes,
-    carried}]}``.
-    """
-    out: dict = {"queries": 0, "rows": []}
-    try:
-        from .build_index import default_index_dir, load_index
-        from .recall import recall
-        from .recall_query import HUMAN_TURN, human_text, turn_class
-        from .telemetry import default_telemetry_dir, read_episodes
+    safest bytes to trim read off the top. ``{"queries", "replayed", "rows": [{line, name,
+    bytes, carried, named, lost}]}`` (``replayed``: an index was there to replay against).
 
-        with open(_floor_path(memory_dir), encoding="utf-8") as fh:
-            lines = fh.read().split("\n")
-        floor_set = floor_memory_names(memory_dir)
+    NAT-3 adds ``named`` and ``lost``, judged the way the prompt hook selects, when the
+    caller passes ``pools_for(queries) -> ({query: [(name, lane, admitted)]}, share)``: each
+    prompt's ranking ``k`` plus a floor's worth deep, with the hook's lane request
+    (``floor_diet`` supplies it, cached on disk). ``named`` counts the replayed prompts on
+    which the hook named the memory when it ran (the episode's names) AND the memory ranks
+    within ``k`` once the other floor memories, which collapse and take no slot, are set
+    aside: the floor line was delivering a real match. ``lost`` counts those on which, with
+    this line gone, the hook's own selection would not serve it: the behavior lane's share is
+    already full, or it is a journal the prompt does not name. That is a recall hit the
+    demotion loses; ``carried`` then reads off the same ranking, so each prompt is ranked
+    once. A prompt ``pools_for`` leaves out (not ranked yet) is not judged: ``unreplayed``
+    counts them, and each row's ``pending`` counts those the hook named it on. ``floor_text`` weighs that text
+    instead of the committed ``MEMORY.md`` (the floor copy a floor edit lands in), and
+    ``names`` weighs those pointers instead of the floor sections' (a flat floor). Without
+    ``pools_for`` the replay is CLM-7's alone: plain recall's top ``k``.
+    """
+    out: dict = {"queries": 0, "rows": [], "replayed": False}
+    try:
+        if floor_text is None:
+            with open(_floor_path(memory_dir), encoding="utf-8") as fh:
+                floor_text = fh.read()
+        lines = floor_text.split("\n")
+        floor_set = set(names) if names is not None else floor_names_in(floor_text, _floor_sections(memory_dir))
         rows = []
         for i, line in enumerate(lines, start=1):
             m = _MD_LINK_RE.search(line)
             name = m.group(1).rsplit("/", 1)[-1][:-3] if m else None
-            if name and name in floor_set:
-                rows.append({"line": i, "name": name, "bytes": len(line.encode("utf-8")) + 1, "carried": 0})
-        td = telemetry_dir or default_telemetry_dir(memory_dir)
-        queries: List[str] = []
-        for e in read_episodes(td):
-            q = (e.get("query_preview") or "").strip()
-            if q and turn_class(q) == HUMAN_TURN:
-                q = human_text(q)
-                if q and q not in queries:
-                    queries.append(q)
-        queries = queries[-max_queries:]
-        idir = index_dir or default_index_dir(memory_dir)
-        idx = load_index(idir)
+            if name and name in floor_set and all(r["name"] != name for r in rows):
+                rows.append({"line": i, "name": name, "bytes": len(line.encode("utf-8")) + 1,
+                             "carried": 0, "named": 0, "lost": 0})
         by_name = {r["name"]: r for r in rows}
-        if idx is not None and by_name:
-            for q in queries:
-                for hit in recall(q, k=k, index=idx, index_dir=idir, memory_dir=memory_dir):
-                    if hit.get("name") in by_name:
-                        by_name[hit["name"]]["carried"] += 1
+        queries, named = recent_prompts(memory_dir, telemetry_dir, max_queries)
+        pools, share, hits = None, None, None
+        if not by_name:
+            pass
+        elif pools_for is not None:
+            pools, share = pools_for(queries)
+            if pools is not None:
+                waiting = [q for q in queries if q not in pools]
+                out["unreplayed"] = len(waiting)
+                for q in waiting:  # judged on a later call; until then it is not known safe
+                    for name in named.get(q, ()):
+                        if name in by_name:
+                            by_name[name]["pending"] = by_name[name].get("pending", 0) + 1
+                queries = [q for q in queries if q in pools]
+                hits = {q: [n for n, _l, ok in pools[q] if ok][:k] for q in queries}
+        else:
+            hits = _plain_hits(memory_dir, index_dir, queries, k)
+        replayed = hits is not None
+        for q in queries if replayed else ():
+            for name in hits.get(q, ()):
+                if name in by_name:
+                    by_name[name]["carried"] += 1
+            if pools is None:
+                continue
+            pool = pools.get(q) or []
+            for name in named.get(q, ()):
+                if name in by_name and _hit_with_floor(pool, name, by_name, k):
+                    by_name[name]["named"] += 1
+                    if not _served_without_line(pool, name, by_name, k, share):
+                        by_name[name]["lost"] += 1
         out["queries"] = len(queries)
+        out["replayed"] = replayed
         out["rows"] = sorted(rows, key=lambda r: (-r["bytes"], r["line"]))
     except Exception:
         pass
     return out
+
+
+def _competing(pool: list, name: str, floor: dict, on_floor: bool) -> list:
+    """The pool rows that take the hook's slots for one prompt: every other floor memory
+    collapses onto its floor line (no slot), an unnamed journal off the floor is withheld,
+    and ``name`` itself is in the pool while its line is on the floor, and after that only
+    if the hook would admit it."""
+    return [(n, lane) for n, lane, ok in pool
+            if (n == name and (on_floor or ok)) or (n != name and n not in floor and ok)]
+
+
+def _hit_with_floor(pool: list, name: str, floor: dict, k: int) -> bool:
+    """Its rank among the rows that take slots is within ``k``: a real top-k match."""
+    return name in [n for n, _ in _competing(pool, name, floor, True)[:k]]
+
+
+def _served_without_line(pool: list, name: str, floor: dict, k: int, share: Optional[float]) -> bool:
+    """The hook's selection over the competing rows once the line is gone
+    (``lanes.select`` when the corpus declares lanes, the first ``k`` otherwise)."""
+    rows = _competing(pool, name, floor, False)
+    if share is None:
+        return name in [n for n, _ in rows[:k]]
+    from .lanes import select
+
+    picked, _cut = select([{"name": n, "lane": lane} for n, lane in rows], k, share)
+    return name in {r["name"] for r in picked}
+
+
+def recent_prompts(memory_dir: str, telemetry_dir: Optional[str], max_queries: int):
+    """``(queries, {query: names the hook named})``: the newest ``max_queries`` distinct
+    human prompts of the episode buffer, oldest first. Raises on failure."""
+    from .recall_query import HUMAN_TURN, human_text, turn_class
+    from .telemetry import default_telemetry_dir, read_episodes
+
+    td = telemetry_dir or default_telemetry_dir(memory_dir)
+    queries: List[str] = []
+    named: Dict[str, set] = {}
+    for e in read_episodes(td):
+        q = (e.get("query_preview") or "").strip()
+        if q and turn_class(q) == HUMAN_TURN:
+            q = human_text(q)
+            if q:
+                if q not in named:
+                    queries.append(q)
+                    named[q] = set()
+                named[q].update(n for n in (e.get("recalled_names") or []) if isinstance(n, str))
+    queries = queries[-max_queries:] if max_queries > 0 else []
+    return queries, {q: named[q] for q in queries}
+
+
+def _plain_hits(memory_dir, index_dir, queries, k) -> Optional[Dict[str, set]]:
+    """CLM-7's own question: plain recall's top ``k`` per prompt; None without an index."""
+    from .build_index import default_index_dir, load_index
+    from .recall import recall
+
+    idir = index_dir or default_index_dir(memory_dir)
+    idx = load_index(idir)
+    if idx is None:
+        return None
+    return {q: {h.get("name") for h in recall(q, k=k, index=idx, index_dir=idir, memory_dir=memory_dir)}
+            for q in queries}
 
 
 def render_trim_report(report: dict) -> str:

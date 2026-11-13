@@ -303,7 +303,10 @@ def check_tend_queue(ctx: DoctorContext) -> Dict[str, str]:
     try:
         from .tend_queue import KINDS, build_queue, total_pending
 
-        r = build_queue(ctx.memory_dir, ctx.repo_root, write_cache=False)
+        from .floor_diet import warm_only  # NAT-3: doctor never runs the floor diet's replay
+
+        with warm_only():
+            r = build_queue(ctx.memory_dir, ctx.repo_root, write_cache=False)
         total = total_pending(r)
         held = sorted({e["kind"] for e in r["held"]})
         held_s = f"; held by the owner: {', '.join(held)}" if held else ""
