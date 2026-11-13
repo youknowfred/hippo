@@ -69,6 +69,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--log", action="store_true", help="list every dream edge (active / aged-in / undone)"
     )
     parser.add_argument(
+        "--below-floor",
+        action="store_true",
+        help="list the completion edges applied with no observed co-recall, before "
+        "completions needed one (read-only)",
+    )
+    parser.add_argument(
+        "--undo-below-floor",
+        action="store_true",
+        help="revert exactly the edges --below-floor lists, in one step (byte-exact; "
+        "refuses per edge on manual drift). Review the list first; nothing runs this for you.",
+    )
+    parser.add_argument(
         "--retire-ghost", default=None, metavar="EDGE_ID",
         help="retire ONE active ledger edge whose stamp is provably gone (source "
         "deleted outside archive/, or the stamped line lost before a commit) — appends the "
@@ -163,6 +175,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.log:
         print(render_log(memory_dir))
+        return 0
+    if args.below_floor or args.undo_below_floor:
+        from .dream_floor import render_below_floor, undo_below_floor
+
+        if args.undo_below_floor:
+            code, text = undo_below_floor(memory_dir, args.index_dir)
+            print(text)
+            return code
+        print(render_below_floor(memory_dir))
         return 0
     if args.deparasite:
         from .deparasite import run_deparasite_pass
