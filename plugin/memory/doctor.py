@@ -187,6 +187,9 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
 
         radar = conflict_radar(memory_dir, repo_root)
         rule_conflicts = len(radar["edge_conflicts"]) + len(radar["authority_gaps"])
+        from .rules_conflict import pending  # RUL-8: the text leg
+
+        rule_conflicts += len(pending(memory_dir, repo_root))
     except Exception:
         rule_conflicts = 0
     rot = 0
