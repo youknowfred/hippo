@@ -251,6 +251,7 @@ def record_prompt(
     backend_reason: Optional[str] = None,
     injected_by_lane: Optional[Dict[str, int]] = None,
     rendered_by_lane: Optional[Dict[str, int]] = None,
+    journal_admitted: Optional[Dict[str, int]] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
@@ -266,7 +267,11 @@ def record_prompt(
     recall event's ``names``: floor- and cooldown-collapsed rows, which ``injected_memories``
     does count, are left out) and the rows it rendered as full pointer lines, counted by
     lane (``behavior``/``fact``/``journal``, rule pointers as ``rule``) — K14's instrument.
-    Additive dicts beside ``injected_memories``; a row from before them reads as absent."""
+    Additive dicts beside ``injected_memories``; a row from before them reads as absent.
+
+    GP-S4 ``journal_admitted``: the served journals counted by the admission that let them
+    past the lane — ``named`` (the prompt names the journal) or ``issue`` (it cites an issue
+    id the prompt names) — so K14's journal share can be read by cause. Additive."""
 
     def fold(acc: dict) -> None:
         _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
@@ -291,7 +296,8 @@ def record_prompt(
             _bump(hook["injected_by_trigger"], trigger or "human", int(injected_chars))
             if injected_memories:  # OBS-10: the denominator of the daily opened rate
                 _bump(hook, "injected_memories", int(injected_memories))
-            for key, counts in (("injected_by_lane", injected_by_lane), ("rendered_by_lane", rendered_by_lane)):
+            for key, counts in (("injected_by_lane", injected_by_lane), ("rendered_by_lane", rendered_by_lane),
+                                ("journal_admitted", journal_admitted)):
                 for lane, n in (counts or {}).items():
                     _bump(hook.setdefault(key, {}), str(lane), int(n))
         if session_id:
@@ -523,6 +529,7 @@ def summarize(rows: List[dict]) -> dict:
         "injected_memories": hook_total("injected_memories"),
         "injected_by_lane": _merge(rows, "hook", "injected_by_lane"),  # HOT-7
         "rendered_by_lane": _merge(rows, "hook", "rendered_by_lane"),
+        "journal_admitted": _merge(rows, "hook", "journal_admitted"),  # GP-S4
         "opens": sum(int((r.get("opened") or {}).get("opens") or 0) for r in rows),
         "opens_after_recall": sum(int((r.get("opened") or {}).get("after_recall") or 0) for r in rows),
         "chars_per_injected_prompt": (hook_total("injected_chars") / injected_prompts) if injected_prompts else None,

@@ -95,12 +95,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         "Read-only; no index, no model, no telemetry. Empty result exits 0 with no output.",
     )
     parser.add_argument(
-        "--json", action="store_true", help="with --for-diff: machine-readable output"
+        "--for-issue",
+        default=None,
+        metavar="ID",
+        help="instead of a query, list the memories that cite a tracker id (from a ledger "
+        "declared in hippo.json) as a whole token, under the id's status and snapshot date. "
+        "Read-only; no index, no model, no telemetry.",
     )
     parser.add_argument(
-        "--cap", type=int, default=None, help="with --for-diff: max memories rendered"
+        "--json", action="store_true", help="with --for-diff or --for-issue: machine-readable output"
+    )
+    parser.add_argument(
+        "--cap", type=int, default=None, help="with --for-diff or --for-issue: max memories rendered"
     )
     args = parser.parse_args(argv)
+
+    if args.for_issue:  # GP-S4: the issue join, the same read-only shape as --for-diff
+        from .recall_issue import DEFAULT_CAP as _ISSUE_CAP, run as _run_for_issue
+
+        return _run_for_issue(
+            args.for_issue,
+            memory_dir=args.memory_dir,
+            index_dir=args.index_dir,
+            repo_root=args.repo_root,
+            cap=args.cap if args.cap is not None else _ISSUE_CAP,
+            as_json=args.json,
+        )
 
     # EXT-1: the reviewer lane dispatches BEFORE any query hygiene, session reads, or
     # telemetry — it is a pure citation join, not a recall (no episode row is logged,
@@ -146,6 +166,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         emit=_emit,
     )
     return 0
+
+
+def _admitted_counts(results: List[dict]) -> Optional[Dict[str, int]]:
+    """GP-S4: the served journals by the admission that let them in (``named``/``issue``);
+    collapsed rows are left out, as in ``injected_by_lane``. None when there are none."""
+    out: Dict[str, int] = {}
+    for r in results:
+        why = r.get("admitted")
+        if why and not (r.get("floor_collapsed") or r.get("cooldown_collapsed")):
+            out[why] = out.get(why, 0) + 1
+    return out or None
 
 
 def hook_envelope(out: str) -> str:
@@ -291,7 +322,16 @@ def run_recall(
         drop_log: dict = {}
         # HOT-7: the prompt hook's lane request. recall() reads the corpus's declaration off
         # the manifest it loads; undeclared, the request only tags rows with their lane.
-        lane_req = LaneRequest(human_text(raw_query), k, floor=floor) if hook else None
+        # LDG-1 / GP-S4: the ledger cache, loaded once per prompt (one failed stat when the
+        # corpus declares no ledger): row annotation below, and the issue join that admits
+        # a journal citing an issue id the prompt names.
+        from .build_index import default_index_dir
+        from .ledger import load as load_ledger
+
+        ledger_cache = load_ledger(index_dir or default_index_dir(memory_dir)) if memory_dir else None
+        lane_req = (
+            LaneRequest(human_text(raw_query), k, floor=floor, join=ledger_cache) if hook else None
+        )
         # HOT-9: a memory enters by expansion at most once per session (the episode buffer
         # this hook already read keeps each turn's expansion entries).
         expanded_before = {n for ep in session_episodes for n in (ep.get("expanded") or ())}
@@ -381,10 +421,16 @@ def run_recall(
         results = results + rule_hits
         for i, r in enumerate(results):
             r["rank"] = i + 1
+            # GP-S4: why a journal got past the lane (``named`` or ``issue``), so the recall
+            # event and the rollup say which admission let it in.
+            why = lane_req.admitted_by.get(r.get("name")) if lane_req is not None else None
+            if why:
+                r["admitted"] = why
     else:
         results = []  # hygiene skipped recall — no model load, no junk injection
         drop_log = {}  # nothing ran, nothing to autopsy — the ledger event stays bare
         lane_share = None
+        ledger_cache = None
     latency_ms = (time.perf_counter() - t0) * 1000.0
     from .recall_fallback import result_reason  # OBS-11: None unless the label is bm25
 
@@ -416,12 +462,11 @@ def run_recall(
                 "instructions from your user"
             )
 
-    if results and memory_dir:  # LDG-1: one stat when no ledger cache exists, else a lookup
-        from .build_index import default_index_dir
-        from .ledger import annotate, load as load_ledger
+    if results and ledger_cache is not None:  # LDG-1: a cited tracker id's status, dated
+        from .ledger import annotate
         from .trust import inject_description
 
-        annotate(results, load_ledger(index_dir or default_index_dir(memory_dir)), inject_description)
+        annotate(results, ledger_cache, inject_description)
     out = format_results(results, prompt_budget(spent), trust_note=trust_note, lane_share=lane_share)
     if out and emit is not None:
         emit(out)
@@ -522,6 +567,7 @@ def run_recall(
                     rendered_by_lane=(
                         count_by_lane(r for r in results if r.get("name") in shown) if out else None
                     ),
+                    journal_admitted=_admitted_counts(results) if out else None,  # GP-S4
                 )
             except Exception:
                 pass

@@ -118,7 +118,9 @@ These may change at any release without a major bump — do not build on them:
   the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
 - **The ledger join** — the `ledgers` key in `hippo.json`, its line-window contract, the
   `· <ID> <status> (snapshot <date>)` row suffix, the derived `.hippo/index/ledger.json`
-  (its schema and its `prev` map), the `build-index` line and the doctor line. An opt-in
+  (its schema, its `prev` map and its id-to-journals map), the `build-index` line, the doctor
+  line, `hippo recall --for-issue` (its output, JSON and exit codes), the issue admission of a
+  journal and the `admitted` / `journal_admitted` telemetry fields. An opt-in
   addition; STABILITY v2 classifies it. That it never calls the network, never writes to a
   tracker or a memory file, and reads nothing for an untrusted corpus will not loosen.
 - **The outbox** — the `write_path` key in `hippo.json`, `.claude/memory.outbox/` and its
