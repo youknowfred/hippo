@@ -249,6 +249,8 @@ def record_prompt(
     path: str = "spawn",
     injected_memories: Optional[int] = None,
     backend_reason: Optional[str] = None,
+    injected_by_lane: Optional[Dict[str, int]] = None,
+    rendered_by_lane: Optional[Dict[str, int]] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
@@ -258,7 +260,13 @@ def record_prompt(
     warm run's wall lands in its own histogram so the spawn wall stays comparable.
 
     OBS-11 ``backend_reason``: a ``bm25`` recall's reason token, counted in
-    ``hook.backend_reason`` beside ``hook.backend`` (a missing token counts as ``unknown``)."""
+    ``hook.backend_reason`` beside ``hook.backend`` (a missing token counts as ``unknown``).
+
+    HOT-7 ``injected_by_lane`` / ``rendered_by_lane``: the rows the block served (the
+    recall event's ``names``: floor- and cooldown-collapsed rows, which ``injected_memories``
+    does count, are left out) and the rows it rendered as full pointer lines, counted by
+    lane (``behavior``/``fact``/``journal``, rule pointers as ``rule``) — K14's instrument.
+    Additive dicts beside ``injected_memories``; a row from before them reads as absent."""
 
     def fold(acc: dict) -> None:
         _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
@@ -283,6 +291,9 @@ def record_prompt(
             _bump(hook["injected_by_trigger"], trigger or "human", int(injected_chars))
             if injected_memories:  # OBS-10: the denominator of the daily opened rate
                 _bump(hook, "injected_memories", int(injected_memories))
+            for key, counts in (("injected_by_lane", injected_by_lane), ("rendered_by_lane", rendered_by_lane)):
+                for lane, n in (counts or {}).items():
+                    _bump(hook.setdefault(key, {}), str(lane), int(n))
         if session_id:
             _bump(hook["session_chars"], str(session_id), int(injected_chars or 0))
         if wall_ms is not None:
@@ -510,6 +521,8 @@ def summarize(rows: List[dict]) -> dict:
         "injected_prompts": injected_prompts,
         "injected_chars": hook_total("injected_chars"),
         "injected_memories": hook_total("injected_memories"),
+        "injected_by_lane": _merge(rows, "hook", "injected_by_lane"),  # HOT-7
+        "rendered_by_lane": _merge(rows, "hook", "rendered_by_lane"),
         "opens": sum(int((r.get("opened") or {}).get("opens") or 0) for r in rows),
         "opens_after_recall": sum(int((r.get("opened") or {}).get("after_recall") or 0) for r in rows),
         "chars_per_injected_prompt": (hook_total("injected_chars") / injected_prompts) if injected_prompts else None,

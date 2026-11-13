@@ -553,7 +553,21 @@ def _fuse_recall_tiers(
             if li is not None and len(li):
                 loadeds.append((li, tdir, label))
         merged = _merge_loaded_indexes(loadeds)
-        return merged if merged is not None else project_idx
+        if merged is None:
+            return project_idx
+        # HOT-7: the lanes are the PROJECT corpus's declaration; an outbox copy was indexed
+        # in a dir that declares nothing, so its journal test is redone under the project's
+        # globs (off the loaded manifest — no file read). Merged entries are copies.
+        lanes_rec = project_idx.manifest.get("lanes")
+        merged.manifest["lanes"] = lanes_rec
+        if outbox:
+            from .lanes import relabel
+
+            globs = (lanes_rec or {}).get("globs") or []
+            for e in merged.entries:
+                if e.get("outbox"):
+                    e["lane"] = relabel(e, globs)
+        return merged
     except Exception:
         return project_idx
 

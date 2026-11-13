@@ -84,7 +84,7 @@ release). New *additions* alongside them are minor, non-breaking changes.
 
 These may change at any release without a major bump — do not build on them:
 
-- **Derived caches and their schemas** — the recall index (`schema_version`, currently 7), the link
+- **Derived caches and their schemas** — the recall index (`schema_version`, currently 8), the link
   cache (`links.json`, currently 6), the staleness cache, and the telemetry ledgers under
   `.hippo/` (`.claude/.memory-*` before v1.42.4). They are
   gitignored, rebuildable-from-source artifacts; hippo may bump their schema and rebuild them freely.
@@ -92,7 +92,8 @@ These may change at any release without a major bump — do not build on them:
   flag tells you when deps or the index change.)
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
   (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
-  `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off), the
+  `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off),
+  `HIPPO_LANE_BEHAVIOR_SHARE` (the behavior lane's share of the prompt hook's slots), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code

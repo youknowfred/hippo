@@ -1485,11 +1485,11 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
     assert on_disk["body_chunks"] == chunks
 
     # The entries list itself is EXACTLY the pre-RET-2 shape plus RET-5's
-    # source_commit_time, GOV-2's steer, and GOV-7's confidence (no OTHER new keys
-    # leaked onto it).
+    # source_commit_time, GOV-2's steer, GOV-7's confidence and HOT-7's lane (no OTHER
+    # new keys leaked onto it).
     assert set(manifest["entries"][0].keys()) == {
         "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
-        "source_commit_time", "steer", "confidence", "row",
+        "source_commit_time", "steer", "confidence", "lane", "row",
     }
 
 
