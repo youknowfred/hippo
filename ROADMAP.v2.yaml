@@ -87,12 +87,19 @@ releases:
     re_bootstrap: "no"
   - version: v1.44.0
     theme: "Selective, and shippable (added by amendment 1, ruling V2Q-13; cut from main on the owner's word, 2026-11-12: HOT-7, HOT-9, OBS-11, OUT-1's tend half, OUT-2, SRF-7's cofire floor; RWY-7 the PostToolUse fast path reads a large payload in linear time, no roadmap item)"
-    status: in review
+    status: released
     re_bootstrap: "no"
   - version: v1.45.0
-    theme: "The rest of the 1.x road (added 2026-11-12 when v1.44.0 was cut from main): the chartered 'last 1.x: derived self-tending' items and gate (TND-3, TND-4, TND-7, FMT-2, OBS-8, the rest of SRF-7, CON-3's draft) and amendment 1's remaining 1.x items (HOT-8, HOT-11, OUT-4, OWN-2, GAT-4, NAT-3, RUL-8, RUL-9, RUL-10, LDG-1, GP-S4, PLT-3), with the v1.44.0 gate"
-    status: planned
+    theme: "Fewer rows, each earned (cut from main on the owner's word, 2026-11-13: HOT-8, HOT-11, LDG-1, GP-S4, TND-3's anchors report-only, TND-7, FMT-2, OBS-8, the rest of SRF-7, CON-3's draft, OWN-2, GAT-4, NAT-3, RUL-8, RUL-9, RUL-10; and seven fixes with no roadmap item). TND-4, OUT-4 and PLT-3 are not built and move to v2.0.0"
+    status: in review
     re_bootstrap: "no"
+    open_gates:
+      - "TND-3's replay gate: missed (7.3% of graduates quiet against 50%), so quiet arming is not on"
+      - "HOT-7's 14-day lane gate with K4 and K13 before and after (first reading 2026-11-26)"
+      - "memory-only commits on emgl's default branch down 80% over 14 days with the outbox on (field time)"
+      - "0 corpora withholding hippo-written files after a pull (OUT-4, not built)"
+      - "14 days of contended warm-recall data on emgl (field time)"
+      - "emgl chars per injecting prompt at or under 1,000 (1,399 on the replay)"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
@@ -166,8 +173,8 @@ items:
     title: "1,000-memory dense-under-load nightly lane"
     size: S
     release: "v1.45.0"
-    status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    status: built
+    note: "built in v1.45.0: a nightly lane with 1,000 memories and 8 concurrent recalls. It fails on a p95 more than 25% over the trailing 7 nights' median (the first 7 nights only record) and on an absolute 30 s ceiling. Its first real run is on CI after the release"
   - id: OBS-9
     title: "Tests never write the live ledgers (repro-first)"
     size: S
@@ -282,15 +289,15 @@ items:
     title: "Derived evidence anchors and quiet arming"
     size: L
     release: "v1.45.0"
-    status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    status: partial
+    note: "v1.45.0 ships the anchors report-only (doctor's count and `hippo staleness --anchors`); arming is unchanged. The replay gate missed: on the held-out half of 441 real graduate verdicts 7.3% would be quiet (gate 50%), with 2.3% of fix/demote verdicts suppressed (gate 5%). An anchor was touched on 89% of graduated memories' drifted paths. Quiet arming waits for a definition that passes the replay"
     deps: [TND-1, OBS-5]
   - id: TND-4
     title: "Batched acknowledgement for owner-ruled classes"
     size: M
-    release: "v1.45.0"
+    release: "v2.0.0"
     status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    note: "ruled 2026-11-13: not built in v1.45.0. TND-3's replay puts the evidence-quiet class at about 6% of graduates, so the batch has almost nothing to carry. Its other class, lossless format rewrites, is what FMT-4 needs, and is built with it"
     deps: [TND-2, TND-3, V2Q-1]
   - id: TND-5
     title: "Capture-queue hygiene"
@@ -309,8 +316,8 @@ items:
     title: "Scheduled sleep for every opted-in corpus"
     size: S
     release: "v1.45.0"
-    status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    status: built
+    note: "built in v1.45.0: `hippo tend` offers the report-only schedule, once a day, when 10 or more items wait and no sleep pass ran in 7 days; a scheduled pass refreshes a stale floor sweep offline. hippo still installs no scheduler"
   - id: FMT-1
     title: "`hippo migrate --check`"
     size: S
@@ -322,8 +329,8 @@ items:
     title: "Derived citation binding moves into the index (dual mode)"
     size: L
     release: "v1.45.0"
-    status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    status: built
+    note: "built in v1.45.0 in two slices: the index derives each memory's citation binding into a sidecar, and readers prefer it while writers still write frontmatter. Parity on emgl: 6 of 1,073 staleness verdicts differ (0.56%, gate 1%). `HIPPO_INDEX_BINDING=0` restores frontmatter-only"
     deps: [RWY-1, RWY-2]
   - id: FMT-3
     title: "N-1 compat guard"
@@ -388,8 +395,8 @@ items:
     title: "Dream: reduce to the linker unless it earns more"
     size: M
     release: "v1.45.0"
-    status: partial
-    note: "the cofire floor for completion edges and the reviewed undo of the edges applied below it ship in v1.44.0 (ruling V2Q-27). The rest, reducing dream to the linker on the field numbers, moved to v1.45.0 on 2026-11-12"
+    status: built
+    note: "v1.44.0 shipped the cofire floor and the reviewed undo (ruling V2Q-27). v1.45.0 ships the rest as ruled on 2026-11-13: reverse replay, the generative tier and de-parasite each measured +0.000 recall@10 on three corpora, so they are off by default and deprecated, and their code is deleted at v2.0.0 (SRF-8). The Tier-A linker stays"
   - id: SRF-8
     title: "The v2 removal cut"
     size: M
@@ -432,9 +439,9 @@ items:
   - id: CON-3
     title: "STABILITY v2"
     size: M
-    release: "v1.45.0"
-    status: planned
-    note: "moved from v1.43.0, then to v1.45.0, on 2026-11-12: v1.43.0 and v1.44.0 were each cut from main without it"
+    release: "v2.0.0"
+    status: partial
+    note: "v1.45.0 publishes the draft, `STABILITY.v2.md`, with its legacy table pinned to the tree and seven questions for the owner. The freeze is at v2.0.0"
   - id: CON-4
     title: "`ROADMAP.v2.yaml` as the one live ledger"
     size: S
@@ -457,9 +464,9 @@ items:
 threads:
   - id: LDG-1
     title: "External-ledger read-time join (LDG-1.spec.md)"
-    status: planned
+    status: built
     release: "v1.45.0"
-    note: "V2Q-10 answered its Q1: direction A, a derived cache. V2Q-21 (2026-11-12) pulled it forward to v1.44.0 and answered the rest: the line-window contract over the committed snapshot, a cap of 2 ids per row with recall rows first, and LDG-2 chartered for v2.x. Moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+    note: "V2Q-10 answered its Q1: direction A, a derived cache. V2Q-21 (2026-11-12) answered the rest: the line-window contract over the committed snapshot, a cap of 2 ids per row with recall rows first, and LDG-2 chartered for v2.x. Built in v1.45.0: the `ledgers` key, the derived `ledger.json`, and a dated status suffix on recall rows"
   - id: LDG-2
     title: "Arming on a terminal ledger status (LDG-1.spec.md section 4)"
     status: planned
@@ -467,9 +474,9 @@ threads:
     note: "chartered by V2Q-21: the trigger for retiring a memory about finished work."
   - id: GP-S4
     title: "recall --for-issue: an issue-id join beside recall --for-diff"
-    status: planned
+    status: built
     release: "v1.45.0"
-    note: "growing-pains slate (2026-08-27) S4. V2Q-21 (2026-11-12) pulled it forward to v1.44.0 with LDG-1, as one of HOT-7's three admissions for journals. Moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+    note: "growing-pains slate (2026-08-27) S4, pulled forward by V2Q-21 as one of HOT-7's three admissions for journals. Built in v1.45.0 with LDG-1. Measured: the issue admission recovers none of the hard-set rows HOT-7 lost, because none of the journal-only rows names an issue id"
   - id: GP-S5
     title: "Trim-safety report for the MEMORY.md floor"
     status: done
@@ -554,7 +561,7 @@ amendment_1:
       title: "Recall lanes by kind"
       size: L
       release: "v1.44.0"
-      status: built
+      status: done
       deps: [OBS-5, OBS-10]
       ruling: V2Q-14
       issue: "#155"
@@ -563,15 +570,15 @@ amendment_1:
       title: "An injection count that scales with signal"
       size: M
       release: "v1.45.0"
-      status: planned
+      status: built
       deps: [HOT-7]
       issue: "#155"
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0 as ruled on 2026-11-13: the count is decided per row (a weak-signal prompt serves at most five rows, each with evidence of its own), not by one margin per query, which cost emgl's hook-mode hard set 0.057 or more in simulation. Median rows per injecting prompt 10/10/8 -> 5/5/3 on three corpora with the hard sets within 0.02. Missed: emgl chars per injecting prompt, 1,399 against 1,000"
     - id: HOT-9
       title: "Hub damping in neighbor expansion"
       size: S
       release: "v1.44.0"
-      status: built
+      status: done
       issue: "#155"
       note: "on by default (HIPPO_HUB_DAMPING=0 turns it off). Hard-set recall unchanged on three corpora; the multi-hop subset is 0.0 at base, so that half of the gate holds only trivially; the 14-day share needs field time"
     - id: HOT-10
@@ -585,10 +592,10 @@ amendment_1:
       title: "Digest headings as recall units"
       size: M
       release: "v1.45.0"
-      status: planned
+      status: built
       deps: [HOT-7]
       issue: "#157"
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0: folded sections live in a sub-index beside the main one and are extra rows in explicit recall; the prompt hook shows one only when the prompt names it. Probe recall@10 0.00 -> 0.80 (gate 0.8). Missed: cold build CPU on emgl, +27% against 25%"
     - id: HOT-12
       title: "Recall for subagents"
       size: M
@@ -608,14 +615,14 @@ amendment_1:
       title: "Say why a recall ran BM25-only"
       size: S
       release: "v1.44.0"
-      status: built
+      status: done
       note: "built after v1.43.0 was cut, so it ships in v1.44.0. The 7-day field reading uses hook.backend_reason"
       issue: "#156"
     - id: OUT-1
       title: "An outbox that recall already sees"
       size: L
       release: "v1.44.0"
-      status: built
+      status: done
       note: "both halves: saves (v1.43.0) and every tend verdict that edits a memory (v1.44.0) land in the outbox. The cost of a shadowing copy on recall is cut, not gone"
       deps: [RWY-3]
       ruling: V2Q-16
@@ -623,7 +630,7 @@ amendment_1:
       title: "`hippo ship`"
       size: M
       release: "v1.44.0"
-      status: built
+      status: done
       deps: [OUT-1]
       note: "the commit is made with git plumbing: no push, no working-tree change, and the repository's git hooks do not run for it. K15 needs 14 days with the outbox on"
     - id: OUT-3
@@ -636,11 +643,11 @@ amendment_1:
     - id: OUT-4
       title: "Consent that travels with the bytes"
       size: M
-      release: "v1.45.0"
+      release: "v2.0.0"
       status: planned
       deps: [OBS-6]
       ruling: V2Q-17
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "not built in v1.45.0: the classification table ruling V2Q-17 asks for first was commissioned on 2026-11-13 and is not in yet"
     - id: OWN-1
       title: "A git home for the user tier"
       size: M
@@ -653,10 +660,10 @@ amendment_1:
       title: "Promotion as a tend kind"
       size: M
       release: "v1.45.0"
-      status: planned
+      status: built
       deps: [TND-2]
       ruling: V2Q-18
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0: a `promote` tend kind with a promote shape and a drifted shape. The scan finds 5 drifted pairs on the estate, 4 of them true. Missed: the 10-probe gate, because a lesson that lives in one corpus only has no twin and is never proposed"
     - id: OWN-3
       title: "Read-only recall across declared siblings"
       size: M
@@ -701,16 +708,16 @@ amendment_1:
       title: "One versioned `CONVENTIONS.md`"
       size: S
       release: "v1.45.0"
-      status: planned
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      status: built
+      note: "built in v1.45.0: the asset carries a version stamp, doctor classifies a corpus's copy, `hippo setup --conventions` refreshes it, and local rules go in `CONVENTIONS.local.md`"
     - id: NAT-3
       title: "A floor diet before a floor channel"
       size: M
       release: "v1.45.0"
-      status: planned
+      status: built
       deps: [GAT-3, HOT-7]
       ruling: V2Q-23
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds"
     - id: NAT-4
       title: "Census flags native memory that belongs to no corpus"
       size: S
@@ -720,28 +727,28 @@ amendment_1:
       title: "Conflicts between what a memory says and what a rule says"
       size: M
       release: "v1.45.0"
-      status: planned
+      status: built
       ruling: V2Q-26
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0: a deterministic text leg into the tend contradiction kind. The handed-over conflict is listed on emgl. Missed: its copy in a second corpus, which carries no rule to compare against"
     - id: RUL-9
       title: "Promote-to-rule as a tend proposal"
       size: S
       release: "v1.45.0"
-      status: planned
+      status: built
       deps: [TND-2]
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      note: "built in v1.45.0: a `rule` tend kind; 1 proposal on emgl at 100% coverage, none on hippo or Skyline"
     - id: RUL-10
       title: "A floor line that restates a rule"
       size: S
       release: "v1.45.0"
-      status: planned
-      note: "moved to v1.45.0 on 2026-11-12: v1.44.0 was cut from main without it"
+      status: built
+      note: "built in v1.45.0, informational: 0 / 2 / 4 floor lines reported on hippo / emgl / Skyline, all true on hand review"
     - id: PLT-3
       title: "Two platform receipts"
       size: S
-      release: "v1.45.0"
+      release: "v2.0.0"
       status: planned
-      note: "moved to v1.45.0 on 2026-11-12. Not run: the probes need a logged-in claude CLI on the machine, and it was logged out; a probe script is prepared"
+      note: "not run: the probes need a logged-in claude CLI on the machine, and it was still logged out on 2026-11-13; a probe script is prepared. It gates NAT-2 and HOT-12, so it moves to v2.0.0 with NAT-2"
     - id: RWY-6
       title: "Writers clean up after themselves"
       size: S
