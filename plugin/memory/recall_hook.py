@@ -483,7 +483,12 @@ def run_recall(
         from .trust import inject_description
 
         annotate(results, ledger_cache, inject_description)
-    out = format_results(results, prompt_budget(spent), trust_note=trust_note, lane_share=lane_share)
+    from .recall_compact import for_hook as hook_compact  # HOT-14: a leaner hook block
+
+    out = format_results(
+        results, prompt_budget(spent), trust_note=trust_note, lane_share=lane_share,
+        compact=hook_compact(hook, spent),
+    )
     if out and emit is not None:
         emit(out)
     # Telemetry: fire-and-forget AFTER results are computed/printed. Logs even a SKIP (empty

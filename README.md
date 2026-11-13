@@ -791,6 +791,15 @@ dismisses it on this machine.
   unchanged and still return the full ranking. The rule needs the dense model, so a BM25-only
   install serves as before. `HIPPO_SIGNAL_COUNT=0` turns it off, and `/hippo:doctor` reports
   the median rows per injecting prompt.
+- **The recalled rows in my prompt look shorter than `hippo recall` shows them.** In the prompt
+  hook only, the first row keeps its description as written (up to 220 characters) and each
+  later row's description is cut at a word boundary at 90. The "already in floor" line names
+  its three best-ranked memories instead of five, the "already surfaced this thread" line
+  gives its count alone, and a session's second and later blocks carry a shorter header that
+  still says the lines are quoted data and to read the file before relying on it. Which rows
+  are served, their order and their names do not change, and a row that does not fit is
+  still named on the overflow line. `hippo recall` and the recall tool render as before.
+  `HIPPO_HOOK_COMPACT=0` restores the longer block.
 - **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
   They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and
   the `resolved corpus:` doctor line says which tree it used. If that line reads `tree: LINKED
