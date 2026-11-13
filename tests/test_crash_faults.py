@@ -41,6 +41,7 @@ import pytest
 
 from memory import atomic as A
 
+from .crash_scenarios_binding import scenarios as _binding_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
 from .crash_scenarios_ship import scenarios as _ship_scenarios
@@ -125,6 +126,7 @@ CRASH_CONTRACT = {
     ("user_tier_git", "sync_ignore_block"): ("detected",),  # OWN-1: error named, .gitignore intact; a machine-local save refuses
     ("outbox", "_record_floor_base"): ("detected",),  # OUT-2: raises before the floor copy exists; no copy without its base
     ("ship", "_edit_manifest"): ("detected",),  # OUT-2: prior manifest kept; False named; the branch still reads as in flight
+    ("citation_binding", "_write_doc"): ("intact",),  # FMT-2: derived sidecar; the build returns, the prior sidecar stays
 }
 
 
@@ -1079,6 +1081,7 @@ _SCENARIOS = [
     *_outbox_scenarios(_arm, _snap, _assert_unchanged),  # OUT-1 sites (tests/crash_scenarios_outbox.py)
     *_user_tier_scenarios(_arm, _snap, _assert_unchanged),  # OWN-1 (tests/crash_scenarios_user_tier.py)
     *_ship_scenarios(_arm, _snap, _assert_unchanged),  # OUT-2 sites (tests/crash_scenarios_ship.py)
+    *_binding_scenarios(_arm, _snap, _assert_unchanged),  # FMT-2 site (tests/crash_scenarios_binding.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

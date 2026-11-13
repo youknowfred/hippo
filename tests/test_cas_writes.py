@@ -152,6 +152,7 @@ NON_CORPUS_SITES = {
     ("recall_warm", "_publish"): "warm-recall heartbeat in the plugin data dir; one writer (the session's server)",
     ("gate_cli", "install"): "the git pre-commit hook, a whole document hippo owns (marker line), written only on --yes",
     ("setup_cli", "_backup"): "a fresh timestamped backup copy (the settings write itself is CAS)",
+    ("citation_binding", "_write_doc"): "gitignored derived citation-binding sidecar, rebuilt by every index build",
 }
 
 

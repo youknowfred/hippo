@@ -209,6 +209,22 @@ fix/demote verdicts suppressed), so doctor counts how many armed stale memories 
 be quiet and `hippo staleness --anchors` lists each with its anchors and the change
 lines that touched them. `HIPPO_QUIET_ARMING=0` turns the anchor report off.
 
+### Citation binding in the index (FMT-2) — derived beside frontmatter
+
+Every index build and SessionStart refresh derives each memory's citation binding from its
+body with the current extractor: `cited_paths` (minus the memory's own authored
+`cited_paths_exclude`), the body tokens nothing could pin, and the evidence-anchor
+candidates. It lives in a sidecar beside the index (`citation_binding.json`, not in
+`manifest.json`, which the prompt hook loads every prompt), keyed by memory name with the
+hash of the text it came from, stamped with the citation and anchor derivation versions and
+a fingerprint of the repo file list (one `git ls-files` per build). A memory re-derives only
+when its text or the file list changed; a missing, torn or older-version sidecar reads as
+absent. `source_commit`, `cited_paths_exclude` and relations stay authored in frontmatter.
+
+In this release nothing reads it for staleness: doctor reports its state and how many
+memories' frontmatter `cited_paths` differ from it, and `hippo migrate --check` reports
+how many bindings the index already derives.
+
 ### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
 
 A renamed/deleted cited file used to vanish from `cited_paths` on the next re-derivation
