@@ -7,6 +7,94 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.44.0 — 2026-11-12 — "Selective, and shippable"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**; `stale.json` schema still
+**1**. **Index schema is now 8** (was 7), so every corpus re-indexes once. Six items of the road
+to v2.0.0 from [amendment 1](ROADMAP.v2.amendment-1.md), and one hook fix. Cut from `main` on
+the owner's word, like v1.43.0. The eighteen 1.x items that are not built, and the rest of
+SRF-7, move to a new v1.45.0 row in the ledger with their gates.
+
+**Operator action: one, and only for a large corpus.** The index rebuild re-embeds every
+memory, offline. Left alone it happens across SessionStarts in slices of about 15 seconds, and
+recall runs BM25-only until it is done: a dozen or so SessionStarts on a corpus of about a
+thousand memories, two to six on a hundred. `hippo build-index` in a terminal does it in one
+pass (about nine minutes at a thousand memories). Things you may notice:
+- **Recall lanes are opt-in.** Nothing changes until a corpus declares `journals` in its
+  `hippo.json` (an empty list opts in with no journals). A corpus that declares nothing gets
+  byte-identical hook output.
+- **Hub damping is on for everyone.** A memory much of the corpus links to no longer rides
+  along with almost every recall. `HIPPO_HUB_DAMPING=0` turns it off.
+- **The outbox is whole.** With `write_path: outbox` accepted, tend verdicts stay out of the
+  working tree too, and `hippo ship` lands the outbox as one commit on one new branch.
+- **Doctor says more.** Two new lines, both always `ok`: why recalls ran BM25-only, and the
+  share of hook-injected memories by lane beside each lane's share of the corpus.
+- **`hippo dream` may name edges to review.** If earlier versions linked memories on a text
+  mention alone, each apply pass now says how many, and how to list and revert them.
+
+**Recall**
+- **HOT-7 — recall lanes by kind.** Each memory gets a lane from what the corpus already
+  declares: **behavior** (`type: user`, `feedback`), **fact** (`project`, `reference`),
+  **journal** (files matching `fold_digests` or the `journals` globs). The index stores it. In
+  the prompt hook, for a corpus that declares `journals`:
+  - a journal is admitted only when the prompt names its id (`name`, `[[name]]` or `name.md`);
+    a withheld journal takes no slot and seeds no expansion. Explicit recall is unchanged;
+  - behavior memories take the first share of the slots and of the character budget (0.4 by
+    default, `HIPPO_LANE_BEHAVIOR_SHARE`); unused share flows to the rest;
+  - the daily rollup counts injected and fully rendered rows by lane.
+
+  Replayed on the largest estate corpus's raw window: journals went from 14.4% of hook-injected
+  rows to 0%, and behavior rows from 26.1% to 36.4%, twice their share of the corpus.
+  **Short of its gate, stated plainly:** hook-mode hard-set recall@10 fell 0.029 there and 0.04
+  on a second corpus, against a bound of 0.02. Almost all of it is hard-set rows whose only
+  expected file is a journal, which the hook now withholds by design. On the second corpus the
+  behavior share did not move: its behavior memories are all in its floor already, so they take
+  no slot. The 14-day field gate has not run. The issue-join admission is not built.
+- **HOT-9 — hub damping in neighbor expansion.** A linked neighbor's score is divided by the
+  square root of its in-degree over the corpus median (no change at or below the median), and a
+  memory enters by expansion at most once per session. Hard-set recall is unchanged on three
+  corpora. The largest share of prompts any one memory rode by expansion alone fell from 9.1%
+  to 3.6% on one corpus and from 2.2% to 0.9% on another.
+- **OBS-11 — say why a recall ran BM25-only.** The hook records a reason beside the backend
+  label: dense turned off, an index without vectors, a matrix that did not load, a tier without
+  vectors, another model, the model not in the offline cache, the dense timeout, an error, or
+  simply no memory clearing the dense floor. The rollup counts reasons, and doctor names the
+  most common one over 30 days with what to do about it.
+
+**The write path**
+- **OUT-1, the tend half — every verdict that edits a memory edits its outbox copy.** With
+  outbox mode accepted, a reverify, a demote, a typed edge, a re-derivation, a baseline heal
+  and a dream edge all copy the memory up and edit the copy, and the tend queue reads the same
+  view, so a decided item does not come back. Archive, promote's removal of its source and
+  pack installs stay working-tree changes and say so. A withheld outbox file now shows in
+  `hippo trust review`. A shadowing copy no longer recounts the corpus's lexical statistics on
+  every prompt; it still costs some tens of milliseconds on a thousand-memory corpus.
+- **OUT-2 — `hippo ship`.** It previews by default. `hippo ship --yes` writes one commit on
+  one new branch off the local default-branch ref and stops: no push, no pull request, no
+  fetch. HEAD, the index and the working tree are never touched. Each outbox file is **new**
+  (ships), **same** (already landed), **stale** (the committed copy moved since: shown as a
+  diff, never overwritten; `--drop` or `--mine` settles it) or **held** (a credential shape, a
+  threat-lint class, or bytes hippo did not write here: the class is named, never the match).
+  Deletions never travel. The floor ships as a replay of pointer adds and removes onto the
+  committed floor, never as a file. Shipped copies stay recallable until the batch has landed
+  and the checkout has it; the next `hippo ship --yes` then drops them and nothing is withheld.
+  The repository's own git hooks do not run for this commit; hippo's gate judgment does.
+
+**Dream**
+- **SRF-7, the cofire floor — a completion edge needs an observed co-recall.** The linker
+  applied a completion whenever a body named another memory, even when recall had never
+  returned the pair together. It now needs any nonzero co-fire. `hippo dream --below-floor`
+  lists the edges already applied below that, and `hippo dream --undo-below-floor` reverts
+  exactly those, byte for byte. Nothing reverts them on its own. The rest of SRF-7 is not in
+  this release.
+
+**Hooks**
+- **RWY-7 — the PostToolUse fast path reads a large payload in linear time.** Its
+  duplicate-key check used a bash 3.2 pattern substitution that is quadratic in the payload: a
+  180 KB Write took 25.6 seconds, past the hook's timeout, and now takes 0.4. Same check, as a
+  glob. Not a roadmap item.
+
 ## v1.43.0 — 2026-11-12 — "Gates, receipts, an outbox"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

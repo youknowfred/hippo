@@ -11,6 +11,31 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.44.0: one re-index, lanes you opt into, and a ship verb
+
+**The index rebuilds once.** The index schema moves from 7 to 8, so the first session after the
+update re-embeds the corpus (section 2 below says what that costs). On a corpus of a thousand
+memories, run `hippo build-index` once in a terminal instead of waiting a dozen SessionStarts
+with BM25-only recall.
+
+**Recall lanes act only where a corpus declares `journals`.** Add
+`"journals": ["<filename glob>", ...]` to `.claude/memory/hippo.json` to keep those files out of
+the prompt hook unless a prompt names one, and to give behavior memories first claim on the
+hook's budget. `"journals": []` opts in with no journals. Nothing else changes for explicit
+recall. No `hippo trust policy` step is needed for this key.
+
+**The outbox can now be used end to end.** With `"write_path": "outbox"` accepted
+(`hippo trust policy --accept`), saves and tend verdicts stay out of the working tree, and
+`hippo ship` previews the batch; `hippo ship --yes` writes it as one commit on a new
+`hippo/ship-<time>` branch. Push that branch and open the pull request yourself: hippo makes no
+network call. After it merges and you pull, run `hippo ship --yes` once more to clear the
+outbox.
+
+**Hub damping changes ranking for everyone.** `HIPPO_HUB_DAMPING=0` restores the old behavior.
+
+**Dream edges applied on a text mention alone.** `hippo dream --below-floor` lists them;
+`hippo dream --undo-below-floor` reverts them in one step, after you have read the list.
+
 ### v1.43.0: a write gate, policy keys that ask once, and two commands that moved
 
 **Restart open sessions.** The update adds a `PreToolUse` hook on file writes into the corpus. A
