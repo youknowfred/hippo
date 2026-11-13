@@ -18,6 +18,10 @@ nav header.
 
 Also flags floor **link rot** — a User/Working-Style pointer whose target file is missing.
 
+A pointer may also be a bare name (``- name — text``) where a memory of that name exists:
+``pointer_targets`` / ``pointer_name`` are the one definition every floor reader uses. A
+bare name with no file is prose, never link rot.
+
 FLR-1 adds **floor governance**: the floor measured against the harness's hard-coded read
 window (25,000-byte cap with silent tail truncation past it; 17,500-byte advisory warn —
 ``provenance_format.HARNESS_FLOOR_*``, field-verified constants) plus the corpus's own
@@ -52,6 +56,72 @@ _ALLOWLIST = ("MEMORY.full.md", "MEMORY.md")
 
 # A markdown link whose target is an .md file: [text](target.md)
 _MD_LINK_RE = re.compile(r"\]\(([^)]+\.md)\)")
+
+# FLR-1: a floor pointer may also be a bare name, `- name — text`: a top-level list item whose
+# first token is a slug (optionally in backticks, optionally `name.md`) followed by an em dash,
+# a spaced hyphen or a colon. It is a pointer only where a memory of that name exists
+# (``memory_exists``): that test is what keeps a prose bullet prose, so a bare name with no file
+# is never link rot. A line with a markdown link is link-form, read exactly as before.
+_BARE_RE = re.compile(r"^[-*+][ \t]+`?([\w.\-]+?)(?:\.md)?`?(?:[ \t]*—|[ \t]+-(?:[ \t]|$)|:(?:[ \t]|$))")
+
+
+def bare_pointer(line: str) -> Optional[str]:
+    """The name a line has in the bare-pointer SHAPE, or None (a line with a markdown link
+    never has it). Shape only: callers that do not already hold the name test existence."""
+    if _MD_LINK_RE.search(line):
+        return None
+    m = _BARE_RE.match(line)
+    if not m or f"{m.group(1)}.md" in _ALLOWLIST:
+        return None
+    return m.group(1)
+
+
+def pointer_targets(line: str, is_memory=None) -> List[str]:
+    """THE definition of the memory pointers one floor line carries, as ``.md`` targets: every
+    non-allow-listed markdown link (today's form), else a bare pointer whose memory exists
+    (``is_memory(name)``; without it only the link form reads). Never raises."""
+    targets = [m.group(1) for m in _MD_LINK_RE.finditer(line)]
+    if targets:
+        return [t for t in targets if t.rsplit("/", 1)[-1] not in _ALLOWLIST]
+    name = bare_pointer(line) if is_memory is not None else None
+    return [f"{name}.md"] if name and is_memory(name) else []
+
+
+def pointer_name(line: str, is_memory=None) -> Optional[str]:
+    """The one memory name a pointer line stands for (sorting, removal, per-line rows): the
+    FIRST link's, None when that link is a restore link (as before), else the bare pointer's."""
+    m = _MD_LINK_RE.search(line)
+    if m:
+        base = m.group(1).rsplit("/", 1)[-1]
+        return None if base in _ALLOWLIST else (base[:-3] if base.endswith(".md") else base)
+    t = pointer_targets(line, is_memory)
+    return t[0][:-3] if t else None
+
+
+def memory_exists(memory_dir: str):
+    """``is_memory`` for ``memory_dir``: a memory file of that name in the corpus or its outbox.
+    Lazy: nothing is read until a bare-shaped line asks, then one directory listing each (a
+    floor of bare pointers asks about every line). Never raises."""
+    known: List[set] = []
+
+    def exists(name: str) -> bool:
+        if not known:
+            names: set = set()
+            try:
+                from .outbox import present
+                from .provenance import _is_memory_filename
+
+                for d in (memory_dir, present(memory_dir)):
+                    if d:
+                        with os.scandir(d) as it:
+                            names.update(e.name[:-3] for e in it
+                                         if _is_memory_filename(e.name) and e.is_file())
+            except Exception:
+                pass
+            known.append(names)
+        return name in known[0]
+
+    return exists
 
 _MAX_ITEMS = 20
 _MAX_CHARS = 1500
@@ -98,6 +168,7 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
         return result
 
     sections = _floor_sections(memory_dir)
+    exists = memory_exists(memory_dir)
     current = "(preamble)"
     for raw in text.split("\n"):
         line = raw.rstrip("\n")
@@ -107,11 +178,8 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
             continue
         if stripped.startswith("# "):  # the H1 title — not a section
             continue
-        for m in _MD_LINK_RE.finditer(line):
-            target = m.group(1)
+        for target in pointer_targets(line, exists):
             base = target.rsplit("/", 1)[-1]
-            if base in _ALLOWLIST:
-                continue
             if current in sections:
                 # A genuine floor pointer — check the target file exists (link rot).
                 if not os.path.exists(os.path.join(memory_dir, target)) and not (
@@ -140,12 +208,13 @@ def floor_memory_names(memory_dir: str) -> set:
             text = fh.read()
     except Exception:
         return set()
-    return floor_names_in(text, _floor_sections(memory_dir))
+    return floor_names_in(text, _floor_sections(memory_dir), memory_exists(memory_dir))
 
 
-def floor_names_in(text: str, sections: tuple) -> set:
+def floor_names_in(text: str, sections: tuple, is_memory=None) -> set:
     """``floor_memory_names``' section walk over floor ``text`` (NAT-3 weighs the floor copy a
-    floor edit lands in, which may be the outbox's). Never raises."""
+    floor edit lands in, which may be the outbox's). ``is_memory`` lets bare pointers read
+    (``pointer_targets``). Never raises."""
     names: set = set()
     current = "(preamble)"
     for raw in text.split("\n"):
@@ -157,10 +226,8 @@ def floor_names_in(text: str, sections: tuple) -> set:
             continue
         if current not in sections:
             continue
-        for m in _MD_LINK_RE.finditer(raw):
-            base = m.group(1).rsplit("/", 1)[-1]
-            if base in _ALLOWLIST:
-                continue
+        for target in pointer_targets(raw, is_memory):
+            base = target.rsplit("/", 1)[-1]
             names.add(base[:-3] if base.endswith(".md") else base)
     return names
 
@@ -256,11 +323,12 @@ def trim_safety_report(
             with open(_floor_path(memory_dir), encoding="utf-8") as fh:
                 floor_text = fh.read()
         lines = floor_text.split("\n")
-        floor_set = set(names) if names is not None else floor_names_in(floor_text, _floor_sections(memory_dir))
+        exists = memory_exists(memory_dir)
+        floor_set = set(names) if names is not None else floor_names_in(floor_text, _floor_sections(memory_dir), exists)
         rows = []
         for i, line in enumerate(lines, start=1):
             m = _MD_LINK_RE.search(line)
-            name = m.group(1).rsplit("/", 1)[-1][:-3] if m else None
+            name = m.group(1).rsplit("/", 1)[-1][:-3] if m else pointer_name(line, exists)
             if name and name in floor_set and all(r["name"] != name for r in rows):
                 rows.append({"line": i, "name": name, "bytes": len(line.encode("utf-8")) + 1,
                              "carried": 0, "named": 0, "lost": 0})

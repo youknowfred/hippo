@@ -112,16 +112,18 @@ def pointers(memory_dir: str, text: str) -> List[dict]:
     floor sections, and every line loads all the same). A pointer to a missing memory is
     the ``missing_targets`` item's business."""
     from .lanes import BEHAVIOR, journal_globs, lane_of
+    from .lint_floor import memory_exists
     from .new_memory_floor import _pointer_name
     from .outbox_edit import resolve
     from .staleness import read_memory_type
 
     globs = journal_globs(memory_dir)
+    exists = memory_exists(memory_dir)  # FLR-1: a bare pointer line is weighed too
     out, seen = [], set()
     for i, line in enumerate(text.split("\n"), start=1):
         if line.lstrip().startswith("#"):
             continue
-        name = _pointer_name(line)
+        name = _pointer_name(line, exists)
         if not name or name in seen:
             continue
         path = resolve(os.path.join(memory_dir, f"{name}.md"))
