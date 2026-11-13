@@ -7,6 +7,152 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.45.0 — 2026-11-13 — "Fewer rows, each earned"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. Three derived files may appear beside the index (a section sub-index, a
+citation-binding sidecar, a ledger cache); each is gitignored and rebuilt from the corpus.
+Sixteen items of the road to v2.0.0 and seven fixes. Cut from `main` on the owner's word, like
+the two releases before it. **Three 1.x items are not in it and move to v2.0.0:** TND-4
+(batched acknowledgement), OUT-4 (consent that travels with the bytes) and PLT-3 (two platform
+receipts). Six gates are open and named in the ledger; the ones this release measured and
+missed are stated below, each with its number.
+
+**Operator action: none.** Things you may notice:
+- **The prompt hook serves fewer memories.** A prompt with a weak match gets at most five
+  rows, each with evidence of its own; a prompt with a strong match still gets up to ten.
+  Explicit recall is unchanged. `HIPPO_SIGNAL_COUNT=0` restores ten rows. A BM25-only install
+  is unchanged.
+- **A floor written as bare names is read again.** If `MEMORY.md` lists memories as
+  `- name — text` with no markdown link, hippo did not see those pointers; it does now. The
+  first SessionStart after the update will report the floor's pointer set as grown.
+- **Three dream tiers are deprecated.** Reverse replay no longer runs in a discovery pass.
+  The generative tier and de-parasite, which only ever ran when asked for, print one line
+  saying they go at v2.0.0. `hippo dream` with no flags does what it did.
+- **Doctor says more.** New lines for the citation binding, the dream tiers, evidence anchors
+  (a count, never a warning), and, where they apply, the ledger, the floor budget and the
+  corpus's `CONVENTIONS.md`. On a corpus whose `CONVENTIONS.md` came from an earlier release
+  the conventions line warns until `hippo setup --conventions --yes`.
+- **`hippo tend` lists more kinds.** Lessons another trusted corpus also keeps (`promote`),
+  path-scoped rule proposals (`rule`), a memory that disagrees with a rule, floor lines an
+  always-loaded rule already says, and, with a floor budget declared, floor demotions.
+
+**Recall**
+- **HOT-8 — an injection count that scales with signal.** The hook served ten rows whenever
+  it served any. Now, when the prompt's best cosine clears the dense floor widely, up to ten
+  rows are served as before. Otherwise at most five are, and a row is served only when its own
+  cosine is close to the prompt's best, or it ranks in the top ten of both the dense lane and
+  a lexical lane, or its description shares three of the prompt's terms. The best-ranked row
+  and any memory the prompt names are always served. A row cut this way is not named on the
+  overflow line. The roadmap entry asked for one margin per query and at most three rows;
+  measured, that took the largest estate corpus's hook-mode hard-set recall@10 from 0.476 to
+  0.419 or lower, because with recall lanes on the first rows are behavior rows, so the count
+  is decided per row and the cap is five (owner ruling, 2026-11-13).
+  Measured on three corpora, hook mode, dense, before and after: hard-set recall@10 0.875 →
+  0.875, 0.476 → 0.467 and 0.60 → 0.60; median rows per injecting prompt 10 → 5, 10 → 5 and
+  8 → 3; characters per injecting prompt 1,761 → 1,444, 1,988 → 1,399 and 1,572 → 1,296.
+  **Short of its gate, stated plainly:** the largest corpus's characters per injecting prompt
+  read 1,399 against a bound of 1,000. The daily rollup now counts rows served per injecting
+  prompt, and doctor's recall-lanes line reports the median. The floor sweep records, per
+  corpus, how far under the best cosine the expected memory sits, and doctor warns when the
+  configured band is tighter than that.
+- **HOT-11 — folded digest sections are recall units.** In a file matching `fold_digests`,
+  each `### <name>` section is indexed on its own, in a sub-index beside the main one: the
+  main index gains no row and no schema bump, and existing memories rank exactly as before.
+  `hippo recall` and the recall tool list up to five matching sections after the memories,
+  shown as `name (digest.md:LINE)`; a query no memory answers stays unanswered. The prompt hook
+  shows a section only when the prompt names it. On the largest estate corpus (1,293 sections
+  in 85 digests) a 30-question probe set went from 0.00 to 0.80 recall@10, and the hook's
+  output over 369 replayed prompts is byte-identical. The upgrade embeds only the new rows,
+  over a few SessionStarts, and recall never drops to BM25-only while it does. **Short of its
+  gate:** a cold full build there costs 27% more CPU (21% more wall time) against a bound of
+  25%. Explicit recall there takes about 200 ms longer per call.
+- **LDG-1 — a cited tracker id shows its status, dated.** A corpus that commits a mirror of
+  its tracker declares it under `ledgers` in `hippo.json`. A recall row that cites an id then
+  ends `· <ID> <status> (snapshot <date>)`, at most two ids per row. hippo reads the committed
+  file line by line into a derived cache, for a trusted corpus only, and never calls the
+  network or writes to the tracker or a memory. A corpus with no ledger is byte-identical.
+- **GP-S4 — `hippo recall --for-issue <ID>`, and the issue admission.** The verb lists the
+  memories that cite an id as a whole token, under the id's status. In the prompt hook, a
+  journal the lanes would withhold is let through when it cites an issue id the prompt names;
+  it still has to rank. **Measured, and it does not do what it was moved forward for:** it
+  recovers none of the hard-set rows the lanes cost in v1.44.0, because none of those
+  journal-only rows names an issue id.
+- **Floor pointers may be bare names.** hippo's floor readers recognised a pointer only as a
+  markdown link. A list item that starts with a memory's name and a separator, where that
+  memory exists, is now a pointer too; hippo still writes the link form. On an estate floor
+  of 147 bare lines, the readers went from seeing 0 pointers to 141, and prompts that served a
+  floor memory as an ordinary row went from 303 of 340 to 0. Not a roadmap item.
+- **The tokenizer skips its per-character check for ASCII tokens.** Identical tokens, about
+  seven times faster (4.4 s → 0.6 s of CPU over a thousand-memory corpus's text). Not a
+  roadmap item.
+
+**Tending**
+- **TND-3 — evidence anchors, report-only.** An anchor is an identifier a memory names that
+  also occurs in a file it cites. A memory whose cited file changed without touching its
+  anchors would be "quiet". Doctor counts them and `hippo staleness --anchors` lists them with
+  the evidence. **The gate missed, so arming is unchanged:** replayed on the held-out half of
+  441 real graduate verdicts, 7.3% would have been quiet (the gate asks for 50%), with 2.3% of
+  fix and demote verdicts suppressed (bound 5%). An anchor was touched on 89% of graduated
+  memories' drifted paths.
+- **FMT-2 — the index derives each memory's citation binding.** `build_index` derives the
+  cited paths from the body into a sidecar, and staleness, the first-touch reminder,
+  `recall --for-diff` and the review packet read it when it is current for that exact text;
+  writers still write frontmatter. A plugin update that changes the extractor no longer
+  queues one re-derivation per memory. On the largest estate corpus 6 of 1,073 staleness
+  verdicts differ (0.56%, bound 1%). A path only frontmatter carries, which the body no longer
+  names, stops arming. `HIPPO_INDEX_BINDING=0` restores frontmatter-only.
+- **NAT-3 — a floor diet.** With `budgets.floor_bytes` declared, tend's floor kind proposes
+  one demotion at a time (the pointer line leaves `MEMORY.md`; the memory stays and recall
+  still finds it): non-behavior pointers first, least used first, each with a replay that
+  says whether removing it loses a recall hit. Two corpora reached 8,192 B with no lost hit;
+  the largest corpus's proposals reach 8,137 B once its bare-name pointers are read.
+- **OWN-2 — promotion as a tend kind.** A lesson another registered, trusted corpus also
+  keeps is proposed for the user tier; the same rule reading differently in two corpora is
+  shown as a diff, with `adopt`, `distinct` or `promote`. Only the corpus being tended and
+  the user tier are ever written. **Short of its gate:** a lesson that lives in one corpus
+  only has no twin and is never proposed, so siblings gained none of the ten probe answers.
+- **RUL-8 — a memory that disagrees with a rule.** A deterministic text check pairs a
+  behavior memory with a rule section that shares most of its words but differs in its
+  directive (ask or run, always or never, before or after), and queues it as a contradiction
+  item. Nothing picks a winner, and hippo never edits a rule file. **Half its gate:** the
+  known conflict is listed where its rule lives; its copy in a second corpus is not, because
+  that corpus has no rule to compare against.
+- **RUL-9 — promote-to-rule as a tend proposal.** When a feedback memory's first-touch
+  reminders land under one path glob, tend shows the path-scoped rule file it would write and
+  writes it on a yes.
+- **RUL-10 — a floor line that restates a rule.** `hippo lint-floor`, doctor and tend report
+  a floor line that an always-loaded rule already says. Informational; no gate judges it.
+- **TND-7 — the scheduled-sleep offer.** When ten or more items wait and no sleep pass ran in
+  a week, `hippo tend` names the command that prints a report-only schedule, once a day.
+  hippo still installs no scheduler. A scheduled pass now refreshes a stale floor sweep.
+- **GAT-4 — one versioned `CONVENTIONS.md`.** The plugin's copy carries a version stamp.
+  Doctor says whether a corpus's copy is current, behind, or edited, and
+  `hippo setup --conventions` previews the refresh; `--yes` applies it and moves a corpus's
+  own lines to `CONVENTIONS.local.md`, which hippo never writes otherwise.
+- **A merge item's supersede verdict clears its pair,** and **`done` on a hand-fixed link or
+  floor item answers fixed** (the follow-up left open since v1.42.0). Not roadmap items.
+
+**Dream**
+- **SRF-7, the rest — dream is the linker.** Measured first, on three corpora: reverse
+  replay, the generative tier and de-parasite each moved recall@10 by 0.000, and the last two
+  have produced nothing in the field. They are off by default and deprecated; nothing is
+  deleted before v2.0.0 (owner ruling, 2026-11-13). The linker's applied edges and recall
+  output are unchanged. The dream tool's schema text shrank from 4,150 to 1,112 characters.
+
+**Contract and runway**
+- **CON-3, the draft — `STABILITY.v2.md`.** Every shipped surface is classified as frozen at
+  v2.0.0, explicitly unfrozen, or a legacy name v2.0.0 removes; a test fails when a legacy
+  name in the tree is missing from it. Nothing is frozen or unfrozen by this release.
+- **OBS-8 — a nightly dense lane at 1,000 memories** with eight concurrent recalls. Its first
+  real run is on CI after this release.
+- **The warm-recall decider reads a large prompt in linear time.** With warm recall on, a
+  180 KB pasted prompt spent 89 seconds in the hook before recall ran. Not a roadmap item.
+- Three changes to tests and CI only: two wall-clock bounds moved to the slow lane, two tear
+  scenarios moved to a sibling file, and CI tries a dependency install three times before it
+  fails a lane (a dropped connection had failed one).
+
 ## v1.44.0 — 2026-11-12 — "Selective, and shippable"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

@@ -11,6 +11,46 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.45.0: fewer rows per prompt, and nothing to re-index
+
+**Nothing rebuilds.** The index schema is unchanged. Three derived files may appear beside the
+index over the first few sessions; each is gitignored and rebuilt from the corpus.
+
+**The prompt hook serves fewer memories.** A weak match gets at most five rows, each with
+evidence of its own; a strong match still gets up to ten. `hippo recall` and the recall tool
+still return the full ranking. `HIPPO_SIGNAL_COUNT=0` restores ten rows per prompt.
+`/hippo:doctor`'s recall-lanes line reports the median once a few prompts have run.
+
+**A floor of bare names is read again.** If your `MEMORY.md` lists memories as
+`- name — text` without markdown links, earlier versions did not see those pointers: floor
+memories were served again as ordinary rows, and the floor lints saw nothing. They are read now.
+Expect the next SessionStart to report the floor's pointer set as grown, and tend to list any
+bare pointer that sits outside the floor sections.
+
+**`CONVENTIONS.md` has a version.** Doctor will say a copy seeded by an earlier release is
+behind. `hippo setup --conventions` shows what would change; `--yes` replaces the copy and moves
+any lines of your own into `CONVENTIONS.local.md`.
+
+**Staleness reads cited paths from the index.** When the index's binding is current for a
+memory, it is used in place of the frontmatter `cited_paths`. A path that only frontmatter
+carries, and the body no longer names, stops arming that memory. `HIPPO_INDEX_BINDING=0` goes
+back to frontmatter only. Nothing rewrites your memories.
+
+**Three dream tiers are deprecated.** Reverse replay no longer runs in a discovery pass
+(`HIPPO_DREAM_REVERSE_REPLAY=1` turns it back on). `--generate` and `--deparasite` still work
+and print one line saying they are removed at v2.0.0.
+
+**Opt-ins this release adds**, each a key in `.claude/memory/hippo.json` that is read directly
+(no `hippo trust policy` step):
+- `"ledgers"`: a committed mirror of your tracker, so a recall row that cites an issue id shows
+  its status with the mirror's date. `hippo recall --for-issue <ID>` lists the memories citing
+  an id.
+- `"budgets": {"floor_bytes": N}`: tend then proposes floor demotions one at a time until the
+  floor fits. The first `hippo tend` calls take about ten seconds each while the safety replay
+  fills its cache.
+
+Folded sections need no opt-in beyond the `fold_digests` a corpus already declares.
+
 ### v1.44.0: one re-index, lanes you opt into, and a ship verb
 
 **The index rebuilds once.** The index schema moves from 7 to 8, so the first session after the
