@@ -160,6 +160,9 @@ def watermark_stale_candidates(
         if not changed:
             return []
         cands: List[Tuple[str, List[str], Optional[str], str]] = []
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -167,9 +170,9 @@ def watermark_stale_candidates(
             except OSError:
                 continue
             cited, sc = read_provenance(text)
-            hits = sorted(set(cited) & changed)
+            name = os.path.splitext(os.path.basename(path))[0]
+            hits = sorted(set(binding.cited(name, text, cited)) & changed)
             if hits:
-                name = os.path.splitext(os.path.basename(path))[0]
                 cands.append((name, hits, sc, text))
         if not cands:
             return []

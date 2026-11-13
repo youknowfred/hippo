@@ -232,10 +232,15 @@ def _cited_paths_of(memory_dir: str, name: str, cache: dict) -> set:
         return cache[name]
     cited: set = set()
     try:
+        from .citation_binding import bound  # FMT-2: the index binding when current
         from .staleness import read_provenance
 
+        if ("index-binding",) not in cache:
+            cache[("index-binding",)] = bound(memory_dir)
+        binding = cache[("index-binding",)]
         with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
-            cited = set(read_provenance(fh.read())[0])
+            text = fh.read()
+        cited = set(binding.cited(name, text, read_provenance(text)[0]))
     except Exception:
         cited = set()
     cache[name] = cited

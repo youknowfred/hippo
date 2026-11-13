@@ -470,7 +470,7 @@ def test_semantic_reverify_demote_never_clears_flag(repo, memory_dir, monkeypatc
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # demote chains a refresh_index (LIF-1)
     write_file(repo, "src/foo.py", "x = 1\n")
     c1 = git_commit(repo, "c1", 1_700_000_000)
-    write_file(memory_dir, "m_bad.md", _mem("m_bad", ["src/foo.py"], c1))
+    write_file(memory_dir, "m_bad.md", _mem_body("m_bad", ["src/foo.py"], c1, "body for m_bad: `src/foo.py`"))  # FMT-2: the body names it
     write_file(repo, "src/foo.py", "x = 2\n")
     git_commit(repo, "c2", 1_700_000_100)
 
@@ -677,7 +677,7 @@ def _seed_stale_recalled(repo, memory_dir, names, when=1_700_000_000):
     write_file(repo, "src/foo.py", "x = 1\n")
     c1 = git_commit(repo, "c1", when)
     for n in names:
-        write_file(memory_dir, f"{n}.md", _mem(n, ["src/foo.py"], c1))
+        write_file(memory_dir, f"{n}.md", _mem_body(n, ["src/foo.py"], c1, f"body for {n}: `src/foo.py`"))  # FMT-2
     write_file(repo, "src/foo.py", "x = 2\n")
     git_commit(repo, "c2", when + 100)
     td = os.path.join(repo, "tele")

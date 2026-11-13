@@ -126,8 +126,14 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
         from .provenance import CITATION_DERIVATION_VERSION, read_cite_derivation
 
         cite = read_cite_derivation(ctx.memory_dir)
+        from .citation_binding import all_index_bound  # FMT-2
+
         if cite >= CITATION_DERIVATION_VERSION:
             parts.append(f"citation derivation current (v{cite})")
+        elif all_index_bound(ctx.memory_dir):
+            parts.append(f"citation derivation v{cite} in frontmatter; the index derives "
+                         f"v{CITATION_DERIVATION_VERSION} for every memory and staleness reads "
+                         "that, so nothing needs re-deriving by hand")
         else:
             status = "warn"
             # DOC-16: NAME the verb. This line used to say "re-derive per memory" and stop —

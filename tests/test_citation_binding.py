@@ -183,8 +183,8 @@ def test_compare_counts_and_doctor_line(corpus):
     assert c["disagree_names"] == ["beta"]
     msg = IB.check_citation_binding(ctx)
     assert msg["status"] == "ok"
-    assert msg["message"] == ("citation binding in the index: current for 3 of 3 memories; "
-                              "frontmatter cited_paths differ on 1.")
+    assert msg["message"] == ("citation binding in the index: current for 3 of 3 memories, and "
+                              "staleness reads it for those; frontmatter cited_paths differ on 1.")
     doc = _doc(idx)
     doc["cite_derivation"] -= 1
     open(os.path.join(idx, IB.BINDING_NAME), "w").write(json.dumps(doc))

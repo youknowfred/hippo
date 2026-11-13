@@ -268,6 +268,9 @@ def find_stale(
     """
     try:
         memories = []  # (name, cited_paths, source_commit)
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -275,8 +278,9 @@ def find_stale(
             except Exception:
                 continue
             cited, sc = read_provenance(text)
+            name = os.path.splitext(os.path.basename(path))[0]
+            cited = binding.cited(name, text, cited)
             if cited and sc:
-                name = os.path.splitext(os.path.basename(path))[0]
                 memories.append((name, cited, sc, text))
         if not memories:
             return []

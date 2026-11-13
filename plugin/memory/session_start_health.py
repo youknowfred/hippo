@@ -195,6 +195,10 @@ def cite_derivation_producer(
             return None
         if next(_iter_memory_files(memory_dir), None) is None:
             return None  # nothing was derived, so nothing needs re-deriving
+        from .citation_binding import all_index_bound  # FMT-2: readers use the index's
+
+        if all_index_bound(memory_dir):
+            return None
     except Exception:
         return None
     # ORC-3: the gap description must name what's ACTUALLY missing for THIS `declared`, not

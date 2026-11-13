@@ -88,17 +88,20 @@ def memories_for_paths(
                 stale_by_name = {}
 
         rows: List[tuple] = []
+        from .citation_binding import bound  # FMT-2: the index binding when current
+
+        binding = bound(memory_dir)
         for path in _iter_memory_files(memory_dir):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
             except Exception:
                 continue
-            cited = read_provenance(text)[0]
+            name = os.path.splitext(os.path.basename(path))[0]
+            cited = binding.cited(name, text, read_provenance(text)[0])
             hit = sorted(set(cited) & changed)
             if not hit:
                 continue
-            name = os.path.splitext(os.path.basename(path))[0]
             fm = parse_frontmatter(text)
             steer = _extract_steer(fm if isinstance(fm, dict) else {})
             mtype = _memory_type(fm) or "project"
