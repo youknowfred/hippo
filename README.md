@@ -229,6 +229,8 @@ terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the 
   citation re-derivation, path-scoped rule proposals, changes waiting for re-consent) in one
   ranked list, worked one verdict at a time with your yes. `hippo tend` in a terminal; the
   `tend` MCP tool on Desktop.
+  A lesson another trusted project on this machine also keeps shows up there too: promote it
+  to the user tier, or, when the same rule reads differently there, adopt one text.
 - `/hippo:doctor` — fast check of the *plumbing* (bootstrapped, venv healthy, corpus symlinked,
   indexed and trusted, format current) plus the consent step; on request, a deep, judgment-based
   audit of the *content* (staleness, drift, orphans, archive candidates).

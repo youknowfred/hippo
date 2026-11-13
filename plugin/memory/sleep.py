@@ -225,7 +225,7 @@ _SECTIONS = (
     ("reconsolidation", "Reconsolidation worklist", "tend", "_section_reconsolidation"),
     ("dream", "Dream discovery", "dream", "_section_dream"),
     ("link_health", "Link health (GRA)", "tend", "_section_links"),
-    ("promotion_mining", "Cross-project promotion candidates", "share", "_section_promote_scan"),
+    ("promotion_mining", "Cross-project promotion candidates", "tend", "_section_promote_scan"),  # OWN-2
 )
 
 

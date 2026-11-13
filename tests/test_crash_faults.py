@@ -50,6 +50,7 @@ from .crash_scenarios_ship import scenarios as _ship_scenarios
 from .crash_scenarios_ledger import scenarios as _ledger_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
+from .crash_scenarios_promote import scenarios as _promote_scenarios  # OWN-2
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
 _PLUGIN_ROOT = os.path.dirname(_MEMORY_PKG)
@@ -133,6 +134,8 @@ CRASH_CONTRACT = {
     ("conventions", "_append_local"): ("detected",),  # GAT-4: local file's prior bytes kept; the copy is not replaced
     ("conventions", "_write_copy"): ("detected",),  # GAT-4: the copy's prior bytes kept; "NOT finished" named
     ("ledger", "write_cache"): ("detected",),  # LDG-1: prior ledger.json kept; the SessionStart caller sees False
+    ("promote_tend", "_write_cache"): ("intact",),  # OWN-2: the scan cache is derived; the scan still returns
+    ("promote_tend", "_adopt"): ("detected",),  # OWN-2: adopt names the miss; the memory keeps its bytes
 }
 
 
@@ -1107,6 +1110,7 @@ _SCENARIOS = [
     (("tend", "_write_state"), "detected", scn_tend_state_detected),
     (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
     (("derived_dirs", "_write_stub"), "intact", scn_derived_stub_intact),
+    *_promote_scenarios(_arm, _snap, _assert_unchanged, _git_repo, _mem),  # OWN-2 (tests/crash_scenarios_promote.py)
 ]
 
 

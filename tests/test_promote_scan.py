@@ -87,9 +87,9 @@ def test_finds_cross_project_duplicate_with_provenance(tmp_path, monkeypatch):
     # repo@sha per side — the origin stamp /hippo:promote will carry.
     for side in prop["sides"]:
         assert side["sha"] == "aaaabbbbcccc"[:7] or side["sha"].startswith("aaaabbb")
-    # ... and the rendered report routes through the EXISTING per-item promote flow.
+    # ... and the rendered report routes to the per-item tend queue (OWN-2).
     text = PS.render_report(res)
-    assert "/hippo:share" in text
+    assert "hippo tend --kind promote" in text
     assert "canary-first" in text and "deploy-canary-rule" in text
 
 
@@ -193,7 +193,7 @@ def test_sleep_report_carries_promotion_section_when_nonempty(tmp_path, monkeypa
     assert rc == 0
     out = capsys.readouterr().out
     assert "Cross-project promotion candidates" in out
-    assert "/hippo:share" in out
+    assert "/hippo:tend" in out  # OWN-2: the section's drain is the tend queue now
 
 
 def test_sleep_report_empty_norm_omits_the_section(tmp_path, monkeypatch, capsys):
