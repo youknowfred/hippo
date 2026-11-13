@@ -356,6 +356,12 @@ Keep a corpus's own rules in `CONVENTIONS.local.md` beside it. hippo never requi
 never overwrites it, and adds to it only on that `--yes` (the lines of an edited copy that are
 in no version hippo shipped). Neither file is a memory: neither is indexed or recalled.
 
+The refresh lands where the corpus's saves land. On a corpus whose `write_path` is `outbox`
+(and this machine has accepted it) both files are written to the outbox and `hippo ship`
+carries them into its branch; the working tree is not touched. Otherwise the corpus dir is
+written, and from a linked git worktree that is the worktree's own `.claude/memory/`, never
+the main checkout's tracked copy.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:
@@ -507,7 +513,7 @@ outbox copy of a memory takes precedence over the committed one.
 #### `hippo ship`: one branch, one commit, nothing pushed
 
 `hippo ship` previews; `hippo ship --yes` acts. It makes ONE commit holding the outbox's new
-and edited memories on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
+and edited memories (and a refreshed `CONVENTIONS.md`, when one is there) on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
 local default-branch ref (`origin/HEAD`, else `origin/main`, `origin/master`, else your local
 `main`/`master`; `--base <ref>` picks another), and stops. It never fetches, so the base is as
 fresh as your last `git fetch`; it never pushes, never touches your checkout, your staged

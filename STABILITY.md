@@ -260,7 +260,10 @@ holds the bytes), so the files count as in flight, not as new.
 the append of a copy's own lines to `CONVENTIONS.local.md` (its prior bytes kept when torn,
 and the copy is not replaced), then the replace of `CONVENTIONS.md` with the plugin's asset
 (the copy's prior bytes kept, "NOT finished" named; a re-run finds the lines already in the
-local file and does not add them twice).
+local file and does not add them twice). On a corpus that saves to the outbox the same two
+sites write the outbox copies (each made by a create-only copy-up first); a run torn between a
+copy-up and its write leaves a copy equal to the committed file, which a re-run reads as the
+copy to refresh and `hippo ship` reads as landed.
 
 ## Support policy
 
