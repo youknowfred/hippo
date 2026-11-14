@@ -15,8 +15,8 @@ rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a
 
 **Nothing rebuilds.** The index schema is unchanged.
 
-**Only a corpus that declares `"budgets": {"floor_bytes": N}` sees a change.** One line at a
-time still works as it did.
+**Only a corpus that declares `"budgets": {"floor_bytes": N}` sees a change.** The verdict on
+one line at a time still works as it did.
 
 - A long diet no longer needs one yes per line. `hippo tend diet` prints every demotion as one
   list with a digest and demotes nothing; `hippo tend apply floor:diet --verdict demote
