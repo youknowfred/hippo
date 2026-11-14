@@ -117,6 +117,17 @@ against the index binding) did not reproduce and is not changed.
 - **V2Q-34 — The release.** **Ruled:** v1.46.0, prepared ahead on the rehearsed tree. An item
   whose measurement says it cannot meet its gate is reported with its number and not shipped.
   Merges, tags and releases still wait for the owner.
+- **V2Q-35 — The floor diet as one reviewed list.** Recorded 2026-11-14. This one is the
+  owner's own word, not the delegation, and it is not about recall performance; it is kept
+  here because this is the open rulings list. v1.46.1 left a reviewed batch for the floor diet
+  unbuilt, as a ruling not made. **Ruled 2026-11-13: build it.** The floor diet's demotions
+  join the V2Q-1 (b) class (V2Q-20 added conserved-text folds the same way): one verdict over
+  an enumerated list the user was shown, applied by a digest of the floor's bytes and that
+  list. **Ruled 2026-11-14,** on the builder's advice: each line is judged again at its turn
+  and skipped, never forced, rather than pinned to the review's rankings; a line that carries
+  more than one pointer is never in the list; a line the tend state keeps is proposed past, in
+  the single-item queue as well. No other tend kind gets a list form. The invariant's text in
+  `ROADMAP.yaml` is amended to say so. Shipped in v1.47.0.
 
 ## B5. The train, amended
 
