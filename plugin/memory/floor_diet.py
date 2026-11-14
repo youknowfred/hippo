@@ -65,6 +65,13 @@ nothing here changes for an item taken alone: the single ``demote`` is the same 
 "wait" or "keep it" item is never in a batch, and neither is a line that carries more than
 one pointer.
 
+A line the user keeps. `hippo tend hold floor:diet:<name> --reason …` is how a line stays on
+the floor whatever its use count says, and a snooze or a skip does the same while it lasts.
+Such a line is still a queue item (it shows as held, and `release` brings it back), but it
+no longer counts toward the target: the diet proposes the next line in its place. Before,
+it counted all the same, and when it covered what was left the queue showed no diet item
+while the floor stayed over its target.
+
 A line with more than one pointer. The diet weighs one pointer per floor line, the first.
 A demotion removes the whole line, so any other pointer joined onto it leaves the floor
 too, and it has no line of its own to be weighed on (no use count, no replay). The item
@@ -494,7 +501,9 @@ def plan(memory_dir: str, *, now: Optional[float] = None, text: Optional[str] = 
     first of them that reach the target. Each row carries ``name, bytes, type, lane,
     behavior, text, riders, use, injected, opened, unsafe, lost, waiting, young, age_days,
     evidence``, and a proposal also ``after`` (the floor bytes once this and every earlier
-    proposal is taken). ``unreplayed`` counts the recent prompts not ranked yet.
+    proposal is taken). ``unreplayed`` counts the recent prompts not ranked yet. A row the
+    tend state keeps on the floor (``kept_by_state``) is in ``proposals`` with ``kept`` set
+    and takes no bytes off the floor, so the rows after it are proposed in its place.
 
     ``text`` weighs that floor in place of the one on disk (the reviewed batch weighs the
     floor as each line leaves it), and ``memo`` is a dict that carries what does not depend
@@ -548,13 +557,39 @@ def plan(memory_dir: str, *, now: Optional[float] = None, text: Optional[str] = 
     rows.sort(key=lambda r: (2 if r["unsafe"] else int(r["young"]), r["behavior"], r["use"],
                              -r["bytes"], r["name"]))
     out["rows"] = rows
+    kept = kept_by_state(memory_dir, rows, now)
     left = total
     for r in rows:
         if left <= target:
             break
+        if r["name"] in kept:  # it stays on the floor: listed (the queue files it), not counted
+            out["proposals"].append(dict(r, after=left - r["bytes"], kept=kept[r["name"]]))
+            continue
         left -= r["bytes"]
         out["proposals"].append(dict(r, after=left))
     return out
+
+
+def kept_by_state(memory_dir: str, rows, now: Optional[float] = None) -> Dict[str, str]:
+    """``{name: why}`` for the rows this clone's tend state keeps on the floor: held (with
+    the reason), snoozed or skipped. Judged the way the queue judges its entries, on the
+    evidence the row shows for the floor as it is, which is what a skip was taken over.
+    Never raises."""
+    try:
+        from . import tend_queue as Q
+
+        state, hidden = Q.read_state(memory_dir), Q.hidden_check(memory_dir, now)
+        kept = {}
+        for r in rows:
+            entry = Q._entry("floor", TARGET_PREFIX + r["name"], r["evidence"], "")
+            why = hidden(entry)
+            if why == "held":
+                why = f"held: {(Q._held_by(entry, state) or {}).get('reason') or 'no reason given'}"
+            if why:
+                kept[r["name"]] = why
+        return kept
+    except Exception:
+        return {}
 
 
 def queue_entries(memory_dir: str, make) -> List[dict]:

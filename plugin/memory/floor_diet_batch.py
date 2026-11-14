@@ -122,24 +122,6 @@ def _against(size: int, target: int, budget: int) -> str:
             f"its {budget:,}B budget")
 
 
-def _kept_by_state(memory_dir: str, rows, now: float) -> dict:
-    """``{name: why}`` for the rows this clone's tend state hides (held, snoozed, skipped),
-    judged on the evidence the queue shows for the floor as it is, which is the evidence a
-    skip was taken over."""
-    from . import tend_queue as Q
-
-    state, hidden = Q.read_state(memory_dir), Q.hidden_check(memory_dir, now)
-    kept = {}
-    for r in rows:
-        entry = Q._entry("floor", FD.TARGET_PREFIX + r["name"], r["evidence"], "")
-        why = hidden(entry)
-        if why == "held":
-            why = f"held: {(Q._held_by(entry, state) or {}).get('reason') or 'no reason given'}"
-        if why:
-            kept[r["name"]] = why
-    return kept
-
-
 def _solo_line(r: dict) -> str:
     """The likely verdict for a line the diet proposes but a batch never takes."""
     return (f"single verdict only: its line also points at {', '.join(r['riders'])}, which the diet "
@@ -173,7 +155,7 @@ def build_review(memory_dir: str, repo_root: str, *, now: Optional[float] = None
     if q is None:
         return None
     exists = memory_exists(memory_dir)
-    kept = _kept_by_state(memory_dir, q["rows"], now)
+    kept = FD.kept_by_state(memory_dir, q["rows"], now)
     out = {"budget": q["budget"], "target": q["target"], "bytes": q["bytes"], "items": [], "rest": [],
            "held": [], "floor_sha256": _sha(text0), "digest": None}
     text, passed, rest = text0, [], {}
@@ -373,7 +355,7 @@ def apply_batch(memory_dir: str, repo_root: str, digest: Optional[str], leave_ou
         return _refused(f"{_no_diet(memory_dir)} Nothing was demoted.")
     budget, target = q["budget"], q["target"]
     shown = {n: _without_pointer(text0, n)[1] for n in names}  # the reviewed bytes: the lines shown
-    kept = _kept_by_state(memory_dir, q["rows"], now)  # a hold placed since the review counts
+    kept = FD.kept_by_state(memory_dir, q["rows"], now)  # a hold placed since the review counts
     applied, skipped = [], []
     for name in names:
         if name in out_names:

@@ -356,11 +356,16 @@ line is judged again as its turn comes, on the floor as the earlier lines leave 
 prompts on record at that moment, which include the ones typed since the review: a line that
 would now lose a recall hit, or whose replay cannot be finished, is skipped, never forced. The
 answer names every skipped line and why, says where the floor ended, and names what the diet
-proposes next. To keep a line on the floor whatever its use, `hippo tend hold
-floor:diet:<name> --reason "<why>"`; the review plans around it. The review and the verdict
+proposes next. A held line (below) is planned around, and a hold placed after the review is
+honoured by the verdict. The review and the verdict
 finish the replay first, so they can take up to a minute on a large corpus with a cold cache.
 The review keeps its digest, the floor's hash and the listed names in the gitignored tend
 state, and nothing in the corpus.
+
+A line you want on the floor whatever its use: `hippo tend hold floor:diet:<name> --reason
+"<why>"`. The line stays, it no longer counts toward the target, and the diet proposes the
+next line in its place, in `hippo tend` and in `hippo tend diet` alike; `hippo tend release
+floor:diet:<name>` puts it back in the diet. A snooze or a skip does the same while it lasts.
 
 The diet does not stop at the budget. The gate fails a change that leaves the floor over its
 budget and bigger, so a floor trimmed to a few bytes under it would have its next new pointer
