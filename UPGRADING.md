@@ -11,6 +11,26 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.47.0: the floor diet can be reviewed as one list
+
+**Nothing rebuilds.** The index schema is unchanged.
+
+**Only a corpus that declares `"budgets": {"floor_bytes": N}` sees a change.** One line at a
+time still works as it did.
+
+- A long diet no longer needs one yes per line. `hippo tend diet` prints every demotion as one
+  list with a digest and demotes nothing; `hippo tend apply floor:diet --verdict demote
+  --digest <digest>` then demotes exactly the lines it showed (`--except <name>,<name>` leaves
+  some out). Each line is judged again at its turn, so the answer may name lines it skipped,
+  and says what the diet proposes next. `hippo doctor` now starts the diet there.
+- A line that points at more than one memory is never in that list: it takes its own
+  `hippo tend apply floor:diet:<name> --verdict demote`, and its evidence names the other
+  memories that leave the floor with it.
+- To keep a line on the floor whatever its use: `hippo tend hold floor:diet:<name> --reason
+  "<why>"`. From this release the diet proposes the next line in its place. If you held a diet
+  line before and `hippo tend` then showed no floor item while the floor was over its target,
+  it will show one now.
+
 ### v1.46.2: the floor diet waits for new memories and leaves room under the budget
 
 **Nothing rebuilds.** The index schema is unchanged.

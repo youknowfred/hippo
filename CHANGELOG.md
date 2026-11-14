@@ -7,6 +7,155 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.47.0 — 2026-11-14 — "The floor diet as one list"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. One feature and two fixes, all to the floor diet (NAT-3): a long diet
+can be reviewed as one list and applied by one verdict. v1.46.1 said of the diet: "A
+reviewed batch for the diet is not built: one yes per write is a standing rule, and changing
+it is the owner's call." The owner made that call, on 2026-11-13 and 2026-11-14, after a
+diet of 72 demotions was worked on emgl's floor (16,334 bytes, target 7,680): 14 answered
+one at a time, then 58 approved as one list a session showed and applied one
+`hippo tend apply` at a time.
+
+**Operator action: none required.** A corpus that declares no `budgets.floor_bytes` sees no
+change: no review, no record, no new key in its tend state. The single-item path is unchanged
+too: the same `hippo tend apply floor:diet:<name> --verdict demote`, the same queue. With a
+budget declared, things you may notice:
+- **`hippo doctor` starts the diet at `hippo tend diet`**, not `hippo tend next --kind floor`.
+- **A floor item names the other memories on its line** when the line points at more than one,
+  and `hippo tend show floor:diet:<name>` prints the line itself.
+- **A diet line you hold, snooze or skip is replaced in the list by the next one.** Before, a
+  held line still counted toward the target, and when it covered what was left `hippo tend`
+  showed no diet item while the floor stayed over its target.
+
+**The rule, amended.** hippo's corrective writes are per-item and agent-gated: one verdict,
+one write, never autonomous. From this release a batch is allowed in one shape only: one
+verdict over an enumerated set the user was shown, applied by the digest of that list, so
+nothing is applied that was not listed and nothing runs by itself. The floor diet's reviewed
+list is the one that exists. There is still no apply-all; no hook, schedule or other verb
+calls it; and no other `hippo tend` kind has a list form. The wording is in `CONTRIBUTING.md`,
+the pull request template, the tend skill and the roadmap's guiding invariants; the ruling is
+V2Q-35 in `planning/ROADMAP.v2.yaml`, beside V2Q-1 and V2Q-20, which allowed a reviewed
+changeset for graduates, format rewrites and folds.
+
+**New**
+- **NAT-3 — the floor diet as one reviewed list, applied by its digest.**
+  `hippo tend diet` (the tend tool's `action='diet'`; `hippo tend show floor:diet` prints the
+  same) is the review. It prints every demotion the batch would make, in the diet's order,
+  each with its evidence and the floor line itself; then what a batch never takes, each with
+  its line and any other pointer on it; then where the floor would end against its target and
+  budget, and a digest. It writes nothing in the corpus.
+  `hippo tend apply floor:diet --verdict demote --digest <digest>` (the tool's
+  `action='apply'`, `id='floor:diet'`, `verdict='demote'`, `digest`, `except`) is the one
+  verdict. It demotes the lines that review listed. `--except <name>,<name>` leaves some on
+  the floor.
+  - **The digest** is 12 hex characters binding the sha256 of the floor's bytes (the outbox's
+    floor copy when there is one) and the listed names in order. The verdict is refused when
+    the digest is not the last review's, or when `MEMORY.md` is no longer the bytes that were
+    reviewed, so a digest is spent by the first line it removes. A name after `--except` that
+    the review did not list refuses the whole verdict: a typo cannot demote the line it was
+    meant to spare.
+  - **Each line is judged again as its turn comes, and skipped, never forced.** A line is
+    demoted only if the floor is still over its target and the diet still proposes the line as
+    safe: it loses no recall hit, its replay is finished, it is not too new, and its text is
+    still the reviewed text. The answer names every skipped line and why, says where the floor
+    ended against the target and the budget, and names what the diet proposes next. A failure
+    part way through is a named skip too, so the answer always counts the lines that did go.
+  - **Never in a batch:** a "wait" or "keep it" item, and a line that points at more than one
+    memory. The diet weighs the first pointer on a line; the others have no use count and no
+    replay, so a batch that took the line could lose their recall hits unseen. The review
+    shows these lines and what is on them, and each takes its own `demote` on its own id.
+  - **The list is built by weighing the floor again after each line**, which is the sequence
+    the one-at-a-time path serves. Trim-safety is judged against the floor a pointer sits on:
+    a demoted memory stops collapsing onto its floor line and competes for the hook's slots.
+  - **A line the tend state keeps is planned around.** A held, snoozed or skipped line stays
+    on the floor and the review lists the next line in its place; a hold placed after the
+    review is honoured by the verdict.
+  - **The review records its digest, the floor's hash and the listed names** (no floor text)
+    in the gitignored tend state, the file snoozes and holds live in. The review and the
+    verdict finish the trim-safety replay before judging (`hippo tend` ranks at most 50
+    prompts per call), so with a cold replay cache and the dense model they can take about a
+    minute on a thousand-memory corpus.
+
+**Fixes**
+- **NAT-3 — a floor diet item names the other pointers on its line.** A floor line can carry
+  more than one pointer (two or more links joined on one line). The diet weighs the first,
+  and a demotion removes the whole line, so the others leave the floor with it; the item
+  described one pointer and the demotion answered about one. Now the item's evidence names
+  the others ("its line also points at 1 other memory, which leaves the floor with it:
+  <name>"), `hippo tend show floor:diet:<name>` and `hippo tend next` print the literal line a
+  demotion removes, and the demotion's answer names what left the floor with it. A line of one
+  pointer reads as before.
+- **NAT-3 — the floor diet proposes past a line the tend state keeps.**
+  `hippo tend hold floor:diet:<name> --reason "<why>"` is how a line is kept on the floor
+  whatever its use count says. The diet did not read the tend state, so a held line still
+  counted toward the target. On a fixture (floor 535 bytes, target 515, one diet item), after
+  the hold the queue was empty and the floor still 535 bytes. Now a held, snoozed or skipped
+  line stays a queue item, filed as it was, and takes no bytes off the floor in the diet's
+  plan: the next line is proposed in its place, in `hippo tend` and in the review alike.
+  `hippo tend release floor:diet:<name>` brings it back. The test covers hold, snooze and
+  skip, and failed on all three before the change.
+
+**Why skip and not pin.** Between a review and its verdict the trim-safety judgments can
+move. The replay judges the newest 200 prompts, and the reviewing session's own prompts enter
+that window: on the diet worked on emgl on 2026-11-13, three approved demotions had become
+lines that lose a recall hit by the time they were applied, and one pointer went safe,
+unsafe, safe again in one session. A batch could have been pinned to the rankings the review
+used. It is not, for three reasons. A prompt on which the hook reached a memory only through
+its floor line is evidence whichever session typed it. A skip costs a second, shorter review;
+a forced demotion costs a recall hit nobody is told about. And pinning the rankings would not
+pin the judgments, because they also depend on the floor, which the batch changes line by
+line. A fixture shows that last one with no new prompt at all:
+
+| With lanes declared: eight habits on the floor that all match one recorded prompt | lines proposed as safe |
+|---|---|
+| `hippo tend` (each line judged against the floor as it is) | 8 |
+| `hippo tend diet` (the floor weighed again after each line) | 4, and 4 shown as "keep it" |
+| the one-at-a-time path, taken to its end | 4, then "keep it" |
+
+Once four are demoted they hold the behavior lane's four slots, and each of the other four
+loses that hit. Another test drives the one-at-a-time path on a copy of its fixture and
+compares the two floors byte for byte.
+
+**Measured** on fixtures only. A corpus of 14 floor pointers (one line carrying two, one
+journal, one memory saved that day), budget 800 bytes, target 750, floor 1,977 bytes; run
+again on this release's code, with the same output:
+
+| step | listed | demoted | skipped | left out | floor after |
+|---|---|---|---|---|---|
+| review 1 (the two-pointer line shown as not in the batch) | 9 | | | | would be 744 B, 6 B under the target |
+| a prompt typed after the review reaches the journal only through its floor line | | | | | |
+| verdict 1 with a misspelt name after `--except` | | 0 | | | refused, 1,977 B unchanged |
+| verdict 1, one name left out | | 7 | 1 (it now loses 1 recall hit) | 1 | 1,012 B, 262 B over the target |
+| the same digest again | | 0 | | | refused: the floor changed |
+| a hold on the left-out line, then review 2 | 2 | | | | would be 738 B |
+| verdict 2 | | 2 | 0 | 0 | 738 B, 12 B under the target |
+
+At a thousand memories, 150 floor pointers and 200 replayed prompts (BM25 only), a review
+that lists 92 demotions takes 2.6 s with a cold replay cache and 1.1 s warm, and the verdict
+1.3 s. Those timings are from the build of the list and were not run again for the release.
+
+**Limits, stated**
+- **Not run on a live corpus.** The reviewed list has only met fixtures. The counts from the
+  diet on emgl are what prompted it, not a measurement of it: that diet was applied one line
+  at a time, before the list existed, and emgl's floor budget was declared on 2026-11-14 once
+  that floor was under its target.
+- **The other pointers on a line are named, not weighed.** A line that carries more than one
+  stays out of every batch and takes a single verdict; nothing replays the others. On a floor
+  with many such lines the list alone will not reach the target. How many of emgl's floor
+  lines are such lines is not counted.
+- **`hippo tend`'s own list is unchanged**, so with lanes declared it can show a diet line as
+  safe that stops being safe once earlier lines go (the table above). The review is the
+  accurate one, and a single `demote` on a line that has come to read "keep it" is still
+  accepted, as before.
+- **Which cause moved the three judgments on emgl is not established:** the reviewing
+  session's prompts, the diet's own demotions, or both. That corpus was not examined.
+- **Only the last review is kept.** A second `hippo tend diet` replaces the first's digest.
+- **A verdict that skips every line still exits 0.** It ran; the answer says nothing was
+  demoted and why.
+
 ## v1.46.2 — 2026-11-13 — "A floor diet that leaves room"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
