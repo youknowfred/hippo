@@ -54,6 +54,12 @@ is old enough, and a file changed inside the bar waits.
   loads everything.
 - opened: Read-tool opens of the memory file (OBS-10's ``row_opened`` over the outcome ledger).
 
+A line with more than one pointer. The diet weighs one pointer per floor line, the first.
+A demotion removes the whole line, so any other pointer joined onto it leaves the floor
+too, and it has no line of its own to be weighed on (no use count, no replay). The item
+says so: its evidence names the other memories, ``hippo tend show`` prints the literal
+line, and the demotion's answer names what left with it.
+
 The usage aggregates are not used: they fold served names only, so a floor memory, collapsed
 on most prompts, reads there as never used. Both ledgers are byte-capped and rotate to their
 newest half, so on a busy corpus the window is shorter than 30 days; the evidence names the
@@ -187,8 +193,32 @@ def pointers(memory_dir: str, text: str) -> List[dict]:
         seen.add(name)
         lane = lane_of(f"{name}.md", kind, globs)
         out.append({"name": name, "line": i, "bytes": len(line.encode("utf-8")) + 1,
-                    "type": kind or "untyped", "lane": lane, "behavior": lane == BEHAVIOR})
+                    "type": kind or "untyped", "lane": lane, "behavior": lane == BEHAVIOR,
+                    "text": line, "riders": riders([line], name, exists)})
     return out
+
+
+def riders(lines, name: str, is_memory=None) -> List[str]:
+    """The other memories ``name``'s floor line(s) point at. A demotion removes the whole
+    line, so they leave the floor with it; they have no line of their own, so the diet
+    weighs none of them (no use count, no replay)."""
+    from .lint_floor import pointer_targets
+
+    out: List[str] = []
+    for line in lines:
+        for t in pointer_targets(line, is_memory):
+            n = t.rsplit("/", 1)[-1][:-3]
+            if n != name and n not in out:
+                out.append(n)
+    return out
+
+
+def _riders_line(names: List[str]) -> str:
+    """The evidence clause for a line that carries other pointers; ``""`` for a line of one."""
+    if not names:
+        return ""
+    what = "1 other memory, which leaves" if len(names) == 1 else f"{len(names)} other memories, which leave"
+    return f"; its line also points at {what} the floor with it: {', '.join(names)}"
 
 
 def usage(memory_dir: str, names, now: Optional[float] = None) -> Tuple[Dict[str, dict], float]:
@@ -461,7 +491,8 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
                  waiting=not s.get("lost") and _unsafe(s, report),
                  young=age is None or age < need, age_days=age, dated_by=dated_by, age_bar=need)
         lane = "behavior-lane" if r["behavior"] else "not behavior-lane"
-        r["evidence"] = (f"floor diet: a {r['bytes']}B floor line, {lane} (type: {r['type']}); "
+        r["evidence"] = (f"floor diet: a {r['bytes']}B floor line, {lane} (type: {r['type']})"
+                         f"{_riders_line(r['riders'])}; "
                          f"{_use_line(u, span)}{_age_line(r, span)}; {_safety_line(s, report)}")
     rows.sort(key=lambda r: (2 if r["unsafe"] else int(r["young"]), r["behavior"], r["use"],
                              -r["bytes"], r["name"]))
@@ -500,14 +531,33 @@ def queue_entries(memory_dir: str, make) -> List[dict]:
     return out
 
 
+def detail_lines(name: str, memory_dir: str) -> List[str]:
+    """What ``hippo tend show`` adds under a diet item: the literal floor line(s) a demotion
+    removes, and the other pointers on them. ``[]`` when the floor has no such line."""
+    from .lint_floor import memory_exists
+    from .new_memory_floor import _without_pointer
+
+    _text, gone = _without_pointer(floor_text(memory_dir) or "", name)
+    out = [f"floor line: {ln}" for ln in gone]
+    also = riders(gone, name, memory_exists(memory_dir))
+    if also:
+        out.append(f"also on this line: {', '.join(also)} (no line of their own; a demotion "
+                   "takes them off the floor too)")
+    return out
+
+
 def demote(name: str, memory_dir: str, repo_root: str) -> dict:
     """``{"ok", "message"}``: remove ``name``'s floor pointer line, through the floor kind's
     write path (the outbox's floor copy when outbox mode is honoured, else the corpus dir's
-    ``MEMORY.md``). Touches no memory file."""
+    ``MEMORY.md``). Touches no memory file. The line goes whole, so the message names any
+    other pointer that was on it."""
     from . import outbox_edit as OE
-    from .new_memory_floor import _remove_floor_pointer
+    from .lint_floor import memory_exists
+    from .new_memory_floor import _remove_floor_pointer, _without_pointer
 
     floor_dir = OE.floor_dir_for_edit(memory_dir, repo_root)
+    _text, gone = _without_pointer(floor_text(memory_dir) or "", name)
+    also = riders(gone, name, memory_exists(memory_dir))
     r = _remove_floor_pointer(memory_dir, name, floor_dir=floor_dir)
     if r.get("status") != "removed":
         return {"ok": False, "message": f"{name}: the floor line was not removed ({r.get('reason')})."}
@@ -517,9 +567,12 @@ def demote(name: str, memory_dir: str, repo_root: str) -> dict:
     where = ("in the outbox's floor copy (it ships with `hippo ship`)" if floor_dir
              else "in MEMORY.md, a working-tree change to commit")
     against = f" of its {budget:,}B budget" if budget else ""
+    rode = "" if not also else (
+        f" Its line also pointed at {', '.join(also)}, which left the floor with it "
+        "(those memory files stay too).")
     return {"ok": True, "message": (
         f"demoted {name}: its floor line is gone {where}; the memory file stays and recall "
-        f"still reaches it. The floor is now {size:,}B{against}.")}
+        f"still reaches it.{rode} The floor is now {size:,}B{against}.")}
 
 
 def doctor_line(memory_dir: str) -> Optional[Dict[str, str]]:
