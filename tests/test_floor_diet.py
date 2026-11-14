@@ -52,6 +52,16 @@ def _floor(names):
             + "\n## Working Style & Process Feedback\n" + "".join(line(n) + "\n" for n in work))
 
 
+_DAY = 86400
+
+
+def _backdate(path, days=40):
+    """A non-git corpus dates a memory by its file's mtime: put it well outside any window."""
+    then = time.time() - days * _DAY
+    os.utime(path, (then, then))
+    return path
+
+
 def _corpus(tmp_path, monkeypatch, budget=None, names=tuple(_MEMS), extra_policy=None):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
@@ -60,7 +70,7 @@ def _corpus(tmp_path, monkeypatch, budget=None, names=tuple(_MEMS), extra_policy
     monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "tel"))
     os.makedirs(str(tmp_path / "tel"))
     for n, (desc, mtype, _sec) in _MEMS.items():
-        write_file(md, f"{n}.md", _mem(n, desc, mtype))
+        _backdate(write_file(md, f"{n}.md", _mem(n, desc, mtype)))
     write_file(md, "MEMORY.md", _floor(names))
     policy = dict(extra_policy or {})
     if budget is not None:
@@ -80,11 +90,12 @@ def _diet_ids(md, repo):
             if e["target"].startswith(FD.TARGET_PREFIX)]
 
 
-def _open(md, stem, times=1):
+def _open(md, stem, times=1, days_ago=0):
     path = _outcome_ledger_path(default_telemetry_dir(md))
     with open(path, "a", encoding="utf-8") as fh:
         for _ in range(times):
-            fh.write(json.dumps({"ts": time.time(), "tool": "Read", "opened": stem, "session_id": "s"}) + "\n")
+            fh.write(json.dumps({"ts": time.time() - days_ago * _DAY, "tool": "Read", "opened": stem,
+                                 "session_id": "s"}) + "\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -189,6 +200,81 @@ def test_a_flat_floor_is_weighed_and_its_out_of_section_items_are_not_doubled(tm
     assert len(diet) == len(FD.plan(md)["proposals"]) >= 1
     rebloat = {e["target"] for e in entries if not e["target"].startswith(FD.TARGET_PREFIX)}
     assert not rebloat & {e["target"][len(FD.TARGET_PREFIX):] + ".md" for e in diet}
+
+
+# --------------------------------------------------------------------------- #
+# Age: a memory newer than the window its use is counted over is not "least used"
+# --------------------------------------------------------------------------- #
+def _git_corpus(repo, memory_dir, monkeypatch, tmp_path, fresh_days):
+    """Three facts committed 60 days ago and one committed ``fresh_days`` ago, all on the floor."""
+    from .conftest import git_commit
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "tel"))
+    os.makedirs(str(tmp_path / "tel"))
+    now = int(time.time())
+    old = ("billing_schema", "vendor_api", "staging_host")
+    for n in old:
+        write_file(memory_dir, f"{n}.md", _mem(n, _MEMS[n][0], _MEMS[n][1]))
+    write_file(memory_dir, "hippo.json", json.dumps({"budgets": {"floor_bytes": 200}}))
+    git_commit(repo, "old facts", now - 60 * _DAY)
+    write_file(memory_dir, "fresh_fact.md", _mem("fresh_fact", "queue worker restart order", "project"))
+    lines = [f"- [{n}]({n}.md) — {_MEMS[n][0]} {_PAD}" for n in old]
+    lines.append(f"- [fresh_fact](fresh_fact.md) — queue worker restart order {_PAD}")
+    write_file(memory_dir, "MEMORY.md", "# Agent Memory\n\n## User\n\n## Working Style & Process Feedback\n"
+               + "\n".join(lines) + "\n")
+    git_commit(repo, "a fresh fact", now - fresh_days * _DAY)
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    return old
+
+
+def test_a_memory_committed_inside_the_ledger_span_is_not_least_used(repo, memory_dir, monkeypatch, tmp_path):
+    old = _git_corpus(repo, memory_dir, monkeypatch, tmp_path, fresh_days=2)
+    for n in old:  # the ledgers hold 10 days; each old fact was opened in them, the new one never
+        _open(memory_dir, n, days_ago=10)
+    p = FD.plan(memory_dir)
+    order = [r["name"] for r in p["proposals"]]
+    assert order[-1] == "fresh_fact" and set(order[:-1]) == set(old)  # zero use, yet not first
+    row = p["proposals"][-1]
+    assert row["young"] and row["use"] == 0 and not row["unsafe"]
+    assert "age: first committed 2 day(s) ago, younger than the 10 days the ledgers hold" in row["evidence"]
+    assert not any(r["young"] or "age:" in r["evidence"] for r in p["proposals"][:-1])
+    entries = FD.queue_entries(memory_dir, Q._entry)
+    assert entries[-1]["target"] == "diet:fresh_fact" and entries[-1]["proposed"].startswith("wait: too new")
+    assert all(e["proposed"].startswith("demote") for e in entries[:-1])
+    # The user may still overrule it: the item is live and takes the verdict.
+    assert TD.apply("floor:diet:fresh_fact", "demote", memory_dir=memory_dir, repo_root=repo)["ok"]
+
+
+@pytest.mark.parametrize("fresh_days, young", [(2, True), (8, False)])
+def test_short_or_empty_ledgers_still_give_a_new_memory_a_week(repo, memory_dir, monkeypatch, tmp_path, fresh_days, young):
+    _git_corpus(repo, memory_dir, monkeypatch, tmp_path, fresh_days=fresh_days)
+    rows = {r["name"]: r for r in FD.plan(memory_dir)["proposals"]}  # no ledger rows at all
+    assert rows["fresh_fact"]["young"] is young
+    assert (f"younger than the {FD.MIN_AGE_DAYS}-day minimum" in rows["fresh_fact"]["evidence"]) is young
+    assert not rows["billing_schema"]["young"]
+
+
+def test_a_corpus_outside_git_dates_a_memory_by_its_file(tmp_path, monkeypatch):
+    md, repo = _corpus(tmp_path, monkeypatch, budget=200)  # no git: files last changed 40 days ago
+    write_file(md, "fresh_fact.md", _mem("fresh_fact", "queue worker restart order", "project"))
+    with open(os.path.join(md, "MEMORY.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"- [fresh_fact](fresh_fact.md) — queue worker restart order {_PAD}\n")
+    p = FD.plan(md)
+    assert [r["name"] for r in p["proposals"] if r["young"]] == ["fresh_fact"]
+    assert p["proposals"][-1]["name"] == "fresh_fact"
+    assert "age: not in git history, file last changed 0 day(s) ago" in p["proposals"][-1]["evidence"]
+
+
+def test_ages_cost_one_history_scan_however_many_pointers(repo, memory_dir, monkeypatch, tmp_path):
+    from memory import archive as A
+
+    _git_corpus(repo, memory_dir, monkeypatch, tmp_path, fresh_days=2)
+    calls = []
+    real = A.run_git
+    monkeypatch.setattr(A, "run_git", lambda args, root: calls.append(args[0]) or real(args, root))
+    assert len(FD.plan(memory_dir)["proposals"]) == 4
+    assert calls.count("log") == 1
 
 
 # --------------------------------------------------------------------------- #

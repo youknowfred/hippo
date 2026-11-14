@@ -11,10 +11,27 @@ The order, decided for NAT-3:
 1. pointers whose memory is not behavior-lane (``lanes.lane_of``: anything but ``type: user``
    or ``feedback``, journals included), least used first;
 2. then behavior-lane pointers, least used first;
-3. last, and never proposed as safe, any pointer whose removal loses a recall hit on CLM-7's
+3. then, and not proposed as safe, any pointer whose memory is too new for its use count to
+   mean anything (see "Age" below);
+4. last, and never proposed as safe, any pointer whose removal loses a recall hit on CLM-7's
    trim-safety replay (``lint_floor.trim_safety_report``).
 
 Within a class, ties go to the bigger line (fewer demotions reach the budget), then the name.
+
+Age. A use count compares memories only when each had the same time to be used. A memory
+first committed inside the span the ledgers hold had less, so it would sort to the front as
+"least used" for being new (on emgl's floor, with 4.4 days of ledgers, 11 of the first 41
+proposals were memories first committed inside those 4.4 days). Such a pointer is listed
+after every pointer that was judged on a full span, its item says "wait" and its evidence
+gives the age. The bar is the span the ledgers hold, and never less than ``MIN_AGE_DAYS``:
+with short or empty ledgers a memory saved this week is still not "unused", it has not been
+needed yet. Ledgers that hold the whole window make the bar the window: there a memory waits
+``WINDOW_DAYS`` days. A memory's birth is the commit that first added its file, read for the whole
+corpus by one ``git log --diff-filter=A`` (``archive._first_seen_times``; about a quarter
+of a second on emgl's 5,700 commits), run only when the floor is over its budget. A file git does not date
+(a corpus outside git, a gitignored corpus, an unshipped outbox copy, a save not committed
+yet) is dated by its mtime, which is the latest it can have been born: old enough by mtime
+is old enough, and a file changed inside the bar waits.
 
 "Use" is read from the two raw ledgers hippo already keeps, over the last 30 days:
 
@@ -52,6 +69,9 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 WINDOW_DAYS = 30
+# The least age at which a use count is read as low, however short the ledgers are. Seven
+# days: work on a topic comes in bursts, and under a week "not used" is "not needed yet".
+MIN_AGE_DAYS = 7
 SUGGESTED_BUDGET = 8192
 TARGET_PREFIX = "diet:"
 START_COMMAND = "hippo tend next --kind floor"
@@ -167,6 +187,44 @@ def usage(memory_dir: str, names, now: Optional[float] = None) -> Tuple[Dict[str
         if stem in names:
             out[stem]["opened"] += 1
     return out, round((now - oldest) / 86400.0, 1)
+
+
+def births(memory_dir: str, names) -> Dict[str, Tuple[float, str]]:
+    """``{name: (unix time, "git" | "file")}``: when each memory came to exist. The commit
+    that first added its file (one ``git log`` for the whole corpus), else the file's mtime
+    (the latest it can have been born). A name is absent only when neither can be read."""
+    from .outbox_edit import resolve
+
+    try:
+        from .archive import _first_seen_times
+
+        seen = _first_seen_times(memory_dir, memory_dir)
+    except Exception:
+        seen = {}
+    out: Dict[str, Tuple[float, str]] = {}
+    for n in names:
+        if n in seen:
+            out[n] = (float(seen[n]), "git")
+            continue
+        try:
+            out[n] = (os.path.getmtime(resolve(os.path.join(memory_dir, f"{n}.md"))), "file")
+        except Exception:
+            continue
+    return out
+
+
+def _age_line(r: dict, span: float) -> str:
+    """The evidence clause for a pointer too new to judge on use; ``""`` for any other."""
+    if not r.get("young"):
+        return ""
+    if r.get("age_days") is None:
+        when = "its age could not be read"
+    elif r.get("dated_by") == "git":
+        when = f"first committed {r['age_days']:g} day(s) ago"
+    else:
+        when = f"not in git history, file last changed {r['age_days']:g} day(s) ago"
+    bar = f"the {span:g} days the ledgers hold" if span > MIN_AGE_DAYS else f"the {MIN_AGE_DAYS}-day minimum"
+    return f"; age: {when}, younger than {bar}, so its use count is not read as low yet"
 
 
 # --------------------------------------------------------------------------- #
@@ -333,8 +391,9 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
     """The diet for a corpus with a declared floor budget, or None when none is declared.
 
     ``{"budget", "bytes", "pointers", "non_behavior", "proposals": [row...]}``; each proposal
-    row carries ``name, bytes, type, lane, behavior, use, injected, opened, unsafe,
-    evidence, after`` (the floor bytes once this and every earlier proposal is taken).
+    row carries ``name, bytes, type, lane, behavior, use, injected, opened, unsafe, young,
+    age_days, evidence, after`` (the floor bytes once this and every earlier proposal is
+    taken).
     Read-only. The replay runs only when the floor is over its budget."""
     budget = floor_budget(memory_dir)
     if not budget:
@@ -353,17 +412,24 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
     report = trim_safety_report(memory_dir, floor_text=text, names={r["name"] for r in rows},
                                 k=REPLAY_K, max_queries=REPLAY_PROMPTS, pools_for=_replay_pools(memory_dir))
     safety = {r["name"]: r for r in report.get("rows") or []}
+    now = time.time() if now is None else now
     uses, span = usage(memory_dir, [r["name"] for r in rows], now)
+    born = births(memory_dir, [r["name"] for r in rows])
+    need = max(span, float(MIN_AGE_DAYS))
     for r in rows:
         u = uses.get(r["name"]) or {"injected": 0, "opened": 0}
         s = safety.get(r["name"]) or {}
+        when, dated_by = born.get(r["name"]) or (None, None)
+        age = None if when is None else round(max(0.0, now - when) / 86400.0, 1)
         r.update(injected=u["injected"], opened=u["opened"], use=u["injected"] + u["opened"],
                  unsafe=_unsafe(s, report),
-                 waiting=not s.get("lost") and _unsafe(s, report))
+                 waiting=not s.get("lost") and _unsafe(s, report),
+                 young=age is None or age < need, age_days=age, dated_by=dated_by, age_bar=need)
         lane = "behavior-lane" if r["behavior"] else "not behavior-lane"
         r["evidence"] = (f"floor diet: a {r['bytes']}B floor line, {lane} (type: {r['type']}); "
-                         f"{_use_line(u, span)}; {_safety_line(s, report)}")
-    rows.sort(key=lambda r: (r["unsafe"], r["behavior"], r["use"], -r["bytes"], r["name"]))
+                         f"{_use_line(u, span)}{_age_line(r, span)}; {_safety_line(s, report)}")
+    rows.sort(key=lambda r: (2 if r["unsafe"] else int(r["young"]), r["behavior"], r["use"],
+                             -r["bytes"], r["name"]))
     left = total
     for r in rows:
         if left <= budget:
@@ -387,6 +453,10 @@ def queue_entries(memory_dir: str, make) -> List[dict]:
         elif r["unsafe"]:
             proposed = ("keep it: removing its line loses a recall hit (listed last); demote only "
                         "if you accept that")
+        elif r["young"]:
+            proposed = (f"wait: too new to judge on use; it is weighed with the rest once it is as "
+                        f"old as the span its use is counted over ({r['age_bar']:g} days today); demote "
+                        "it now only if you know it is not needed")
         else:
             proposed = (f"demote: remove its line from MEMORY.md (the memory stays, reachable by "
                         f"recall); the floor would be {r['after']:,}B of its {p['budget']:,}B budget")
