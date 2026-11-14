@@ -328,7 +328,11 @@ committed, so raising one deliberately in the same change is judged by the new n
 A declared `floor_bytes` also puts the floor on a diet: `hippo tend` lists one demotion per
 floor line until the floor would fit, lines whose memory is not a user or feedback memory
 first, the least used first (injected or opened in the last 30 days, as far back as the local
-ledgers reach). Each item says whether a replay of recent prompts shows the memory reaching a
+ledgers reach). A memory younger than the span those ledgers hold, or younger than seven days
+when they hold less, has not had the time to be used that the others had: its line is listed
+after the ones judged on a full span, its item says "wait", and the evidence gives its age
+(the commit that first added the file, or the file's last change when git does not date it).
+Each item says whether a replay of recent prompts shows the memory reaching a
 prompt only through its floor line; such a line is listed last and never proposed as safe.
 The replay ranks at most 50 prompts per `hippo tend` call and keeps each ranking in a
 gitignored cache, so later calls read it back; a line whose prompts are not all replayed yet
