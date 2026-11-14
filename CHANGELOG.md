@@ -7,6 +7,76 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.46.2 — 2026-11-13 — "A floor diet that leaves room"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. Two fixes to the floor diet (NAT-3). Both were found by running the
+diet on a copy of emgl's corpus with its real prompt history, which v1.46.1's measurement did
+not have, and because of them the floor budget was not declared on that corpus.
+
+**Operator action: none required.** A corpus that declares no `budgets.floor_bytes` sees no
+change. With one declared, things you may notice:
+- **`hippo tend` lists floor items while the floor is within its budget.** The diet now runs
+  to a target under the budget (a sixteenth of it), so a floor inside that room gets the
+  demotions that restore it. `"floor_headroom_bytes": 0` beside `floor_bytes` puts the
+  stopping point back on the budget.
+- **Some floor items say "wait: too new".** The memory is younger than the window its use is
+  counted over; the evidence line gives its age. `demote` still works on it.
+- **Doctor's floor budget line says more.** Within the budget but inside the room: `ok`, the
+  bytes to spare, and the command for the next line. Over the budget: where the diet ends.
+
+**Fixes**
+- **NAT-3 — the floor diet does not call a new memory "least used".** The diet orders floor
+  pointers least used first, counting the prompts that named a memory and the Read opens over
+  the span the usage ledgers hold. A memory created inside that span has had less time to be
+  used, so it sorted to the front for being new. Now a pointer whose memory is younger than
+  the span the ledgers hold, and never less than seven days, is not proposed on its use
+  count: it is listed after every pointer judged on a full span (and before the pointers that
+  lose a recall hit, which stay last), its item says "wait: too new to judge on use", and its
+  evidence line gives the age and the bar it is under. A memory's birth is the commit that
+  first added its file, read for the whole corpus by one `git log` (about 0.26 s on a
+  repository of 5,728 commits), only when the floor is over its target. A file git does not
+  date (a corpus outside git, a gitignored corpus, an unshipped outbox copy) is dated by its
+  last change.
+- **NAT-3 — a finished floor diet leaves room for the next floor pointer.** The diet stopped
+  at the budget, so within one line of it. The gate reports a finding when a change leaves the
+  floor over its budget and bigger, and `hippo ship --yes` refuses on a finding, so the first
+  save that added a floor pointer after a finished diet was refused. Now the diet runs to the
+  budget less a headroom: a sixteenth of the budget by default (512 of 8,192), or the new
+  optional key `"budgets": {"floor_headroom_bytes": N}`, a whole number from 0 to under
+  `floor_bytes`. Only the diet reads it. The gate is not changed: it judges against
+  `floor_bytes` alone, and a change that holds or shrinks a measure still passes.
+
+**Measured** on a copy of emgl's corpus with `"budgets": {"floor_bytes": 8192}` declared: a
+floor of 22,140 bytes, 150 floor pointers, usage ledgers holding 4.5 days.
+
+| | v1.46.1 | v1.46.2 |
+|---|---|---|
+| demotions proposed | 103 | 118 |
+| of the first 41, memories first committed inside the ledger span | 11 | 0 |
+| of the first 63 | 16 | 0 |
+| of all proposals | 23 | 0 |
+| floor when the diet is finished | 8,152 B | 7,601 B |
+| room under the budget | 40 B | 591 B |
+| floor pointers left | 47 | 32, 23 of them the new ones |
+
+A floor pointer add on that corpus is 100 to 230 bytes, so 591 bytes is two to five adds.
+v1.46.1's entry gave 95 demotions ending at 8,120 bytes, from a run with no prompt history
+(200 synthetic prompts). The v1.46.1 column above is the same code with the real history.
+
+**Limits, stated**
+- **Not run on a live corpus.** The counts are from a copy, and each memory's birth was read
+  from the real repository's history, because the copy's own history is two commits.
+- **The defaults are from one corpus.** Seven days, and a sixteenth of the budget. With the
+  headroom, one save over the target brings one demotion proposal.
+- **The age bar follows the ledgers, up to the 30-day window.** On a quiet corpus whose
+  ledgers hold all 30 days, a new memory waits 30 days before its use count is read.
+- **A corpus whose whole history is younger than the bar** (imported this week, or a shallow
+  clone) has every floor pointer wait. It errs toward proposing nothing.
+- **Outside git, a memory is as old as its file's last change,** so editing a memory makes its
+  floor pointer wait again.
+
 ## v1.46.1 — 2026-11-13 — "Follow-ups from the estate install"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
