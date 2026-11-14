@@ -114,14 +114,22 @@ releases:
     status: released
     re_bootstrap: "no"
     open_gates:
-      - "NAT-3's floor diet at emgl's size: 95 one-at-a-time demotions reach an 8,192-byte budget (22,140 to 8,120 bytes on a copy); measured, not changed. A reviewed batch is a ruling the owner has not made"
+      - "NAT-3's floor diet at emgl's size: 95 one-at-a-time demotions reach an 8,192-byte budget (22,140 to 8,120 bytes on a copy); measured, not changed. Closed since: a reviewed batch was then a ruling the owner had not made; the owner ruled on 2026-11-13 (V2Q-35) and the reviewed list ships in v1.47.0"
   - version: v1.46.2
     theme: "A floor diet that leaves room (two fixes to NAT-3, both measured on a copy of emgl's corpus with its prompt history: a memory newer than the usage window no longer ranks as least used, and a finished diet leaves room under the budget for the next floor pointer). No new roadmap item"
+    status: released
+    re_bootstrap: "no"
+    open_gates:
+      - "Closed after the release: a diet of 72 proposed demotions was worked on emgl's live floor (16,334 bytes, target 7,680), and the floor budget was declared there on 2026-11-14, once the floor was under its target. The copy's counts (118 demotions, 32 floor pointers left, 23 of them newer than the bar) are the copy's, not that run's"
+      - "The seven-day minimum age, the sixteenth of headroom and the `budgets.floor_headroom_bytes` key are defaults chosen from one corpus's measurement; the owner has not ruled on them"
+  - version: v1.47.0
+    theme: "The floor diet as one list (NAT-3, on the owner's ruling V2Q-35: `hippo tend diet` reviews every demotion and one verdict applies the reviewed list by its digest, each line judged again at its turn; a diet item names the other pointers on its line; a line the tend state keeps is proposed past). No new roadmap item"
     status: in review
     re_bootstrap: "no"
     open_gates:
-      - "Not run on a live corpus: emgl's floor budget is still undeclared. On the copy the diet now proposes 118 demotions and leaves 32 floor pointers, 23 of them newer than the bar"
-      - "The seven-day minimum age, the sixteenth of headroom and the `budgets.floor_headroom_bytes` key are defaults chosen from one corpus's measurement; the owner has not ruled on them"
+      - "The reviewed list has only met fixtures: it has not run on a live corpus"
+      - "Lines that carry more than one pointer are single verdicts, and the other pointers on a line are still not weighed. How many of emgl's floor lines are such lines is not counted"
+      - "`hippo tend` judges every diet line against the floor as it is, so with lanes declared it can show a line as safe that stops being safe once earlier lines go (8 shown and 4 safe on a fixture). The review weighs the floor again after each line; the queue's list is unchanged"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
@@ -739,7 +747,7 @@ amendment_1:
       status: done
       deps: [GAT-3, HOT-7]
       ruling: V2Q-23
-      note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds. v1.46.2: a pointer whose memory is younger than the span the usage ledgers hold (never less than seven days) waits instead of ranking as least used, and the diet runs to the budget less a headroom (a sixteenth, or `budgets.floor_headroom_bytes`) so the next floor pointer still passes the gate. On a copy of emgl's corpus with its prompt history: 103 proposals ending at 8,152 B with 23 new memories among them, then 118 ending at 7,601 B with none"
+      note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds. v1.46.2: a pointer whose memory is younger than the span the usage ledgers hold (never less than seven days) waits instead of ranking as least used, and the diet runs to the budget less a headroom (a sixteenth, or `budgets.floor_headroom_bytes`) so the next floor pointer still passes the gate. On a copy of emgl's corpus with its prompt history: 103 proposals ending at 8,152 B with 23 new memories among them, then 118 ending at 7,601 B with none. Worked on emgl's live corpus on 2026-11-13, as the owner's session reported it: 72 demotions from 16,334 B toward a 7,680 B target, 14 answered one at a time and 58 approved as one shown list; 3 of the approved were refused at apply because the line had come to lose a recall hit, and the floor ended 221 B over the target that day; the floor budget was declared there on 2026-11-14, once the floor was under its target. v1.47.0: the diet as one reviewed list (`hippo tend diet`, then one `demote` on `floor:diet` with the review's digest), each line judged again at its turn and skipped, never forced; lines with more than one pointer, and wait and keep-it items, are never in the list; a line the tend state keeps is proposed past. On a fixture with lanes declared, 8 lines read as safe against the floor as it is and 4 remain safe once the first 4 are gone, with no new prompt"
     - id: NAT-4
       title: "Census flags native memory that belongs to no corpus"
       size: S
@@ -961,4 +969,8 @@ amendment_2:
     - id: V2Q-34
       question: "The release"
       ruling: "v1.46.0 prepared ahead on the rehearsed tree; an item that misses its gate is not shipped; merges and tags wait for the owner"
+      status: ratified
+    - id: V2Q-35
+      question: "The floor diet as one reviewed list"
+      ruling: "the owner's own word, 2026-11-13 and 2026-11-14, not the delegation: add the floor diet's demotions to the V2Q-1 (b) class, as one verdict over an enumerated list the user was shown, applied by the digest of the floor's bytes and that list; each line judged again at its turn and skipped, never forced; no other tend kind"
       status: ratified

@@ -54,7 +54,12 @@ guiding_invariants:
   - degradation must be legible — every silent-fallback path gains a
     user-visible signal somewhere (nudge, doctor line, producer)
   - destructive/corrective writes are per-item and agent-gated; no bulk
-    autonomous sweeps (no --all, no auto-archive, no blind re-baseline)
+    autonomous sweeps (no --all, no auto-archive, no blind re-baseline). A
+    batch is allowed in one shape only, one verdict over an enumerated set
+    the user was shown, applied by the digest of that list, so nothing is
+    applied that was not listed and nothing runs by itself (amended at
+    v1.47.0 for the floor diet's reviewed list; ROADMAP.v2.yaml rulings
+    V2Q-1, V2Q-20 and V2Q-35)
   - one canonical name/path per concept; renames are clean breaks with a
     version bump, not compat shims
   - the UserPromptSubmit hot path stays pure retrieval — no LLM calls, no
