@@ -11,6 +11,21 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.46.2: the floor diet waits for new memories and leaves room under the budget
+
+**Nothing rebuilds.** The index schema is unchanged.
+
+**Only a corpus that declares `"budgets": {"floor_bytes": N}` sees a change.**
+
+- The diet now runs to a target under the budget: the budget less a sixteenth of it (7,680
+  bytes for 8,192). A floor that an earlier diet left just under its budget is inside that
+  room, so `hippo tend` proposes a few more demotions. That room is what lets the next save's
+  floor pointer through `hippo ship --yes`. To choose the room yourself, add
+  `"floor_headroom_bytes": N` beside `floor_bytes`; `0` stops the diet at the budget, as
+  before.
+- A floor item that says "wait: too new" names a memory younger than the window its use is
+  counted over. Leave it; it is weighed with the rest once it is old enough.
+
 ### v1.46.1: two fixes; the conventions refresh follows your write path
 
 **Nothing rebuilds.** The index schema is unchanged.
