@@ -20,9 +20,10 @@ one at a time, then 58 approved as one list a session showed and applied one
 `hippo tend apply` at a time.
 
 **Operator action: none required.** A corpus that declares no `budgets.floor_bytes` sees no
-change: no review, no record, no new key in its tend state. The single-item path is unchanged
-too: the same `hippo tend apply floor:diet:<name> --verdict demote`, the same queue. With a
-budget declared, things you may notice:
+change: no review, no record, no new key in its tend state. The single-item verdict is
+unchanged too: the same `hippo tend apply floor:diet:<name> --verdict demote`. Its queue
+changes in one case, a diet line the tend state keeps (below). With a budget declared, things
+you may notice:
 - **`hippo doctor` starts the diet at `hippo tend diet`**, not `hippo tend next --kind floor`.
 - **A floor item names the other memories on its line** when the line points at more than one,
   and `hippo tend show floor:diet:<name>` prints the line itself.
