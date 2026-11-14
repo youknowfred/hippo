@@ -122,7 +122,7 @@ not frozen.
 | `mute` | list of SessionStart signal names, or a comma string | `attention.py` | declares data |
 | `acknowledged_findings` | list of `{file, rule, sha256, reason, date}` | `lint_ack.py`, `review.py` | declares data |
 | `journals` | list of memory filename globs | `lanes.py` | declares data |
-| `budgets` | object of positive integers: `files`, `floor_bytes`, `floor_lines`, `journals` | `gate_cli.py`, `floor_diet.py` | declares data |
+| `budgets` | object of positive integers: `files`, `floor_bytes`, `floor_lines`, `journals`; and `floor_headroom_bytes`, an integer from 0 to under `floor_bytes` that only the floor diet reads | `gate_cli.py`, `floor_diet.py` | declares data |
 | `ledgers` | list of at most four `{name, path, id_re, entry_key, status_key}` | `ledger.py` | declares data |
 | `write_path` | `"direct"` or `"outbox"` | `outbox.py` | `hippo trust policy --accept` on each machine |
 | `gate` | `{"write": "warn" \| "deny" \| "off"}` | `gate_hook.py`, `doctor_checks_gate.py` | `deny` needs `hippo trust policy --accept`, and the committed file at HEAD must say `deny` too |

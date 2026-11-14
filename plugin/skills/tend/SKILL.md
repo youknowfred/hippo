@@ -89,7 +89,8 @@ What each kind needs before its verdict:
   finds it), or, when the user wants it kept, `skip` it or acknowledge it (`hippo lint-floor`
   prints the entry to add).
 - **floor**, a `floor:diet:<name>` item (a corpus that declares `budgets.floor_bytes`) — the
-  floor is over its budget and this line is the next one to move out. Read the evidence (its
+  floor is over its budget, or within it but inside the room the diet keeps free so the next
+  new floor line still ships, and this line is the next one to move out. Read the evidence (its
   type, how often it was used, and the trim-safety replay), then `demote`: tend removes that
   one line from `MEMORY.md` (the outbox's floor copy in outbox mode) and nothing else; the
   memory file stays and recall still finds it. An item that says "keep it" loses a recall hit
