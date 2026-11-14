@@ -4,7 +4,9 @@ The same engine as ``hippo tend`` (``memory.tend``): list the derived queue, sho
 item with its evidence and verdicts, apply ONE verdict, or manage snoozes, skips and owner
 holds. Reads and writes gate on corpus trust like every other corpus tool; ``apply`` stays
 per-item (there is no apply-all), and each verdict routes to the engine call that already
-owns that write.
+owns that write. The one verdict over more than one item is NAT-3's reviewed floor diet:
+action ``diet`` shows the list and its digest, and ``apply`` with id ``floor:diet`` and
+that digest demotes exactly what was listed (``floor_diet_batch``).
 """
 
 from __future__ import annotations
@@ -82,6 +84,10 @@ def _tool_tend(args: Dict[str, Any]):
         top = result["pending"][0] if result["pending"] else None
         text = tend.render_next(top, memory_dir, repo_root, Q.total_pending(result))
         return text, _structured(action, text, result, [top] if top else [])
+    if action == "diet" or (action == "show" and item == "floor:diet"):
+        from .floor_diet_batch import review  # NAT-3: every diet line as one list, and a digest
+
+        return review(memory_dir, repo_root, surface="mcp")["message"]
     if action == "release":
         key = item or kind
         if not key:
@@ -109,6 +115,7 @@ def _tool_tend(args: Dict[str, Any]):
                 item, verdict, memory_dir=memory_dir, repo_root=repo_root,
                 winner=_opt_str(args, "winner"), loser=_opt_str(args, "loser"),
                 superseded_by=_opt_str(args, "superseded_by"),
+                digest=_opt_str(args, "digest"), leave_out=args.get("except"),
             )
         elif action == "snooze":
             days = args.get("days")
@@ -118,5 +125,5 @@ def _tool_tend(args: Dict[str, Any]):
             r = tend.skip(item, memory_dir=memory_dir, repo_root=repo_root)
         else:
             return ("tend: action is one of list (default), next, show, apply, snooze, skip, "
-                    "hold, release, add_decision, restore, snapshot, fixtures, interview, link_proposals.")
+                    "hold, release, diet, add_decision, restore, snapshot, fixtures, interview, link_proposals.")
     return r["message"] if r["ok"] else f"refused — {r['message']}"

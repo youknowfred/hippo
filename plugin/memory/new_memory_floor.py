@@ -255,7 +255,9 @@ def _without_pointer(text: str, name: str) -> Tuple[str, list]:
     return "\n".join(ln for ln in lines if not _points_at(ln, name)), gone
 
 
-def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] = None) -> dict:
+def _remove_floor_pointer(
+    memory_dir: str, name: str, floor_dir: Optional[str] = None, expect: Optional[list] = None
+) -> dict:
     """Drop ``name``'s floor pointer line from MEMORY.md — ``_append_floor_pointer``'s inverse.
 
     RCH-1: when /hippo:promote lifts a user/feedback memory OUT of the project corpus, the
@@ -269,17 +271,22 @@ def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] =
     - ``skipped`` — nothing written; ``reason`` names why: ``MEMORY.md missing``,
       ``pointer not present`` (idempotence — safe to call for never-floor-linked types),
       or ``MEMORY.md unreadable/write failed: ...``.
+
+    NAT-3: ``expect`` is the line(s) a reviewer was shown. With it the removal is exact: if
+    the lines that would go are not those, nothing is written and the outcome is ``skipped``
+    with that reason. The check runs inside the compare-and-swap, on the bytes it replaces.
     """
     from .atomic import update_text_cas
 
     # OUT-1: ``floor_dir`` is the outbox when the removal belongs in its floor copy.
     path = os.path.join(floor_dir or memory_dir, "MEMORY.md")
-    removed = {"any": False}
+    removed = {"any": False, "other": False}
 
     def transform(text: str) -> Optional[str]:
         new_text, gone = _without_pointer(text, name)
-        removed["any"] = bool(gone)
-        return new_text if gone else None
+        removed["other"] = bool(gone) and expect is not None and gone != list(expect)
+        removed["any"] = bool(gone) and not removed["other"]
+        return new_text if removed["any"] else None
 
     try:
         update_text_cas(path, transform)  # COR-18 + RWY-3
@@ -287,6 +294,8 @@ def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] =
         return {"status": "skipped", "reason": "MEMORY.md missing"}
     except Exception as exc:
         return {"status": "skipped", "reason": f"MEMORY.md unreadable or write failed: {exc}"}
+    if removed["other"]:
+        return {"status": "skipped", "reason": "its floor line is not the line that was reviewed"}
     if not removed["any"]:
         return {"status": "skipped", "reason": "pointer not present"}
     return {"status": "removed", "reason": None}

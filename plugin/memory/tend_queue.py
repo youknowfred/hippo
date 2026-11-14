@@ -19,7 +19,9 @@ Entry fields:
   - ``target``    the memory name, seed file, pair or file the decision is about
   - ``evidence``  one line: why it is queued
   - ``proposed``  the verdict most likely right, for the human to confirm or change
-  - ``gate``      the per-item gate that applies; tend never batches past it
+  - ``gate``      the per-item gate that applies; tend never batches past it (NAT-3's
+                  reviewed floor diet is one verdict over a list the user was shown, and
+                  judges each line again at its turn: ``floor_diet_batch``)
   - ``rank``      the kind's rank (lower first), then source order within a kind
 
 Tend state (TND-2 writes it; this module reads it): ``snooze`` hides an entry until a date,
@@ -362,14 +364,20 @@ def state_path(memory_dir: str) -> str:
 
 def read_state(memory_dir: str) -> dict:
     """``{"snooze": {id: until_epoch}, "skip": {id: evidence_hash}, "hold": {key: {...}}}``.
-    A hold key is a kind (``derivation``) or an entry id. Never raises."""
+    A hold key is a kind (``derivation``) or an entry id. A fourth key, ``review``, is there
+    only once a floor diet review was shown (NAT-3): its digest, the hash of the floor it
+    read and the names it listed, which the batch verdict quotes; every state write carries
+    it along. Never raises."""
     empty = {"snooze": {}, "skip": {}, "hold": {}}
     try:
         with open(state_path(memory_dir), "r", encoding="utf-8") as fh:
             doc = json.load(fh)
         if not isinstance(doc, dict):
             return empty
-        return {k: dict(doc.get(k) or {}) for k in empty}
+        out = {k: dict(doc.get(k) or {}) for k in empty}
+        if isinstance(doc.get("review"), dict) and doc["review"]:
+            out["review"] = dict(doc["review"])
+        return out
     except Exception:
         return empty
 

@@ -343,6 +343,25 @@ evidence names the other memories that leave the floor with it, which the diet d
 separately, and `hippo tend show <id>` prints the line itself. `hippo doctor` shows the floor against the budget and how to start, and
 suggests 8,192 bytes when a floor without a budget is over the warn line.
 
+A long diet does not need one yes per line. `hippo tend diet` prints every demotion the diet
+would serve as one list, in order, each with its evidence and the floor line itself; then
+what a batch never takes, each with its line: the "wait" and "keep it" items, and any line
+that points at more than one memory (the others on it were not weighed, so that line takes
+its own `demote`); then where the floor would end against its target and budget, and a digest
+of the floor's bytes and the list. It demotes nothing. `hippo tend apply floor:diet --verdict demote
+--digest <digest>` then demotes exactly the lines that list showed, and `--except
+<name>,<name>` leaves some of them on the floor (a name the list did not show refuses the
+whole command). It is refused if `MEMORY.md` is no longer the bytes that were reviewed. Each
+line is judged again as its turn comes, on the floor as the earlier lines leave it and on the
+prompts on record at that moment, which include the ones typed since the review: a line that
+would now lose a recall hit, or whose replay cannot be finished, is skipped, never forced. The
+answer names every skipped line and why, says where the floor ended, and names what the diet
+proposes next. To keep a line on the floor whatever its use, `hippo tend hold
+floor:diet:<name> --reason "<why>"`; the review plans around it. The review and the verdict
+finish the replay first, so they can take up to a minute on a large corpus with a cold cache.
+The review keeps its digest, the floor's hash and the listed names in the gitignored tend
+state, and nothing in the corpus.
+
 The diet does not stop at the budget. The gate fails a change that leaves the floor over its
 budget and bigger, so a floor trimmed to a few bytes under it would have its next new pointer
 refused by `hippo ship --yes`. The diet runs to a target under the budget instead: the budget
@@ -356,7 +375,7 @@ or less the bytes you declare:
 `floor_headroom_bytes` is a whole number from 0 to under `floor_bytes`; `0` stops the diet at
 the budget, and any other value is read as undeclared. Only the diet reads it: the gate
 judges against `floor_bytes` alone, and a floor between the target and the budget is within
-its budget. `hippo doctor` says so and names the command that proposes the next line.
+its budget. `hippo doctor` says so and names the command that lists the lines to move out.
 
 `hippo gate --install` shows the pre-commit hook it would write and where (it follows
 `core.hooksPath` and linked worktrees); `--install --yes` writes it. It never overwrites a

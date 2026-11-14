@@ -787,14 +787,17 @@ _TOOLS = [
             "the likely verdict and the verdicts it accepts; 'show' does the same for one id; 'apply' executes ONE "
             "verdict on ONE item (there is no apply-all — confirm each with the user first); "
             "'snooze' (days), 'skip' (until its evidence changes), 'hold' (an owner decision "
-            "with a reason, on a kind or an id; held items count as resolved) and 'release'."
+            "with a reason, on a kind or an id; held items count as resolved) and 'release'. "
+            "'diet' shows every floor-diet demotion as one list with a digest; after the user "
+            "has read that list and agreed, 'apply' with id='floor:diet', verdict='demote' and "
+            "that digest demotes exactly the listed lines (except=[names] leaves some out)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "next", "show", "apply", "snooze", "skip", "hold", "release"],
+                    "enum": ["list", "next", "show", "apply", "snooze", "skip", "hold", "release", "diet"],
                 },
                 "id": {"type": "string", "description": "an item id from list/next (kind:target)"},
                 "kind": {
@@ -807,6 +810,9 @@ _TOOLS = [
                 "superseded_by": {"type": "string", "description": "reverify demote: the successor memory"},
                 "days": {"type": "number", "description": "with snooze (default 7)"},
                 "reason": {"type": "string", "description": "with hold: why (required)"},
+                "digest": {"type": "string", "description": "with apply id='floor:diet': the digest action='diet' printed"},
+                "except": {"type": "array", "items": {"type": "string"},
+                           "description": "with apply id='floor:diet': listed names to leave on the floor"},
             },
         },
     },

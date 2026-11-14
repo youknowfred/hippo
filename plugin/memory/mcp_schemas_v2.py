@@ -133,7 +133,9 @@ V2_TOOLS: List[dict] = [
             "also keeps (promote, or a drifted rule), broken links, floor "
             "overflow, citation re-derivation. action list (default) | next | show (id) | apply "
             "(id, verdict: ONE item, after the user agrees) | snooze | skip | hold (kind or id, "
-            "reason) | release. Also: add_decision (text) records a decision the user made for "
+            "reason) | release | diet (every floor-diet demotion as one list with a digest; after "
+            "the user reads it and agrees, apply id='floor:diet' verdict='demote' with that digest "
+            "demotes exactly the listed lines, except=[names] spared). Also: add_decision (text) records a decision the user made for "
             "the capture drain; restore (seed, or all) brings back an expired capture; "
             "snapshot (stamp) backs up the corpus (a copy in .hippo/snapshots/, or the "
             "commit git restores); fixtures (step draft or "
@@ -142,7 +144,7 @@ V2_TOOLS: List[dict] = [
         ),
         "inputSchema": _schema({
             "action": {"type": "string", "enum": [
-                "list", "next", "show", "apply", "snooze", "skip", "hold", "release",
+                "list", "next", "show", "apply", "snooze", "skip", "hold", "release", "diet",
                 "add_decision", "restore", "snapshot", "fixtures", "interview", "link_proposals"]},
             "id": dict(_S, description="an item id (kind:target)"),
             "kind": _S,
@@ -152,6 +154,9 @@ V2_TOOLS: List[dict] = [
             "superseded_by": _S,
             "days": {"type": "number"},
             "reason": _S,
+            "digest": dict(_S, description="with apply id='floor:diet': the digest diet printed"),
+            "except": {"type": "array", "items": _S,
+                       "description": "with apply id='floor:diet': listed names to leave on the floor"},
             "text": dict(_S, description="with add_decision"),
             "seed": dict(_S, description="with restore: an expired seed or session id"),
             "all": _B,

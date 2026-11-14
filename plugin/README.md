@@ -15,7 +15,7 @@ one-line "which one do I want?" guide for recall-vs-doctor, tend-vs-dream and th
 | `/hippo:setup` | Once per machine: builds the shared venv and warms the offline model cache. Once per project (or a fresh clone): seeds `.claude/memory/`, the cross-machine symlink and the index; a linked git worktree needs nothing (it resolves the main checkout's corpus) |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
 | `/hippo:recall` | Deliberately recall the corpus ("what do you remember about X"), list it by type, or get the receipt for why a memory surfaced (or didn't) for a query |
-| `/hippo:tend` | The one maintenance queue: pending captures, memories whose cited code moved, contradictions, duplicates, broken baselines and links, floor overflow, rule proposals, changes waiting for re-consent; one verdict at a time |
+| `/hippo:tend` | The one maintenance queue: pending captures, memories whose cited code moved, contradictions, duplicates, broken baselines and links, floor overflow, rule proposals, changes waiting for re-consent; one verdict at a time (a long floor diet can be reviewed as one list and applied by its digest) |
 | `/hippo:doctor` | Fast health check of the plugin's install and the corpus's wiring, plus the consent step; on request, the deep judgment-based audit of the corpus's content |
 | `/hippo:dream` | The offline link pass: replay recall over each memory's self-query and surface the latent edges |
 | `/hippo:review` | Review a memory diff like a pull request: what each change is, the lints on the touched files, how recall would shift |
