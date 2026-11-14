@@ -95,7 +95,7 @@ status beside the row, dated, so nobody has to type it into a memory.
 
 The example is a Linear mirror, the setup this feature was built for: a `LINEAR-SNAPSHOT.yaml`
 that the repo's own script refreshes from Linear and commits. Any tracker works the same way
-(Jira, GitHub Issues, a hand-kept file), because hippo reads only the committed file. It
+(Jira, GitHub Issues, a hand-kept file), because hippo reads only that file. It
 never calls Linear's API or any other tracker's, holds no tracker credential, and writes
 nothing back. Up to four ledgers can be declared. The README's
 [hippo and Linear](README.md#hippo-and-linear-or-any-issue-tracker) section has the whole
@@ -114,7 +114,10 @@ The declaration:
 
 A row whose name or description cites `ENG-901` then ends `· ENG-901 In Progress (snapshot
 2026-08-26)`, at most two ids per row, in the prompt hook's rows, `hippo recall` and
-`hippo inspect`. The date is the mirror's last commit. hippo reads the file line by line: an
+`hippo inspect`. The date is the mirror's last commit, or the day the file was last written
+when git does not track it: a mirror may be an ignored, machine-local file that your own job
+refreshes. Where several ledgers are declared, the first that knows an id answers for it, so
+a local mirror can sit in front of a committed one. hippo reads the file line by line: an
 entry starts at an `id: <an id_re match>` line (`- id:` in a list too) and its status is the
 first `state:` line at that key's indent before the next entry; nothing else in the file is
 read. The `path` must stay inside the repo, `id_re` must be a plain pattern (no nested
