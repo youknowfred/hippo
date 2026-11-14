@@ -1,19 +1,19 @@
 ---
 name: hippo-enhancement-roadmap
-description: ROADMAP.enhancements.yaml — executable post-v1 capability roadmap with a capstone-memory session protocol
+description: planning/ROADMAP.enhancements.yaml — executable post-v1 capability roadmap with a capstone-memory session protocol
 metadata: 
   node_type: memory
   type: project
   originSessionId: 607b0701-e396-4c92-8070-0cbb31a38e60
   last_verified: "2026-07-17T00:37:15.803267+00:00"
   verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:19:08.950957+00:00"
-  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.yaml", "ROADMAP.enhancements2.yaml"]
+  cited_paths: ["planning/ROADMAP.enhancements.yaml", "planning/ROADMAP.yaml", "planning/ROADMAP.enhancements2.yaml"]
   source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
   source_commit_time: 1784354967
 ---
 
-`ROADMAP.enhancements.yaml` (hippo repo root, DRAFT, created 2026-07-08) is the
-EXECUTABLE form of [[hippo-enh-exploration-r2]] / EXPLORATIONS.md — the
+`planning/ROADMAP.enhancements.yaml` (hippo repo, DRAFT, created 2026-07-08) is the
+EXECUTABLE form of [[hippo-enh-exploration-r2]] / planning/EXPLORATIONS.md — the
 vetted enhancement catalog formalized into a real roadmap for **multi-session
 implementation**. 6 workstreams (SIG/RUL/RCL/GOV/GRW/RCH), **41 items**, **7
 work tiers** v1.1.0→v1.7.0 (T1 Positive-context & dark-signals · T2 The
@@ -57,6 +57,6 @@ When work begins, create `hippo-enh-t1-signals` as the first capstone.
 started" state above is the design-time record):** round 1 shipped end to end — T1–T7,
 v1.1.0→v1.7.0, capstone chain [[hippo-enh-t1-signals]] → [[hippo-enh-t7-learned-ranking]].
 The same two-ledger protocol (per-item `status:` + capstone chain) then drove round 3
-(T14–T17, all shipped, v1.18.0–v1.19.0) and now round 2 (ROADMAP.enhancements2.yaml:
+(T14–T17, all shipped, v1.18.0–v1.19.0) and now round 2 (planning/ROADMAP.enhancements2.yaml:
 T8 + T9 shipped 2026-07-16, PRs #68/#70; T10 SEN in flight). This memory stays as the
 protocol's design record — the protocol itself is unchanged and still governs.

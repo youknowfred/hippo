@@ -5,7 +5,7 @@ as recommended ("i ratify this all"). This document does not modify `ROADMAP.yam
 `STABILITY.md`, or any `ROADMAP.enhancements*.yaml`; CON-4 charters the train in
 `ROADMAP.v2.yaml`. Authored 2026-10-03 at **v1.39.0** (`0d65178`). Companion to
 [`ROADMAP.v1.md`](ROADMAP.v1.md) (same section shape: thesis → items → train → decisions → is/is-not
-→ top moves) and to [`STABILITY.md`](STABILITY.md), whose frozen surface a major version is the
+→ top moves) and to [`STABILITY.md`](../STABILITY.md), whose frozen surface a major version is the
 one chance to redraw.
 
 **Method.** The run was sized to the session's 10-agent guideline and the budget-lean fan-out rule.

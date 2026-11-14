@@ -7,7 +7,7 @@ metadata:
   originSessionId: 5e683ae7-b857-47d3-a37d-daafd56e45e2
   last_verified: "2026-07-13T04:49:53.242134+00:00"
   verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:40:59.387597+00:00"
-  cited_paths: ["ROADMAP.enhancements.yaml", "plugin/memory/lint_floor.py", "plugin/memory/recall.py", "plugin/memory/export_agents.py", "tests/test_export_agents.py", "ROADMAP.yaml", ".github/workflows/release.yml", "plugin/memory/eval_recall.py", "tests/test_fixture_drafts.py"]
+  cited_paths: ["planning/ROADMAP.enhancements.yaml", "plugin/memory/lint_floor.py", "plugin/memory/recall.py", "plugin/memory/export_agents.py", "tests/test_export_agents.py", "planning/ROADMAP.yaml", ".github/workflows/release.yml", "plugin/memory/eval_recall.py", "tests/test_fixture_drafts.py"]
   source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
   source_commit_time: 1784589679
 ---
@@ -23,7 +23,7 @@ browsable only on the PR's Commits tab); main holds ONE commit for the tier's wo
 far. Post-merge suite re-verified directly on main: 1462 passed / 12 deselected,
 identical to the PR's own count.** Tier status flipped planned → **in_progress** (NOT
 done — done_means requires the SIG-5 salience decision, which cannot be made yet);
-dated gate-state comments written into ROADMAP.enhancements.yaml on the tier and on
+dated gate-state comments written into planning/ROADMAP.enhancements.yaml on the tier and on
 RUL-7.
 
 GATE STATE, re-verified against the live tree this session (the post-T2 audit_note was
@@ -131,7 +131,7 @@ index_dir (the shape _expand_neighbors documents as no-edges), so GRA-1/GRA-4 ne
 ran inside eval; index_dir now threads through every metric. (2) main()'s ambient
 fixture defaults applied even with explicit --memory-dir — a false-verdict source once
 gated; CLI hermeticity guard added (explicit --memory-dir → only explicit fixtures).
-FIRST INSTRUMENT FINDING (recorded in the fixture header + ROADMAP.yaml note):
+FIRST INSTRUMENT FINDING (recorded in the fixture header + planning/ROADMAP.yaml note):
 multi-hop = 1.0 bm25-only vs 0.0 dense+bm25 — under dense every entry has a primary
 rank so the knee's graph exemption never fires and GRA-1 expansion is structurally
 suppressed; a GRA-1/GRA-7 ranking gap, deliberately NOT fixed here (ranking change =

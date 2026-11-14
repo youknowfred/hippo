@@ -7,7 +7,7 @@ body:
       value: |
         hippo's engine is intentionally scoped (local, git-native, offline, review-gated, no LLM on
         the hot path). Requests that fit that identity are most likely to land — see the `non_goals`
-        in [ROADMAP.yaml](https://github.com/youknowfred/hippo/blob/main/ROADMAP.yaml) for what's
+        in [planning/ROADMAP.yaml](https://github.com/youknowfred/hippo/blob/main/planning/ROADMAP.yaml) for what's
         deliberately out of scope (cloud/server, Windows, autonomous bulk writes, LLM on the hot path).
   - type: textarea
     id: problem

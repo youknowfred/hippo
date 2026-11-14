@@ -31,7 +31,7 @@
 #
 # Branch protection for `main` (QUA-12 — the ruleset of record, versioned here). APPLIED to
 # `main` 2026-07-19 via the API, the repo now being public — Q2(r5), dated owner entry on
-# REL-2 in ROADMAP.enhancements5.yaml. As applied:
+# REL-2 in planning/ROADMAP.enhancements5.yaml. As applied:
 #   - Require a pull request before merging. ONE solo-maintainer deviation from the text as
 #     originally codified: code-owner review is OFF with 0 required approvals — CODEOWNERS
 #     is `* @youknowfred` and GitHub forbids self-approval, so requiring code-owner review

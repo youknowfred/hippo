@@ -1,13 +1,13 @@
 ---
 name: hippo-v1-roadmap-proposal
-description: "ROADMAP.v1.md — the v0.8→v1.0 OSS-launch roadmap (2026-07-08 recon+design session): APPROVED AND FULLY EXECUTED, kept as the historical design record — the whole 4-release arc shipped (v0.8 'Safe in the open' → v0.9 'Proven for strangers' → v0.10 → v1.0), the repo flipped public 2026-07-11, and its 'sharpest blocker' SEC-5 shipped in the v0.8.0 trust spine"
+description: "planning/ROADMAP.v1.md — the v0.8→v1.0 OSS-launch roadmap (2026-07-08 recon+design session): APPROVED AND FULLY EXECUTED, kept as the historical design record — the whole 4-release arc shipped (v0.8 'Safe in the open' → v0.9 'Proven for strangers' → v0.10 → v1.0), the repo flipped public 2026-07-11, and its 'sharpest blocker' SEC-5 shipped in the v0.8.0 trust spine"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 607b0701-e396-4c92-8070-0cbb31a38e60
   last_verified: "2026-07-13T04:49:53.402288+00:00"
   verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T22:48:23.131700+00:00"
-  cited_paths: ["ROADMAP.yaml", "plugin/memory/trust.py", "plugin/memory/recall.py", "plugin/memory/archive.py"]
+  cited_paths: ["planning/ROADMAP.yaml", "plugin/memory/trust.py", "plugin/memory/recall.py", "plugin/memory/archive.py"]
   source_commit: "32ee471c7dfb5f9c5cc33e26ac2eac2151bc6c00"
   source_commit_time: 1784580625
 ---
@@ -20,9 +20,9 @@ SHIPPED in the v0.8.0 trust spine** (`trust.corpus_consent_sample` is live; see
 [[hippo-v080-trust-spine]]). The OQ-7..OQ-10 flags were all decided long ago (OQ-8 became
 STABILITY.md's compat policy). Nothing here is pending.
 
-Deep recon + roadmap-design session on 2026-07-08 produced `ROADMAP.v1.md` at the
+Deep recon + roadmap-design session on 2026-07-08 produced `planning/ROADMAP.v1.md` at the
 hippo repo root — at the time a DRAFT proposal for the v0.8.0→v1.0.0 open-source launch,
-pending owner review (nothing decided/implemented yet; `ROADMAP.yaml` untouched).
+pending owner review (nothing decided/implemented yet; `planning/ROADMAP.yaml` untouched).
 
 Verified ground truth: the entire planned `release_train` v0.2.0→v0.7.0 SHIPPED;
 only the `exploratory` set remained. Adversarial verdict on those 7 (checked vs
@@ -47,7 +47,7 @@ Flags decisions to revisit: OQ-7 (amend OQ-6 trust posture), OQ-8 (post-1.0
 compat policy vs the clean-break invariant), OQ-9 (record INT-6 cut), OQ-10
 (RET-5 salience default-on). Related: [[hippo-v070-release-pr]].
 
-**Companion: `EXPLORATIONS.md`** (repo root, same session, DRAFT) — a 15-agent
+**Companion: `planning/EXPLORATIONS.md`** (repo root, same session, DRAFT) — a 15-agent
 divergent-ideation + adversarial-vetting catalog of NET-NEW post-v1 (v1.1+)
 capability bets. Two meta-insights: (1) activate the dark signals hippo already
 collects but discards (episode buffer read only by capture; salience machine

@@ -563,8 +563,8 @@ worktree).
 | Platform | Status |
 |---|---|
 | macOS | **Fully supported** — the primary development platform; CI runs the full suite on macOS |
-| Linux | **Fully supported** — CI runs the full suite on Ubuntu. Without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is XDG-aware: `${XDG_CACHE_HOME:-~/.cache}/hippo-memory` ([ROADMAP.yaml](ROADMAP.yaml), OSP-2) |
-| Windows | **Out of scope** — a decision, not an omission ([ROADMAP.yaml](ROADMAP.yaml), decision OQ-2 + non_goals): the hooks are bash and the engine is untested there. Revisit only on concrete adoption evidence |
+| Linux | **Fully supported** — CI runs the full suite on Ubuntu. Without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is XDG-aware: `${XDG_CACHE_HOME:-~/.cache}/hippo-memory` ([planning/ROADMAP.yaml](planning/ROADMAP.yaml), OSP-2) |
+| Windows | **Out of scope** — a decision, not an omission ([planning/ROADMAP.yaml](planning/ROADMAP.yaml), decision OQ-2 + non_goals): the hooks are bash and the engine is untested there. Revisit only on concrete adoption evidence |
 
 **Claude Code 2.1.269 or newer.** That is the first version that sets plugin options from
 `/config` (the attention setting); `/hippo:doctor` prints the running version against this
@@ -662,6 +662,7 @@ plugin/
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
 └── skills/                       # the nine verbs, plus 12 v1 names routing to them (see Commands above)
 tests/                            # hermetic test suite (no network/model download by default)
+planning/                         # roadmaps, exploration notes and design specs (planning/README.md)
 bench/                            # the reproducible recall benchmark (bench/run.sh)
 demo/                             # git_drift.sh: staleness in five seconds
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
