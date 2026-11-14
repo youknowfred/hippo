@@ -453,6 +453,31 @@ def test_driving_tend_item_by_item_reaches_the_budget(tmp_path, monkeypatch):
     assert FD.check_floor_budget(DoctorContext(md, repo))["status"] == "ok"
 
 
+@pytest.mark.parametrize("how", ["hold", "snooze", "skip"])
+def test_a_line_the_tend_state_keeps_stays_and_the_diet_proposes_another(tmp_path, monkeypatch, how):
+    """A held line used to count toward the target all the same: when it covered what was
+    left, the queue showed no diet item while the floor stayed over its target."""
+    md, repo = _corpus(tmp_path, monkeypatch, budget=100_000)
+    size = _floor_bytes(md)
+    _set_budgets(md, floor_bytes=size - 20, floor_headroom_bytes=0)  # any one line covers it
+    first = _diet_ids(md, repo)
+    assert len(first) == 1
+    keep = {"hold": lambda: TD.hold(first[0], "the owner wants it loaded", memory_dir=md, repo_root=repo),
+            "snooze": lambda: TD.snooze(first[0], 3, memory_dir=md, repo_root=repo),
+            "skip": lambda: TD.skip(first[0], memory_dir=md, repo_root=repo)}[how]
+    assert keep()["ok"]
+    after = _diet_ids(md, repo)
+    assert len(after) == 1 and after != first  # before: [] with the floor still over its target
+    _entry, state = TD.find_entry(md, repo, first[0])
+    assert state == {"hold": "held", "snooze": "snoozed", "skip": "skipped"}[how]  # still a queue item
+    proposed = next(e for e in FD.queue_entries(md, Q._entry) if e["id"] == after[0])["proposed"]
+    assert proposed.startswith("demote") and f"{size - FD.plan(md)['proposals'][-1]['bytes']:,}B" in proposed
+    assert TD.apply(after[0], "demote", memory_dir=md, repo_root=repo)["ok"]
+    assert _floor_bytes(md) <= size - 20 and _diet_ids(md, repo) == []
+    kept_line = f"]({first[0].split(':', 2)[2]}.md)"
+    assert kept_line in open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+
+
 # --------------------------------------------------------------------------- #
 # Outbox mode: the floor copy, never the working tree
 # --------------------------------------------------------------------------- #

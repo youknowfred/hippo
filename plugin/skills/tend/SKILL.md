@@ -103,7 +103,9 @@ What each kind needs before its verdict:
   "wait" is not judged yet: list the queue again (each call replays more recent prompts).
   An item that says "wait: too new" names a memory younger than the window its use is
   counted over (the evidence gives its age): leave it, and it is weighed with the rest once
-  it is old enough; `demote` it now only if the user says it is not needed.
+  it is old enough; `demote` it now only if the user says it is not needed. When the user
+  wants a line kept whatever its use, `hippo tend hold floor:diet:<name> --reason "<why>"`:
+  the line stays and the diet proposes the next one in its place.
   **A long diet goes as one list.** With more than a few `floor:diet:` items, run
   `hippo tend diet` instead of walking them. It prints every demotion the batch would make,
   in the diet's order (evidence and the floor line itself), then what a batch never takes
