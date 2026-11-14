@@ -111,10 +111,17 @@ releases:
       - "OWN-5: siblings gained 0 of the ten probe answers against 5 (6 of the ten qualify under the rule; none was among the first twelve proposed)"
   - version: v1.46.1
     theme: "Follow-ups from the estate install (two fixes found installing v1.45.0 across the estate: DRM-7, a memory deleted outside the archive retires its dream edges; GAT-4, the conventions refresh lands where the corpus's write path says). No new roadmap item"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "NAT-3's floor diet at emgl's size: 95 one-at-a-time demotions reach an 8,192-byte budget (22,140 to 8,120 bytes on a copy); measured, not changed. A reviewed batch is a ruling the owner has not made"
+  - version: v1.46.2
+    theme: "A floor diet that leaves room (two fixes to NAT-3, both measured on a copy of emgl's corpus with its prompt history: a memory newer than the usage window no longer ranks as least used, and a finished diet leaves room under the budget for the next floor pointer). No new roadmap item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "Not run on a live corpus: emgl's floor budget is still undeclared. On the copy the diet now proposes 118 demotions and leaves 32 floor pointers, 23 of them newer than the bar"
+      - "The seven-day minimum age, the sixteenth of headroom and the `budgets.floor_headroom_bytes` key are defaults chosen from one corpus's measurement; the owner has not ruled on them"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
@@ -732,7 +739,7 @@ amendment_1:
       status: done
       deps: [GAT-3, HOT-7]
       ruling: V2Q-23
-      note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds"
+      note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds. v1.46.2: a pointer whose memory is younger than the span the usage ledgers hold (never less than seven days) waits instead of ranking as least used, and the diet runs to the budget less a headroom (a sixteenth, or `budgets.floor_headroom_bytes`) so the next floor pointer still passes the gate. On a copy of emgl's corpus with its prompt history: 103 proposals ending at 8,152 B with 23 new memories among them, then 118 ending at 7,601 B with none"
     - id: NAT-4
       title: "Census flags native memory that belongs to no corpus"
       size: S
