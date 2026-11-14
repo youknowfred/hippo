@@ -338,11 +338,11 @@ now a one-line route into the verb above that absorbed it.
 
 hippo does not connect to Linear. There is no integration to install and no API key to hold,
 and hippo never reads or writes an issue. The two work together through the repo: **Linear
-keeps the state of the work, hippo keeps what was learned doing it, and a file the repo
-commits carries the one to the other.**
+keeps the state of the work, hippo keeps what was learned doing it, and a file in the repo
+carries the one to the other.**
 
 ```
- Linear ──(your export script, on your schedule)──▶ LINEAR-SNAPSHOT.yaml, committed
+ Linear ──(your export script, on your schedule)──▶ a mirror file inside the repo
                                                             │
                                     read at SessionStart and `hippo build-index`
                                                             ▼
@@ -363,9 +363,9 @@ wrong the day the issue moves, and nothing in the repo changes to say so.
 
 **How a status reaches the session.** Three steps, the first one yours:
 
-1. **Commit a mirror of the tracker.** hippo ships no exporter. A script of your own (Linear's
-   GraphQL API in a scheduled job is the usual shape) writes a text file with one entry per
-   issue and commits it:
+1. **Keep a mirror of the tracker in the repo.** hippo ships no exporter. A script of your own
+   (Linear's GraphQL API in a scheduled job is the usual shape) writes a text file with one
+   entry per issue:
 
    ```yaml
    issues:
@@ -375,6 +375,11 @@ wrong the day the issue moves, and nothing in the repo changes to say so.
    ```
 
    hippo reads two lines of each entry, the id and the state, and nothing else in the file.
+   The file can be committed, so every clone and CI sees the same statuses, as fresh as its
+   last commit. Or it can be an ignored, machine-local file that a job on your machine
+   rewrites, so statuses stay current with no commit per refresh. Declare both and the first
+   that knows an id answers, with the committed one as the fallback where the local one is
+   absent.
 2. **Declare it** in `.claude/memory/hippo.json`:
 
    ```json
@@ -399,8 +404,8 @@ wrong the day the issue moves, and nothing in the repo changes to say so.
    - signing-key-rotation [project] — ENG-901 signing key rotation: …  (cites it in: description, line 8)
    ```
 
-The date is the mirror's last commit, so a status is as fresh as your last refresh and says
-so. For live state a session still asks Linear (its MCP server, or your own script); what
+The date is the mirror's last commit (for a file git does not track, the day it was last
+written), so a status is as fresh as your last refresh and says so. For live state a session still asks Linear (its MCP server, or your own script); what
 hippo adds is that the session knows which issues bear on the prompt, and what was learned
 on them, before it asks.
 
@@ -422,7 +427,7 @@ re-queue a memory for review when an issue it cites is closed; that is planned. 
 
 **Other trackers.** Nothing above is specific to Linear except the example. Jira, GitHub
 Issues or a hand-kept file work the same way once a mirror with an id line and a status line
-per entry is committed; up to four ledgers can be declared. The declaration's limits, the
+per entry is in the repo; up to four ledgers can be declared. The declaration's limits, the
 cache and the journal rule are in [SETTINGS.md](SETTINGS.md#tracker-statuses-at-read-time).
 
 ## Warm recall (opt-in)
