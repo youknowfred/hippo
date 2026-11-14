@@ -1,6 +1,6 @@
 # Platform reality — dated receipts (PLT-1)
 
-The v2 plan (`ROADMAP.v2.md` §2, §5 PLT-1) depends on Claude Code behavior that moved under
+The v2 plan (`planning/ROADMAP.v2.md` §2, §5 PLT-1) depends on Claude Code behavior that moved under
 hippo during 2026. This file records what was **observed**, not what the docs say, for each
 question the plan gates on. A row names its date, the Claude Code version, how it was observed,
 and what it changes. When the platform moves again, re-run the row and date it again.

@@ -277,7 +277,7 @@ copy to refresh and `hippo ship` reads as landed.
 
 ## Reconciling the pre-1.0 "clean break" invariant
 
-`ROADMAP.yaml`'s guiding invariant *"renames are clean breaks with a version bump, not compat
+`planning/ROADMAP.yaml`'s guiding invariant *"renames are clean breaks with a version bump, not compat
 shims"* was correct **pre-1.0** (exercised by INT-7 and DOC-8, both on minor bumps at near-zero
 adopters). It is now **qualified to pre-1.0 and to major bumps**: post-1.0, a clean break on any
 frozen-surface element requires a major-version bump or a deprecation window. The invariant still

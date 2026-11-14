@@ -1,7 +1,7 @@
 # Releasing hippo (DOC-7)
 
 This formalizes the release process the first releases (v0.2.0–v0.5.0) ran by hand. Each
-release is a workstream slice of [`ROADMAP.yaml`](ROADMAP.yaml)'s `release_train`, shipped as
+release is a workstream slice of [`planning/ROADMAP.yaml`](planning/ROADMAP.yaml)'s `release_train`, shipped as
 one PR, squash-merged, then tagged.
 
 ## Version numbers

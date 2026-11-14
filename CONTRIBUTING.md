@@ -81,7 +81,7 @@ dense with 8 concurrent recalls, gated against the trailing 7 nights).
 ## How we ship changes
 
 hippo is developed as a sequence of small, self-describing changes, each traceable to a roadmap
-item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
+item ([`planning/ROADMAP.yaml`](planning/ROADMAP.yaml) / [`planning/ROADMAP.v1.md`](planning/ROADMAP.v1.md)):
 
 - **Branch off `main`.** One coherent change per branch/PR.
 - **One id-prefixed commit per roadmap item.** Commit subjects lead with the item id and a colon —
@@ -89,7 +89,7 @@ item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
   commit. If your change isn't tied to an existing item, describe it plainly — a new id isn't
   required for an outside contribution.
 - **Keep the full suite green after each commit.** `HIPPO_DISABLE=dense pytest` from the root.
-- **Preserve the guiding invariants.** They're listed in `ROADMAP.yaml` (`guiding_invariants`) —
+- **Preserve the guiding invariants.** They're listed in `planning/ROADMAP.yaml` (`guiding_invariants`) —
   the load-bearing ones: markdown-in-git is the only source of authority (index/telemetry/graph are
   derived, rebuildable, gitignored caches); hooks always `exit 0` and never download, and no hook blocks unless the corpus's own committed
   policy asks it to; the
@@ -107,6 +107,9 @@ one short paragraph per feature with a link. The reference for a setting, a `hip
 a gate goes in [`SETTINGS.md`](SETTINGS.md); engine internals go in
 [`plugin/memory/README.md`](plugin/memory/README.md). A change that renames or retires a command
 updates every doc that names it in the same change (`grep -rn "hippo:<name>" --include="*.md" .`).
+
+Roadmaps, exploration notes and design specs live in [`planning/`](planning/README.md), never at
+the repo root. The root holds what a visitor or a contributor needs to use and change hippo.
 
 ## Code layout
 

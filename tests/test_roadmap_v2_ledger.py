@@ -1,4 +1,4 @@
-"""CON-4: ROADMAP.v2.yaml is the one live ledger, in step with the ratified design record."""
+"""CON-4: planning/ROADMAP.v2.yaml is the one live ledger, in step with the ratified design record."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 
 import yaml
 
-_ROOT = os.path.join(os.path.dirname(__file__), "..")
+_ROOT = os.path.join(os.path.dirname(__file__), "..", "planning")  # the roadmaps live in planning/
 
 
 def _read(name):

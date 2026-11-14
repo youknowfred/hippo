@@ -1,25 +1,25 @@
 ---
 name: hippo-enh-exploration-r2
-description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → EXPLORATIONS2.md + ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 MERGED to main (52369c7), as were its cross-file deps #17/#18/#19. Execution detoured through round 3 first (T14–T17), then BEGAN 2026-07-16: T8 MSR shipped (PR #68) and T9 GRF shipped (PR #70, incl. MSR-5's HIPPO_SALIENCE rig); T10 SEN in flight — T11–T13 remain planned."
+description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → planning/EXPLORATIONS2.md + planning/ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 MERGED to main (52369c7), as were its cross-file deps #17/#18/#19. Execution detoured through round 3 first (T14–T17), then BEGAN 2026-07-16: T8 MSR shipped (PR #68) and T9 GRF shipped (PR #70, incl. MSR-5's HIPPO_SALIENCE rig); T10 SEN in flight — T11–T13 remain planned."
 metadata:
   node_type: memory
   type: project
   originSessionId: a5a922b1-a6ab-4fcf-96cc-bec2e048816f
   last_verified: "2026-07-16T14:39:50.641856+00:00"
   verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:41:06.387761+00:00"
-  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py", "plugin/memory/salience_eval.py"]
+  cited_paths: ["planning/ROADMAP.enhancements.yaml", "planning/ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "planning/ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py", "plugin/memory/salience_eval.py"]
   source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
   source_commit_time: 1784589679
 ---
 
 Round-2 exploration+vetting cycle — session 2026-07-09, mirroring the round-1
-process that produced [[hippo-enhancement-roadmap]] (EXPLORATIONS.md →
-ROADMAP.enhancements.yaml). **RESEARCH/PROPOSAL ONLY** — two additive docs, no
+process that produced [[hippo-enhancement-roadmap]] (planning/EXPLORATIONS.md →
+planning/ROADMAP.enhancements.yaml). **RESEARCH/PROPOSAL ONLY** — two additive docs, no
 code, no status flips on existing roadmap files. **[PR #20](https://github.com/youknowfred/hippo/pull/20)
 was opened as a DRAFT then — at the owner's explicit direction later the same session
 (2026-07-10) — squash-MERGED to `main` as `52369c7`** (all 6 required checks green:
 dense, 4× hermetic matrix, shellcheck; head branch `explorations-r2` deleted
-remote+local, stale tracking ref pruned). So EXPLORATIONS2.md + ROADMAP.enhancements2.yaml
+remote+local, stale tracking ref pruned). So planning/EXPLORATIONS2.md + planning/ROADMAP.enhancements2.yaml
 now live on `main` (like round 1's docs). **FOLLOW-UP same session (owner-directed): the
 three open dev-line PRs were then squash-merged to main IN ORDER #17→#18→#19** — SIG-6
 (`14f4968`), the GRA-1 dense-knee fix (`4bf8a6f`), and the trust spine SEC-5/6/7 + RCH-5
@@ -33,14 +33,14 @@ launch-security tier (SEC-8/9/10 committed + WIP) is now in progress on the OWNE
 `v080-sec-tail` branch, stacked on the trust spine — do not disturb it.
 
 **Deliverables (both at repo root on branch `explorations-r2`):**
-- **EXPLORATIONS2.md** — round-2 catalog. 47 raw candidates from an 8-lens ideation
+- **planning/EXPLORATIONS2.md** — round-2 catalog. 47 raw candidates from an 8-lens ideation
   over a 13-agent verified grounding fan-out + a 6-survey provenance-tagged 2026
   landscape survey; merged to 37; each faced a 3-skeptic adversarial panel (signal-
   existence/autonomy · user-value · fit/redundancy) + a judge — **158 agents total**.
   Verdicts: **36 RESHAPE** (every survivor pared to its detection/HITL half, ED-1) +
   **1 KILL** (`trust-ratchet-state-anchored-consent` — superseded by the shipped
   trust spine, inv5).
-- **ROADMAP.enhancements2.yaml** — executable form: **29 items, 6 workstreams**
+- **planning/ROADMAP.enhancements2.yaml** — executable form: **29 items, 6 workstreams**
   (MSR measurement · GRF graph/retrieval · SEN write-side/security · TMB temporal/
   lifecycle · CLB team collaboration · IOP interop/reach), **6 tiers T8–T13**, full
   round-1 machinery (acceptance_criteria, resolving deps, invariant_notes,
@@ -124,7 +124,7 @@ per-memory cross-session touch aggregation), cross-clone-auto-harvest (CLB-4 re-
 
 **WHAT ACTUALLY HAPPENED (re-verified 2026-07-16): the round-2 tiers were never built.**
 The docs and every cross-file dep landed on main as described, but execution never started
-on T8 — the owner commissioned round 3 instead (EXPLORATIONS3.md + ROADMAP.enhancements3.yaml,
+on T8 — the owner commissioned round 3 instead (planning/EXPLORATIONS3.md + planning/ROADMAP.enhancements3.yaml,
 tiers T14–T17 INV/SLP/JIT/EXT, grounded in the 2026-07-16 QA sweep), and that is the chain
 that is executing: [[hippo-enh-t14-invariants]] and [[hippo-enh-t15-sleep]] shipped in
 v1.18.0. So **T8–T13 remain PROPOSED, not dead** — `eval_recall.py` still says "HIPPO_SALIENCE

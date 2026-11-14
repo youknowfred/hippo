@@ -7,7 +7,7 @@ metadata:
   originSessionId: 8290772b-b5b1-43a3-856d-416ac6e3302d
   last_verified: "2026-07-16T14:40:03.428277+00:00"
   verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:11:09.547289+00:00"
-  cited_paths: ["plugin/memory/rules_plane.py", "tests/test_rules_plane.py", "plugin/.claude-plugin/plugin.json", "ROADMAP.enhancements.yaml"]
+  cited_paths: ["plugin/memory/rules_plane.py", "tests/test_rules_plane.py", "plugin/.claude-plugin/plugin.json", "planning/ROADMAP.enhancements.yaml"]
   source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
   source_commit_time: 1784415607
 ---
@@ -82,7 +82,7 @@ the RUL-3 CLI gap. (3) mcp tests: resolve_dirs' repo_root comes from CLAUDE_PROJ
 or cwd — hermetic tests MUST set CLAUDE_PROJECT_DIR or they scan the live hippo repo.
 POST-T2 DRY AUDIT (same session, commit `5b2c963` on the PR): T3–T7 fully re-audited
 against the live tree (5-agent fan-out). Every remaining planned item (31) now carries a
-BINDING `implementation_notes:` field in ROADMAP.enhancements.yaml (verified seams, T2
+BINDING `implementation_notes:` field in planning/ROADMAP.enhancements.yaml (verified seams, T2
 rule-pointer-lane guards, attach points, schema-bump mechanics, test pins) + per-tier
 `audit_note:` blocks + a meta.audits record; session_protocol.pick_up says read them
 first. Premise corrections landed in-file (RCL-2/3/6, GOV-1/3, GRW-4/7). HARD GATES
