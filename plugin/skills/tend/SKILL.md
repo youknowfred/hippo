@@ -93,7 +93,10 @@ What each kind needs before its verdict:
   new floor line still ships, and this line is the next one to move out. Read the evidence (its
   type, how often it was used, and the trim-safety replay), then `demote`: tend removes that
   one line from `MEMORY.md` (the outbox's floor copy in outbox mode) and nothing else; the
-  memory file stays and recall still finds it. An item that says "keep it" loses a recall hit
+  memory file stays and recall still finds it. When the evidence says the line also points
+  at other memories, tell the user their names before asking: the line goes whole, so they
+  leave the floor with it, and the diet did not weigh them (`hippo tend show <id>` prints
+  the line). An item that says "keep it" loses a recall hit
   if removed; demote it only if the user accepts that, or `skip` it. An item that says
   "wait" is not judged yet: list the queue again (each call replays more recent prompts).
   An item that says "wait: too new" names a memory younger than the window its use is

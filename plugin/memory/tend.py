@@ -161,6 +161,10 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
             from .rule_proposals import detail_lines
 
             return detail_lines(entry, memory_dir, repo_root)
+        if kind == "floor" and target.startswith("diet:"):  # NAT-3: the literal line that goes
+            from .floor_diet import detail_lines
+
+            return detail_lines(target[len("diet:"):], memory_dir)
     except Exception as exc:
         return [f"(evidence unavailable: {exc})"]
     return []

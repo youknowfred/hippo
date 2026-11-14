@@ -576,3 +576,47 @@ def test_doctor_never_runs_the_replay(tmp_path, monkeypatch):
     n = calls["n"]
     check_tend_queue(ctx)
     assert calls["n"] == n
+
+
+# --------------------------------------------------------------------------- #
+# A line that carries more than one pointer: the item says what else leaves with it
+# --------------------------------------------------------------------------- #
+def _joined(md):
+    """Put staging_host's pointer on vendor_api's line (two pointers, one floor line)."""
+    path = os.path.join(md, "MEMORY.md")
+    lines = open(path, encoding="utf-8").read().split("\n")
+    rider = next(ln for ln in lines if "](staging_host.md)" in ln)
+    lines.remove(rider)
+    i = next(i for i, ln in enumerate(lines) if "](vendor_api.md)" in ln)
+    lines[i] = lines[i] + " · " + rider[2:]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return lines[i]
+
+
+def test_a_diet_item_says_which_other_pointers_ride_on_its_line(tmp_path, monkeypatch, capsys):
+    md, repo = _corpus(tmp_path, monkeypatch, budget=200)
+    line = _joined(md)
+    entries = {e["id"]: e for e in FD.queue_entries(md, Q._entry)}
+    assert "floor:diet:staging_host" not in entries  # it has no line of its own to weigh
+    ev = entries["floor:diet:vendor_api"]["evidence"]
+    assert "its line also points at 1 other memory, which leaves the floor with it: staging_host" in ev
+    assert not any("also points at" in e["evidence"] for i, e in entries.items() if i != "floor:diet:vendor_api")
+    assert TD.main(["show", "floor:diet:vendor_api", "--memory-dir", md, "--repo-root", repo]) == 0
+    out = capsys.readouterr().out
+    assert f"floor line: {line}" in out and "leaves the floor with it: staging_host" in out
+    r = TD.apply("floor:diet:vendor_api", "demote", memory_dir=md, repo_root=repo)
+    assert r["ok"] and "staging_host" in r["message"] and "left the floor with it" in r["message"], r
+    floor = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    assert "staging_host" not in floor and os.path.isfile(os.path.join(md, "staging_host.md"))
+
+
+def test_a_one_pointer_line_reads_as_before(tmp_path, monkeypatch, capsys):
+    md, repo = _corpus(tmp_path, monkeypatch, budget=200)
+    first = FD.queue_entries(md, Q._entry)[0]
+    assert "also points at" not in first["evidence"]
+    assert TD.main(["show", first["id"], "--memory-dir", md, "--repo-root", repo]) == 0
+    out = capsys.readouterr().out
+    assert "floor line: - [" in out and "leaves the floor with it" not in out
+    r = TD.apply(first["id"], "demote", memory_dir=md, repo_root=repo)
+    assert r["ok"] and "left the floor with it" not in r["message"]

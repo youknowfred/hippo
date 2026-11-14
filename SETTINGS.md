@@ -338,7 +338,9 @@ The replay ranks at most 50 prompts per `hippo tend` call and keeps each ranking
 gitignored cache, so later calls read it back; a line whose prompts are not all replayed yet
 says "wait". `hippo doctor` never runs the replay.
 `--verdict demote` removes that one line and nothing else: the memory file stays, and recall
-still finds it. `hippo doctor` shows the floor against the budget and how to start, and
+still finds it. A floor line that points at more than one memory goes whole: the item's
+evidence names the other memories that leave the floor with it, which the diet does not weigh
+separately, and `hippo tend show <id>` prints the line itself. `hippo doctor` shows the floor against the budget and how to start, and
 suggests 8,192 bytes when a floor without a budget is over the warn line.
 
 The diet does not stop at the budget. The gate fails a change that leaves the floor over its

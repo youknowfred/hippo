@@ -247,6 +247,14 @@ def _with_pointer(
     return "\n".join(lines), {"status": "appended", "reason": None}
 
 
+def _without_pointer(text: str, name: str) -> Tuple[str, list]:
+    """``(text without name's pointer line(s), the lines that went)``: the removal as a pure
+    function, so a caller can show the exact lines before any write (NAT-3)."""
+    lines = text.split("\n")
+    gone = [ln for ln in lines if _points_at(ln, name)]
+    return "\n".join(ln for ln in lines if not _points_at(ln, name)), gone
+
+
 def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] = None) -> dict:
     """Drop ``name``'s floor pointer line from MEMORY.md — ``_append_floor_pointer``'s inverse.
 
@@ -269,10 +277,9 @@ def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] =
     removed = {"any": False}
 
     def transform(text: str) -> Optional[str]:
-        lines = text.split("\n")
-        kept = [ln for ln in lines if not _points_at(ln, name)]
-        removed["any"] = len(kept) != len(lines)
-        return "\n".join(kept) if removed["any"] else None
+        new_text, gone = _without_pointer(text, name)
+        removed["any"] = bool(gone)
+        return new_text if gone else None
 
     try:
         update_text_cas(path, transform)  # COR-18 + RWY-3
