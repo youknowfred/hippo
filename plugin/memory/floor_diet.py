@@ -3,8 +3,20 @@
 The floor (``MEMORY.md``) loads into every session. A corpus that declares a hard floor budget
 in ``hippo.json`` (GAT-2's ``"budgets": {"floor_bytes": N}``, the one key for that number) gets
 demotion proposals in tend's existing ``floor`` kind, one floor pointer per item, until the
-floor would be at or under the budget. A demotion removes the pointer line and nothing else:
-the memory file stays, and recall reaches it like any other memory.
+floor would be under the budget by the diet's headroom (below). A demotion removes the
+pointer line and nothing else: the memory file stays, and recall reaches it like any other
+memory.
+
+Headroom. The gate (``gate.judge_floor``) objects to a change that leaves the floor over its
+budget and bigger, and ``hippo ship --yes`` refuses on a finding. A diet that stops at the
+budget stops within one line of it (40 bytes under, on emgl's 8,192), so the next save that
+adds a floor pointer (100 to 230 bytes there) is that change. The diet therefore runs to a
+target under the budget: ``budget - headroom``, where the headroom is a sixteenth of the
+budget (512 of 8,192: two to five pointer adds) unless the corpus declares
+``"budgets": {"floor_headroom_bytes": N}`` (``0`` stops at the budget, as before). The
+budget stays the gate's number and the one doctor and each item report against; a floor
+between the target and the budget is within its budget, and the diet proposes the lines
+that restore the room.
 
 The order, decided for NAT-3:
 
@@ -28,7 +40,7 @@ with short or empty ledgers a memory saved this week is still not "unused", it h
 needed yet. Ledgers that hold the whole window make the bar the window: there a memory waits
 ``WINDOW_DAYS`` days. A memory's birth is the commit that first added its file, read for the whole
 corpus by one ``git log --diff-filter=A`` (``archive._first_seen_times``; about a quarter
-of a second on emgl's 5,700 commits), run only when the floor is over its budget. A file git does not date
+of a second on emgl's 5,700 commits), run only when the floor is over its target. A file git does not date
 (a corpus outside git, a gitignored corpus, an unshipped outbox copy, a save not committed
 yet) is dated by its mtime, which is the latest it can have been born: old enough by mtime
 is old enough, and a file changed inside the bar waits.
@@ -73,6 +85,10 @@ WINDOW_DAYS = 30
 # days: work on a topic comes in bursts, and under a week "not used" is "not needed yet".
 MIN_AGE_DAYS = 7
 SUGGESTED_BUDGET = 8192
+# The room a finished diet leaves under the budget, so the next floor pointer still passes
+# the gate: the declared budgets.floor_headroom_bytes, else budget // HEADROOM_SHARE.
+HEADROOM_KEY = "floor_headroom_bytes"
+HEADROOM_SHARE = 16
 TARGET_PREFIX = "diet:"
 START_COMMAND = "hippo tend next --kind floor"
 
@@ -113,6 +129,22 @@ def floor_budget(memory_dir: str) -> Optional[int]:
         return read_budgets(read_policy_key(memory_dir, "budgets")).get("floor_bytes")
     except Exception:
         return None
+
+
+def floor_headroom(memory_dir: str, budget: int) -> int:
+    """The bytes the diet keeps free under ``budget``: the declared
+    ``budgets.floor_headroom_bytes`` when it is a whole number of bytes from 0 to under the
+    budget, else a sixteenth of the budget. The gate never reads it. Never raises."""
+    try:
+        from .provenance_format import read_policy_key
+
+        raw = read_policy_key(memory_dir, "budgets")
+        v = raw.get(HEADROOM_KEY) if isinstance(raw, dict) else None
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < budget:
+            return v
+    except Exception:
+        pass
+    return budget // HEADROOM_SHARE
 
 
 def floor_text(memory_dir: str) -> Optional[str]:
@@ -390,11 +422,12 @@ def _unsafe(row: dict, report: dict) -> bool:
 def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
     """The diet for a corpus with a declared floor budget, or None when none is declared.
 
-    ``{"budget", "bytes", "pointers", "non_behavior", "proposals": [row...]}``; each proposal
+    ``{"budget", "headroom", "target", "bytes", "pointers", "non_behavior", "proposals":
+    [row...]}``, where ``target`` is the budget less the headroom; each proposal
     row carries ``name, bytes, type, lane, behavior, use, injected, opened, unsafe, young,
     age_days, evidence, after`` (the floor bytes once this and every earlier proposal is
     taken).
-    Read-only. The replay runs only when the floor is over its budget."""
+    Read-only. The replay runs only when the floor is over its target."""
     budget = floor_budget(memory_dir)
     if not budget:
         return None
@@ -403,9 +436,11 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
         return None
     total = len(text.encode("utf-8"))
     rows = pointers(memory_dir, text)
-    out = {"budget": budget, "bytes": total, "pointers": len(rows),
+    headroom = floor_headroom(memory_dir, budget)
+    target = budget - headroom
+    out = {"budget": budget, "headroom": headroom, "target": target, "bytes": total, "pointers": len(rows),
            "non_behavior": sum(1 for r in rows if not r["behavior"]), "proposals": []}
-    if total <= budget or not rows:
+    if total <= target or not rows:
         return out
     from .lint_floor import trim_safety_report
 
@@ -432,7 +467,7 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
                              -r["bytes"], r["name"]))
     left = total
     for r in rows:
-        if left <= budget:
+        if left <= target:
             break
         left -= r["bytes"]
         out["proposals"].append(dict(r, after=left))
@@ -446,6 +481,7 @@ def queue_entries(memory_dir: str, make) -> List[dict]:
     if not p:
         return []
     out = []
+    room = f" (the diet runs to {p['target']:,}B, so a new floor line still fits)" if p["headroom"] else ""
     for r in p["proposals"]:
         if r["waiting"]:
             proposed = ("wait: its trim-safety replay is not finished; run `hippo tend` again "
@@ -459,7 +495,7 @@ def queue_entries(memory_dir: str, make) -> List[dict]:
                         "it now only if you know it is not needed")
         else:
             proposed = (f"demote: remove its line from MEMORY.md (the memory stays, reachable by "
-                        f"recall); the floor would be {r['after']:,}B of its {p['budget']:,}B budget")
+                        f"recall); the floor would be {r['after']:,}B of its {p['budget']:,}B budget{room}")
         out.append(make("floor", TARGET_PREFIX + r["name"], r["evidence"], proposed))
     return out
 
@@ -488,7 +524,8 @@ def demote(name: str, memory_dir: str, repo_root: str) -> dict:
 
 def doctor_line(memory_dir: str) -> Optional[Dict[str, str]]:
     """K17's instrument: the floor against its declared budget, how many floor pointers are
-    not behavior-lane, and the command that starts the diet. Without a budget: a suggestion
+    not behavior-lane, and the command that starts the diet (also shown when the floor is
+    within its budget but inside the diet's headroom). Without a budget: a suggestion
     only when the floor is over hippo's warn line, else None (no line)."""
     budget = floor_budget(memory_dir)
     text = floor_text(memory_dir)
@@ -509,17 +546,26 @@ def doctor_line(memory_dir: str) -> Optional[Dict[str, str]]:
     rows = pointers(memory_dir, text)
     nb = sum(1 for r in rows if not r["behavior"])
     lanes = f"{nb} of {len(rows)} floor pointer(s) are not behavior-lane"
-    if size <= budget:
+    headroom = floor_headroom(memory_dir, budget)
+    target = budget - headroom
+    if size <= target:
         return {"status": "ok", "message": (
             f"floor budget: MEMORY.md {size:,}B, within its declared {budget:,}B "
             f"(budgets.floor_bytes); {lanes}.")}
+    if size <= budget:
+        return {"status": "ok", "message": (
+            f"floor budget: MEMORY.md {size:,}B, within its declared {budget:,}B "
+            f"(budgets.floor_bytes) with {budget - size:,}B to spare; {lanes}. The diet keeps "
+            f"{headroom:,}B free so a new floor line still passes the gate: `{START_COMMAND}` "
+            "proposes the next line to move out.")}
+    runs_to = f" (it runs to {target:,}B, leaving {headroom:,}B for new floor lines)" if headroom else ""
     later = "" if replay_cached(memory_dir) else (
         " Which lines are safe to move is judged by a replay of recent prompts, which runs on "
         "`hippo tend`, not here.")
     return {"status": "warn", "message": (
         f"floor budget: MEMORY.md {size:,}B, over its declared {budget:,}B "
         f"(budgets.floor_bytes) by {size - budget:,}B; {lanes}. Start the diet: "
-        f"`{START_COMMAND}`.{later}")}
+        f"`{START_COMMAND}`{runs_to}.{later}")}
 
 
 def check_floor_budget(ctx) -> Optional[Dict[str, str]]:

@@ -2,8 +2,9 @@
 
 A corpus that declares ``budgets.floor_bytes`` gets tend ``floor`` items that propose demoting
 floor pointers one at a time, non-behavior first, least used first, until the floor would be
-at or under the budget; a pointer whose removal loses a recall hit on CLM-7's replay is listed
-last and never proposed as safe. A demotion removes that one line (the outbox's floor copy in
+under the budget by the diet's headroom; a pointer whose memory is too new to judge on use
+waits, and one whose removal loses a recall hit on CLM-7's replay is listed last and never
+proposed as safe. A demotion removes that one line (the outbox's floor copy in
 outbox mode) and nothing else. An undeclared corpus sees nothing new.
 """
 
@@ -278,6 +279,110 @@ def test_ages_cost_one_history_scan_however_many_pointers(repo, memory_dir, monk
 
 
 # --------------------------------------------------------------------------- #
+# Headroom: a finished diet leaves room for the next floor pointer
+# --------------------------------------------------------------------------- #
+def _set_budgets(md, **budgets):
+    path = os.path.join(md, "hippo.json")
+    doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {}
+    doc["budgets"] = budgets
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
+def test_a_finished_diet_leaves_room_for_the_next_floor_pointer_to_ship(repo, memory_dir, monkeypatch, tmp_path, capsys):
+    """The gate refuses a change that leaves the floor over its budget and bigger. A diet that
+    stops a few bytes under the budget makes the next save's floor pointer that change."""
+    import subprocess
+
+    from memory import new_memory as N
+    from memory import policy_consent as PC
+    from memory import ship_cli as SC
+    from memory import trust as T
+
+    from .conftest import git_commit
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "tel"))
+    os.makedirs(str(tmp_path / "tel"))
+    names = [f"habit_{i:02d}" for i in range(30)]
+    for n in names:
+        write_file(memory_dir, f"{n}.md", _mem(n, f"working habit {n} for the scheduler", "feedback"))
+    write_file(memory_dir, "MEMORY.md", "# Agent Memory\n\n## User\n\n## Working Style & Process Feedback\n"
+               + "".join(f"- [{n}]({n}.md) — working habit {_PAD}\n" for n in names))
+    write_file(memory_dir, "hippo.json", json.dumps({"budgets": {"floor_bytes": 10}}))
+    write_file(repo, ".gitignore", ".hippo/\n.claude/memory.local/\n.claude/memory.outbox/\n")
+    git_commit(repo, "seed", 1_700_000_000)
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    # The emgl shape: a budget that six demotions land 5 bytes under (it was 40 bytes there).
+    budget = FD.plan(memory_dir)["proposals"][5]["after"] + 5
+    _set_budgets(memory_dir, floor_bytes=budget)
+    for _ in range(40):
+        ids = _diet_ids(memory_dir, repo)
+        if not ids:
+            break
+        assert TD.apply(ids[0], "demote", memory_dir=memory_dir, repo_root=repo)["ok"]
+    assert _diet_ids(memory_dir, repo) == [] and _floor_bytes(memory_dir) <= budget  # the diet is finished
+    # The diet lands, and the corpus saves through the outbox from here on.
+    write_file(memory_dir, "hippo.json", json.dumps({"write_path": "outbox", "budgets": {"floor_bytes": budget}}))
+    git_commit(repo, "the diet", 1_700_000_100)
+    for args in (("update-ref", "refs/remotes/origin/main", "HEAD"),
+                 ("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")):
+        subprocess.run(["git", "-C", repo, *args], check=True)
+    assert T.mark_trusted(T.gate_repo_root(memory_dir, repo), memory_dir=memory_dir, origin="init")
+    assert PC.acknowledge(memory_dir, repo)["ok"]
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    r = N.write_memory("lint_before_push", "run the linter before every push", "feedback", "the body",
+                       memory_dir=memory_dir, repo_root=repo)
+    assert r["created"] and r.get("write_path") == "outbox" and r["floor"]["status"] == "appended", r
+    capsys.readouterr()
+    rc = SC.main(["--memory-dir", memory_dir, "--yes"])
+    assert rc == 0, capsys.readouterr().out  # before: "a finding against this ship", exit 1
+
+
+def test_the_diet_runs_to_the_budget_less_its_headroom(tmp_path, monkeypatch):
+    md, repo = _corpus(tmp_path, monkeypatch, budget=800)  # the floor is about 1,200B
+    p = FD.plan(md)
+    assert (p["budget"], p["headroom"], p["target"]) == (800, 50, 750)  # a sixteenth by default
+    assert p["proposals"][-1]["after"] <= 750
+    entry = FD.queue_entries(md, Q._entry)[0]
+    assert "of its 800B budget" in entry["proposed"] and "the diet runs to 750B" in entry["proposed"]
+    _set_budgets(md, floor_bytes=800, floor_headroom_bytes=300)  # declared: bytes, read beside the budget
+    p = FD.plan(md)
+    assert (p["headroom"], p["target"]) == (300, 500) and p["proposals"][-1]["after"] <= 500
+    _set_budgets(md, floor_bytes=800, floor_headroom_bytes=0)  # none: the diet stops at the budget
+    p = FD.plan(md)
+    assert p["target"] == 800 and p["proposals"][-1]["after"] <= 800
+    assert "the diet runs to" not in FD.queue_entries(md, Q._entry)[0]["proposed"]
+    for bad in (800, 5000, -1, True, "64", 12.5):  # not a byte count under the budget: the default
+        _set_budgets(md, floor_bytes=800, floor_headroom_bytes=bad)
+        assert FD.plan(md)["headroom"] == 50, bad
+
+
+def test_doctor_says_when_the_floor_is_inside_the_headroom(tmp_path, monkeypatch):
+    md, repo = _corpus(tmp_path, monkeypatch, budget=100_000)
+    size = _floor_bytes(md)
+    _set_budgets(md, floor_bytes=size + 10)  # within the budget, 10B to spare
+    r = FD.check_floor_budget(DoctorContext(md, repo))
+    assert r["status"] == "ok" and f"within its declared {size + 10:,}B" in r["message"]
+    assert "10B to spare" in r["message"] and f"`{FD.START_COMMAND}`" in r["message"]
+    assert len(_diet_ids(md, repo)) == 1  # one line restores the room
+    _set_budgets(md, floor_bytes=size - 10)  # over: the warn line names where the diet ends
+    r = FD.check_floor_budget(DoctorContext(md, repo))
+    target = (size - 10) - (size - 10) // 16
+    assert r["status"] == "warn" and f"it runs to {target:,}B" in r["message"]
+    # The gate still judges against the budget itself, not the diet's target.
+    from memory.gate import judge_floor
+    from memory.provenance_format import read_floor_lint
+
+    floor = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    _set_budgets(md, floor_bytes=size + 100)
+    grown = floor + "- [vendor_api](vendor_api.md) — again\n"  # 40B: inside the budget, over the target
+    assert len(grown.encode()) > FD.plan(md)["target"]
+    assert judge_floor(floor, grown, read_floor_lint(md), {"floor_bytes": size + 100}) == []
+
+
+# --------------------------------------------------------------------------- #
 # The verdict
 # --------------------------------------------------------------------------- #
 def test_demote_removes_that_one_line_and_nothing_else(tmp_path, monkeypatch):
@@ -344,7 +449,7 @@ def test_driving_tend_item_by_item_reaches_the_budget(tmp_path, monkeypatch):
         assert TD.apply(ids[0], "demote", memory_dir=md, repo_root=repo)["ok"]
         applied += 1
         assert applied < 10
-    assert _floor_bytes(md) <= budget and applied == planned >= 2
+    assert _floor_bytes(md) <= budget - budget // 16 and applied == planned >= 2  # to the target
     assert FD.check_floor_budget(DoctorContext(md, repo))["status"] == "ok"
 
 

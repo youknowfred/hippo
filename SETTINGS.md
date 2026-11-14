@@ -326,8 +326,8 @@ with no `budgets` and no `floor_lint` is not checked. The budgets are read from 
 committed, so raising one deliberately in the same change is judged by the new number.
 
 A declared `floor_bytes` also puts the floor on a diet: `hippo tend` lists one demotion per
-floor line until the floor would fit, lines whose memory is not a user or feedback memory
-first, the least used first (injected or opened in the last 30 days, as far back as the local
+floor line until the floor would fit with room to spare, lines whose memory is not a user or
+feedback memory first, the least used first (injected or opened in the last 30 days, as far back as the local
 ledgers reach). A memory younger than the span those ledgers hold, or younger than seven days
 when they hold less, has not had the time to be used that the others had: its line is listed
 after the ones judged on a full span, its item says "wait", and the evidence gives its age
@@ -340,6 +340,21 @@ says "wait". `hippo doctor` never runs the replay.
 `--verdict demote` removes that one line and nothing else: the memory file stays, and recall
 still finds it. `hippo doctor` shows the floor against the budget and how to start, and
 suggests 8,192 bytes when a floor without a budget is over the warn line.
+
+The diet does not stop at the budget. The gate fails a change that leaves the floor over its
+budget and bigger, so a floor trimmed to a few bytes under it would have its next new pointer
+refused by `hippo ship --yes`. The diet runs to a target under the budget instead: the budget
+less a sixteenth of it (7,680 bytes for a budget of 8,192, room for two to five new pointers),
+or less the bytes you declare:
+
+```json
+{"budgets": {"floor_bytes": 8192, "floor_headroom_bytes": 1024}}
+```
+
+`floor_headroom_bytes` is a whole number from 0 to under `floor_bytes`; `0` stops the diet at
+the budget, and any other value is read as undeclared. Only the diet reads it: the gate
+judges against `floor_bytes` alone, and a floor between the target and the budget is within
+its budget. `hippo doctor` says so and names the command that proposes the next line.
 
 `hippo gate --install` shows the pre-commit hook it would write and where (it follows
 `core.hooksPath` and linked worktrees); `--install --yes` writes it. It never overwrites a
