@@ -277,7 +277,8 @@ terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the 
   code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow,
   citation re-derivation, path-scoped rule proposals, changes waiting for re-consent) in one
   ranked list, worked one verdict at a time with your yes. `hippo tend` in a terminal; the
-  `tend` MCP tool on Desktop.
+  `tend` MCP tool on Desktop. A long floor diet can go as one list instead: `hippo tend diet`
+  shows every line it would move out, and one verdict applies exactly the lines it showed.
   A lesson another trusted project on this machine also keeps shows up there too: promote it
   to the user tier, or, when the same rule reads differently there, adopt one text.
 - `/hippo:doctor` — fast check of the *plumbing* (bootstrapped, venv healthy, corpus symlinked,

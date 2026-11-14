@@ -94,7 +94,10 @@ item ([`planning/ROADMAP.yaml`](planning/ROADMAP.yaml) / [`planning/ROADMAP.v1.m
   derived, rebuildable, gitignored caches); hooks always `exit 0` and never download, and no hook blocks unless the corpus's own committed
   policy asks it to; the
   `UserPromptSubmit` hot path stays pure retrieval (no LLM, no network, no per-prompt writes);
-  destructive/corrective writes are per-item and agent-gated (no bulk autonomous sweeps).
+  destructive/corrective writes are per-item and agent-gated (no bulk autonomous sweeps). A
+  batch is allowed in one shape only: one verdict over an enumerated set the user was shown,
+  applied by the digest of that list, so nothing is applied that was not listed and nothing
+  runs by itself (the floor diet's `hippo tend diet` is the one that exists).
 - **PRs are squash-merged.** Write a PR body that says what shipped and why.
 
 Post-1.0, changes to the frozen compatibility surface follow [`STABILITY.md`](STABILITY.md) — a

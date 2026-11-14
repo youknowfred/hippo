@@ -6,12 +6,14 @@ description: Work hippo's maintenance queue one item at a time — captures to d
 
 hippo derives every kind of memory upkeep into one ranked queue. This skill works it with
 the user: show the top item and its evidence, say the likely verdict, ask, and apply ONE
-verdict at a time. Nothing is applied without the user's yes, and there is no apply-all.
+verdict at a time. Nothing is applied without the user's yes, and there is no apply-all. The
+one verdict that covers more than one item is the floor diet's reviewed list (below): the
+user is shown every line, and one yes applies exactly those lines.
 Integrity items (changes withheld from recall, invisible baselines) come first.
 
 ## Surface routing — decide first, then act silently
 
-- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): run this same flow through the `tend` MCP tool — action='list', then 'next' (or 'show' with id=…), then per item action='apply' with id= and verdict=, or 'snooze' / 'skip' / 'hold'. Drafting a memory from a capture uses the `new_memory` tool (check:true first), then tend apply verdict='done' drains the seed as drafted (an expired seed comes back with tend action='restore', seed=… or all=true); a verbatim hunk goes through the `doctor` tool's action='secrets_scan' before it is fenced into a body. The consolidate steps below map the same way: the graph refresh is the `setup` tool's action='build_index'; co-recall link suggestions are tend action='link_proposals'; the blind-spot fixtures are tend action='fixtures' (step='draft', then 'confirm' per item); the interview is tend action='interview' (step='questions' or 'respond'); a decision the user stated is tend action='add_decision'. Just start driving the tool; don't explain why the shell flow isn't used here.
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): run this same flow through the `tend` MCP tool — action='list', then 'next' (or 'show' with id=…), then per item action='apply' with id= and verdict=, or 'snooze' / 'skip' / 'hold'. Drafting a memory from a capture uses the `new_memory` tool (check:true first), then tend apply verdict='done' drains the seed as drafted (an expired seed comes back with tend action='restore', seed=… or all=true); a verbatim hunk goes through the `doctor` tool's action='secrets_scan' before it is fenced into a body. The consolidate steps below map the same way: the graph refresh is the `setup` tool's action='build_index'; co-recall link suggestions are tend action='link_proposals'; the blind-spot fixtures are tend action='fixtures' (step='draft', then 'confirm' per item); the interview is tend action='interview' (step='questions' or 'respond'); a decision the user stated is tend action='add_decision'; the floor diet's list is tend action='diet', then action='apply' with id='floor:diet', verdict='demote', digest=… (except=[names] to leave some out). Just start driving the tool; don't explain why the shell flow isn't used here.
 - **In a terminal Claude Code session**: run the bash flow below, guard first.
 
 ## Preflight (shared across all hippo skills)
@@ -102,6 +104,22 @@ What each kind needs before its verdict:
   An item that says "wait: too new" names a memory younger than the window its use is
   counted over (the evidence gives its age): leave it, and it is weighed with the rest once
   it is old enough; `demote` it now only if the user says it is not needed.
+  **A long diet goes as one list.** With more than a few `floor:diet:` items, run
+  `hippo tend diet` instead of walking them. It prints every demotion the batch would make,
+  in the diet's order (evidence and the floor line itself), then what a batch never takes
+  (the "wait" and "keep it" items, and any line that points at more than one memory, whose
+  other pointers were not weighed), where the floor would end, and a digest; it demotes
+  nothing. Show the user the list itself, not a summary of it. Ask which lines they want
+  kept. On their yes,
+  `hippo tend apply floor:diet --verdict demote --digest <digest>` (add
+  `--except <name>,<name>` for the lines to keep) demotes exactly the lines that list showed.
+  Only quote a digest from a review the user saw in this conversation. Each line is judged
+  again at its turn, so the answer may name lines it skipped (most often a prompt typed since
+  the review now reaches that memory only through its floor line): relay the skipped lines
+  and why, where the floor ended, and what the diet proposes next, and run `hippo tend diet`
+  again for the next list if the floor fell short. A "wait" or "keep it" item, and a line
+  that carries other pointers, still takes its own `demote` on its own id. To keep a line whatever its use,
+  `hippo tend hold floor:diet:<name> --reason "<why>"`; the next list plans around it.
 - **rule** — a feedback memory whose recorded file touches concentrate under one path glob
   (the evidence gives the share). `hippo tend show` prints the `.claude/rules/<name>.md` it
   would write, scoped to that glob; on the user's yes, `write` creates that one file and
@@ -150,7 +168,8 @@ drafts, close the stale-memory loops, and refresh the graph. Run it when the Ses
 says the pending queue or worklist is deep, or on demand.
 
 Every write in this skill is per-item and agent-gated — the same approval gate as everywhere
-else. Nothing here is a bulk sweep.
+else. Nothing here is a bulk sweep. (The floor diet's reviewed list, above, is one verdict
+over lines the user was shown; nothing in the steps below has a list form.)
 
 ### Before you start
 

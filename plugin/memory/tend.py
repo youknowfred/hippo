@@ -19,14 +19,23 @@ Every per-item gate is preserved, because ``apply`` only routes:
   - link, floor    done (re-checked: refused while the problem is still there, fixed once
                    the source no longer reports it)
   - floor (diet)   demote (NAT-3: remove that one pointer line from the floor; the memory stays)
+  - floor:diet     demote, with the digest of a ``hippo tend diet`` review (NAT-3: the lines
+                   that review listed, each judged again at its turn; ``floor_diet_batch``)
   - derivation     apply (re-derive ONE memory) | stamp (earned: refused while any
                    memory still derives differently)
   - trust          routed to the consent review (re-consent is its own gate)
   - rule           write (the path-scoped rule file ``promote_rule`` drafts, through its
                    writer; ``rule_proposals``)
 
-There is no apply-all. ``hold`` is an owner decision with a reason (for example, keeping
-an old citation derivation on purpose); held items count as resolved.
+There is no apply-all. The one verdict that covers more than one item is the reviewed floor
+diet: ``diet`` shows every demotion the diet would serve and prints a digest, and ``apply
+floor:diet --verdict demote --digest <d>`` demotes exactly the lines that review listed
+(``--except`` leaves named ones out). It is one verdict over an enumerated set the user was
+shown: nothing is applied that was not listed, and nothing runs by itself. No other kind
+has one.
+
+``hold`` is an owner decision with a reason (for example, keeping an old citation
+derivation on purpose); held items count as resolved.
 """
 
 from __future__ import annotations
@@ -190,6 +199,7 @@ def _verdict_help(kind: str, entry_id: str) -> List[str]:
         lines.append("  done means you already wrote what was durable with `hippo new` (check first).")
     if diet:
         lines.append("  demote removes this one line from MEMORY.md; the memory file stays and recall reaches it.")
+        lines.append("  Every diet line as one list, for one verdict: hippo tend diet")
     if kind == "promote":
         lines.append("  promote moves this memory to the user tier; adopt (a drifted rule only) takes "
                      "the other corpus's text here; distinct keeps both as they are.")
@@ -360,6 +370,19 @@ def _apply_derivation(target, verdict, memory_dir, repo_root):
     return _ok(f"re-derived {target}'s citations.", r)
 
 
+def _apply_reviewed_diet(verdict, digest, leave_out, memory_dir, repo_root) -> dict:
+    """NAT-3: one verdict over the list a ``hippo tend diet`` review showed."""
+    from .floor_diet_batch import BATCH_ID, REVIEW_COMMAND, apply_batch
+
+    if verdict != "demote":
+        return _refused(f"{BATCH_ID} is the reviewed floor diet: it takes --verdict demote with the "
+                        f"--digest `{REVIEW_COMMAND}` prints.")
+    r = apply_batch(memory_dir, repo_root, digest, leave_out)
+    for _name in r["applied"]:  # OBS-2 counts drained items, so one per line demoted
+        _count(memory_dir, "floor", "demote")
+    return r
+
+
 def apply(
     entry_id: str,
     verdict: str,
@@ -369,10 +392,17 @@ def apply(
     winner: Optional[str] = None,
     loser: Optional[str] = None,
     superseded_by: Optional[str] = None,
+    digest: Optional[str] = None,
+    leave_out=None,
 ) -> dict:
-    """Execute ONE verdict on ONE queue item. ``{"ok", "message"}``. Never raises."""
+    """Execute ONE verdict on ONE queue item. ``{"ok", "message"}``. Never raises.
+
+    The id ``floor:diet`` is not an item: it is the list a ``hippo tend diet`` review showed,
+    and takes ``demote`` with that review's ``digest`` (``leave_out`` names lines to spare)."""
     memory_dir, repo_root = _dirs(memory_dir, repo_root)
     try:
+        if entry_id == "floor:diet":
+            return _apply_reviewed_diet(verdict, digest, leave_out, memory_dir, repo_root)
         entry, state = find_entry(memory_dir, repo_root, entry_id)
         kind = entry_id.split(":", 1)[0]
         if entry is None and kind in ("link", "floor"):
@@ -507,7 +537,7 @@ def release(key: str, *, memory_dir=None, repo_root=None) -> dict:
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="hippo tend", description=__doc__.split("\n\n")[0])
     p.add_argument("action", nargs="?", default="list",
-                   choices=("list", "next", "show", "apply", "snooze", "skip", "hold", "release"))
+                   choices=("list", "next", "show", "apply", "snooze", "skip", "hold", "release", "diet"))
     p.add_argument("target", nargs="?", default=None, help="an item id, or a kind for hold/release")
     p.add_argument("--verdict", default=None)
     p.add_argument("--winner", default=None)
@@ -515,6 +545,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--superseded-by", default=None)
     p.add_argument("--days", type=float, default=_DEFAULT_SNOOZE_DAYS)
     p.add_argument("--reason", default=None)
+    p.add_argument("--digest", default=None,
+                   help="with apply floor:diet: the digest `hippo tend diet` printed")
+    p.add_argument("--except", dest="leave_out", default=None,
+                   help="with apply floor:diet: names from the reviewed list to leave on the floor")
     p.add_argument("--kind", default=None, help="limit list/next to one kind")
     p.add_argument("--limit", type=int, default=15)
     p.add_argument("--memory-dir", default=None)
@@ -531,6 +565,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             top = result["pending"][0] if result["pending"] else None
             print(render_next(top, memory_dir, repo_root, Q.total_pending(result)))
         return 0
+    if args.action == "diet" or (args.action == "show" and args.target == "floor:diet"):
+        from .floor_diet_batch import review  # NAT-3: every diet line as one list, and a digest
+
+        r = review(memory_dir, repo_root)
+        print(r["message"])
+        return 0 if r["ok"] else 1
     if not args.target:
         print(f"hippo tend {args.action}: needs an item id (see `hippo tend`).")
         return 2
@@ -546,7 +586,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("hippo tend apply: needs --verdict (see `hippo tend show <id>`).")
             return 2
         r = apply(args.target, args.verdict, memory_dir=memory_dir, repo_root=repo_root,
-                  winner=args.winner, loser=args.loser, superseded_by=args.superseded_by)
+                  winner=args.winner, loser=args.loser, superseded_by=args.superseded_by,
+                  digest=args.digest, leave_out=args.leave_out)
     elif args.action == "snooze":
         r = snooze(args.target, args.days, memory_dir=memory_dir, repo_root=repo_root)
     elif args.action == "skip":

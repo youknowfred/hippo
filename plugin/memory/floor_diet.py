@@ -54,6 +54,17 @@ is old enough, and a file changed inside the bar waits.
   loads everything.
 - opened: Read-tool opens of the memory file (OBS-10's ``row_opened`` over the outcome ledger).
 
+One list, one verdict. A floor far over its budget needs dozens of demotions, and one yes
+per line is a yes to a line much like the last. ``floor_diet_batch`` gives the same diet as
+one review (``hippo tend diet``: every demotion in the order below, each with its evidence
+and its literal floor line, and a digest bound to the floor's bytes and the list) and one
+verdict that applies exactly that list by its digest. It serves the items this module
+proposes as safe, weighing the floor again as each line leaves it (``plan`` takes the
+floor ``text`` and a ``memo`` for that), and it judges each one again when it applies, so
+nothing here changes for an item taken alone: the single ``demote`` is the same call. A
+"wait" or "keep it" item is never in a batch, and neither is a line that carries more than
+one pointer.
+
 A line with more than one pointer. The diet weighs one pointer per floor line, the first.
 A demotion removes the whole line, so any other pointer joined onto it leaves the floor
 too, and it has no line of its own to be weighed on (no use count, no replay). The item
@@ -96,7 +107,9 @@ SUGGESTED_BUDGET = 8192
 HEADROOM_KEY = "floor_headroom_bytes"
 HEADROOM_SHARE = 16
 TARGET_PREFIX = "diet:"
-START_COMMAND = "hippo tend next --kind floor"
+# Doctor starts the diet at the review: every line as one list (`tend next --kind floor`
+# serves the floor kind's other items first, and one line per call).
+START_COMMAND = "hippo tend diet"
 
 # The trim-safety replay: how many of the newest distinct human prompts it judges (CLM-7's
 # 200), how many one call may rank, and how deep. Ranking a prompt is the whole cost (one
@@ -164,11 +177,12 @@ def floor_text(memory_dir: str) -> Optional[str]:
         return None
 
 
-def pointers(memory_dir: str, text: str) -> List[dict]:
-    """``[{name, line, bytes, type, lane, behavior}]`` for each memory pointer line in the
-    floor whose memory exists, in any section (a flat floor keeps its pointers outside the
-    floor sections, and every line loads all the same). A pointer to a missing memory is
-    the ``missing_targets`` item's business."""
+def pointers(memory_dir: str, text: str, types: Optional[dict] = None) -> List[dict]:
+    """``[{name, line, bytes, type, lane, behavior, text, riders}]`` for each memory pointer
+    line in the floor whose memory exists, in any section (a flat floor keeps its pointers
+    outside the floor sections, and every line loads all the same). A pointer to a missing
+    memory is the ``missing_targets`` item's business. ``types`` (name to type) is read
+    before the file and filled in, so a caller that weighs many floors reads each file once."""
     from .lanes import BEHAVIOR, journal_globs, lane_of
     from .lint_floor import memory_exists
     from .new_memory_floor import _pointer_name
@@ -184,12 +198,17 @@ def pointers(memory_dir: str, text: str) -> List[dict]:
         name = _pointer_name(line, exists)
         if not name or name in seen:
             continue
-        path = resolve(os.path.join(memory_dir, f"{name}.md"))
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                kind = read_memory_type(fh.read())
-        except Exception:
-            continue
+        if types is not None and name in types:
+            kind = types[name]
+        else:
+            path = resolve(os.path.join(memory_dir, f"{name}.md"))
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    kind = read_memory_type(fh.read())
+            except Exception:
+                continue
+            if types is not None:
+                types[name] = kind
         seen.add(name)
         lane = lane_of(f"{name}.md", kind, globs)
         out.append({"name": name, "line": i, "bytes": len(line.encode("utf-8")) + 1,
@@ -449,37 +468,69 @@ def _unsafe(row: dict, report: dict) -> bool:
             or bool(report.get("queries") and not report.get("replayed")))
 
 
-def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
+def _memoized_pools(memory_dir: str, memo: Optional[dict]):
+    """``_replay_pools`` that answers the same prompt list from ``memo`` (one cache read and
+    one ranking pass for a whole batch); a different list is read and ranked afresh."""
+    real = _replay_pools(memory_dir)
+    if memo is None:
+        return real
+
+    def run(queries):
+        key = tuple(queries)
+        if memo.get("pools_key") != key:
+            memo["pools_key"], memo["pools"] = key, real(queries)
+        return memo["pools"]
+
+    return run
+
+
+def plan(memory_dir: str, *, now: Optional[float] = None, text: Optional[str] = None,
+         memo: Optional[dict] = None) -> Optional[dict]:
     """The diet for a corpus with a declared floor budget, or None when none is declared.
 
-    ``{"budget", "headroom", "target", "bytes", "pointers", "non_behavior", "proposals":
-    [row...]}``, where ``target`` is the budget less the headroom; each proposal
-    row carries ``name, bytes, type, lane, behavior, use, injected, opened, unsafe, young,
-    age_days, evidence, after`` (the floor bytes once this and every earlier proposal is
-    taken).
+    ``{"budget", "headroom", "target", "bytes", "pointers", "non_behavior", "unreplayed",
+    "rows": [row...], "proposals": [row...]}``, where ``target`` is the budget less the
+    headroom; ``rows`` is every weighed pointer in the diet's order and ``proposals`` the
+    first of them that reach the target. Each row carries ``name, bytes, type, lane,
+    behavior, text, riders, use, injected, opened, unsafe, lost, waiting, young, age_days,
+    evidence``, and a proposal also ``after`` (the floor bytes once this and every earlier
+    proposal is taken). ``unreplayed`` counts the recent prompts not ranked yet.
+
+    ``text`` weighs that floor in place of the one on disk (the reviewed batch weighs the
+    floor as each line leaves it), and ``memo`` is a dict that carries what does not depend
+    on the floor from one call to the next: each memory's type, the use counts, the births
+    and the replay's rankings.
     Read-only. The replay runs only when the floor is over its target."""
     budget = floor_budget(memory_dir)
     if not budget:
         return None
-    text = floor_text(memory_dir)
+    text = floor_text(memory_dir) if text is None else text
     if text is None:
         return None
     total = len(text.encode("utf-8"))
-    rows = pointers(memory_dir, text)
+    rows = pointers(memory_dir, text, None if memo is None else memo.setdefault("types", {}))
     headroom = floor_headroom(memory_dir, budget)
     target = budget - headroom
     out = {"budget": budget, "headroom": headroom, "target": target, "bytes": total, "pointers": len(rows),
-           "non_behavior": sum(1 for r in rows if not r["behavior"]), "proposals": []}
+           "non_behavior": sum(1 for r in rows if not r["behavior"]), "unreplayed": 0, "rows": [],
+           "proposals": []}
     if total <= target or not rows:
         return out
     from .lint_floor import trim_safety_report
 
     report = trim_safety_report(memory_dir, floor_text=text, names={r["name"] for r in rows},
-                                k=REPLAY_K, max_queries=REPLAY_PROMPTS, pools_for=_replay_pools(memory_dir))
+                                k=REPLAY_K, max_queries=REPLAY_PROMPTS,
+                                pools_for=_memoized_pools(memory_dir, memo))
+    out["unreplayed"] = int(report.get("unreplayed") or 0)
     safety = {r["name"]: r for r in report.get("rows") or []}
     now = time.time() if now is None else now
-    uses, span = usage(memory_dir, [r["name"] for r in rows], now)
-    born = births(memory_dir, [r["name"] for r in rows])
+    names = [r["name"] for r in rows]
+    if memo is not None and set(names) <= set(memo.get("names") or ()):
+        (uses, span), born = memo["usage"], memo["births"]  # the floor only shrinks in a batch
+    else:
+        (uses, span), born = usage(memory_dir, names, now), births(memory_dir, names)
+        if memo is not None:
+            memo.update(names=names, usage=(uses, span), births=born)
     need = max(span, float(MIN_AGE_DAYS))
     for r in rows:
         u = uses.get(r["name"]) or {"injected": 0, "opened": 0}
@@ -487,7 +538,7 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
         when, dated_by = born.get(r["name"]) or (None, None)
         age = None if when is None else round(max(0.0, now - when) / 86400.0, 1)
         r.update(injected=u["injected"], opened=u["opened"], use=u["injected"] + u["opened"],
-                 unsafe=_unsafe(s, report),
+                 unsafe=_unsafe(s, report), lost=int(s.get("lost") or 0),
                  waiting=not s.get("lost") and _unsafe(s, report),
                  young=age is None or age < need, age_days=age, dated_by=dated_by, age_bar=need)
         lane = "behavior-lane" if r["behavior"] else "not behavior-lane"
@@ -496,6 +547,7 @@ def plan(memory_dir: str, *, now: Optional[float] = None) -> Optional[dict]:
                          f"{_use_line(u, span)}{_age_line(r, span)}; {_safety_line(s, report)}")
     rows.sort(key=lambda r: (2 if r["unsafe"] else int(r["young"]), r["behavior"], r["use"],
                              -r["bytes"], r["name"]))
+    out["rows"] = rows
     left = total
     for r in rows:
         if left <= target:
@@ -511,24 +563,31 @@ def queue_entries(memory_dir: str, make) -> List[dict]:
     p = plan(memory_dir)
     if not p:
         return []
-    out = []
+    return [make("floor", TARGET_PREFIX + r["name"], r["evidence"], proposal_line(p, r))
+            for r in p["proposals"]]
+
+
+def demotable(r: dict) -> bool:
+    """The diet proposes this row as safe to demote: not one that loses a recall hit, not
+    one whose replay is unfinished, not one too new to judge on use."""
+    return not r["unsafe"] and not r["young"]
+
+
+def proposal_line(p: dict, r: dict) -> str:
+    """A proposal row's likely verdict: ``demote: …``, ``wait: …`` or ``keep it: …``."""
+    if r["waiting"]:
+        return ("wait: its trim-safety replay is not finished; run `hippo tend` again "
+                "before demoting it")
+    if r["unsafe"]:
+        return ("keep it: removing its line loses a recall hit (listed last); demote only "
+                "if you accept that")
+    if r["young"]:
+        return (f"wait: too new to judge on use; it is weighed with the rest once it is as "
+                f"old as the span its use is counted over ({r['age_bar']:g} days today); demote "
+                "it now only if you know it is not needed")
     room = f" (the diet runs to {p['target']:,}B, so a new floor line still fits)" if p["headroom"] else ""
-    for r in p["proposals"]:
-        if r["waiting"]:
-            proposed = ("wait: its trim-safety replay is not finished; run `hippo tend` again "
-                        "before demoting it")
-        elif r["unsafe"]:
-            proposed = ("keep it: removing its line loses a recall hit (listed last); demote only "
-                        "if you accept that")
-        elif r["young"]:
-            proposed = (f"wait: too new to judge on use; it is weighed with the rest once it is as "
-                        f"old as the span its use is counted over ({r['age_bar']:g} days today); demote "
-                        "it now only if you know it is not needed")
-        else:
-            proposed = (f"demote: remove its line from MEMORY.md (the memory stays, reachable by "
-                        f"recall); the floor would be {r['after']:,}B of its {p['budget']:,}B budget{room}")
-        out.append(make("floor", TARGET_PREFIX + r["name"], r["evidence"], proposed))
-    return out
+    return (f"demote: remove its line from MEMORY.md (the memory stays, reachable by "
+            f"recall); the floor would be {r['after']:,}B of its {p['budget']:,}B budget{room}")
 
 
 def detail_lines(name: str, memory_dir: str) -> List[str]:
@@ -546,11 +605,12 @@ def detail_lines(name: str, memory_dir: str) -> List[str]:
     return out
 
 
-def demote(name: str, memory_dir: str, repo_root: str) -> dict:
+def demote(name: str, memory_dir: str, repo_root: str, expect: Optional[List[str]] = None) -> dict:
     """``{"ok", "message"}``: remove ``name``'s floor pointer line, through the floor kind's
     write path (the outbox's floor copy when outbox mode is honoured, else the corpus dir's
     ``MEMORY.md``). Touches no memory file. The line goes whole, so the message names any
-    other pointer that was on it."""
+    other pointer that was on it. ``expect`` (the reviewed batch passes the lines it showed)
+    makes the removal exact: nothing is removed unless those are the lines that would go."""
     from . import outbox_edit as OE
     from .lint_floor import memory_exists
     from .new_memory_floor import _remove_floor_pointer, _without_pointer
@@ -558,9 +618,10 @@ def demote(name: str, memory_dir: str, repo_root: str) -> dict:
     floor_dir = OE.floor_dir_for_edit(memory_dir, repo_root)
     _text, gone = _without_pointer(floor_text(memory_dir) or "", name)
     also = riders(gone, name, memory_exists(memory_dir))
-    r = _remove_floor_pointer(memory_dir, name, floor_dir=floor_dir)
+    r = _remove_floor_pointer(memory_dir, name, floor_dir=floor_dir, expect=expect)
     if r.get("status") != "removed":
-        return {"ok": False, "message": f"{name}: the floor line was not removed ({r.get('reason')})."}
+        return {"ok": False, "reason": r.get("reason"),
+                "message": f"{name}: the floor line was not removed ({r.get('reason')})."}
     budget = floor_budget(memory_dir)
     text = floor_text(memory_dir) or ""
     size = len(text.encode("utf-8"))
@@ -610,7 +671,7 @@ def doctor_line(memory_dir: str) -> Optional[Dict[str, str]]:
             f"floor budget: MEMORY.md {size:,}B, within its declared {budget:,}B "
             f"(budgets.floor_bytes) with {budget - size:,}B to spare; {lanes}. The diet keeps "
             f"{headroom:,}B free so a new floor line still passes the gate: `{START_COMMAND}` "
-            "proposes the next line to move out.")}
+            "lists the lines to move out.")}
     runs_to = f" (it runs to {target:,}B, leaving {headroom:,}B for new floor lines)" if headroom else ""
     later = "" if replay_cached(memory_dir) else (
         " Which lines are safe to move is judged by a replay of recent prompts, which runs on "
