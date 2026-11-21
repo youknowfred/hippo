@@ -38,7 +38,7 @@ jobs:
     # Same-repo PRs only: forks get no write token; the boundary is explicit, not incidental.
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history: staleness baselines resolve source_commit shas via git log —
           # a shallow clone would silently render every memory as fresh.
