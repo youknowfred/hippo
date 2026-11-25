@@ -49,8 +49,18 @@ _STRONG_DESC_COVERAGE = 0.40
 
 # Cosine thresholds per embedding model: ``strong`` admits on dense alone, ``support``
 # admits a corroborated memory that shares too few terms.
+#
+# Qwen3-Embedding-4B, full width (HCR-3, 2026-11-25; the floor's evidence file has the
+# numbers): with no entry the gate was off on the high profile, and only 3 of 23 fixture
+# off-topic probes abstained (lean: 18 of 23). Its on/off-topic best cosines separate
+# cleanly (on-topic min 0.495; off-topic max 0.454 over every probe on three corpora,
+# 12 adjacent technical ones included), so both thresholds sit inside that gap: no measured
+# off-topic probe clears either, and ``strong`` is under every on-topic best. Every
+# ``strong`` from 0.46 to 0.60 and every ``support`` from 0.42 to 0.48 gave identical
+# results; 0.40 leaked.
 _COSINE_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": {"strong": 0.76, "support": 0.72},
+    "Qwen/Qwen3-Embedding-4B": {"strong": 0.48, "support": 0.46},
 }
 
 

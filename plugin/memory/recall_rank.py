@@ -46,9 +46,22 @@ _RRF_K = 60
 # similarities run on a visibly lower absolute scale (on-topic hits [0.32, 0.70], off-topic
 # probes topping out at 0.28), so its floor is calibrated separately and is NOT the
 # bge-small number.
+#
+# HCR-3 (2026-11-25): the high profile's space, Qwen3-Embedding-4B at full width (2560) with
+# the production query instruction (``embed_mlx.QUERY_INSTRUCTION``), by the same method on
+# the real warm model (mxfp8 weights, MLX). Best cosine per query over the whole gated
+# matrix: on-topic [0.618, 0.835] golden, [0.495, 0.773] starter packs, [0.538, 0.806] this
+# repo's own corpus; the fixtures' off-topic probes top out at 0.328 / 0.308 / 0.399, and 12
+# generic off-topic probes at 0.402. Unlike bge-small (whose classes overlap on the live
+# corpus) the instruction-aware space separates cleanly. 0.42 sits on the low side of that
+# gap: 0.018 over the generic off-topic ceiling, 0.075 under the lowest on-topic best. The
+# live corpus's hard set plateaus at its best from 0.38 to 0.42 and loses rows from 0.43 up.
+# The key is the space id: an MRL-truncated space (``model@dim``) is a different cosine
+# space and is NOT covered by this entry. Evidence: planning/HCR-3.evidence.2026-11-25.json.
 _DENSE_FLOOR_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": 0.60,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
+    "Qwen/Qwen3-Embedding-4B": 0.42,
 }
 # Fallback for any OTHER model id (a future default bump, a user-supplied HIPPO_EMBED_MODEL
 # not in the table above) -- conservative (low) rather than guessing a tight number for an
@@ -98,6 +111,11 @@ def _dense_floor(model: Optional[str]) -> float:
 # 0.0025 up a corroborated near-duplicate (0.0023 under) displaced a hippo hit at the MMR
 # re-cut, and emgl's MRR dipped. Admitting on ANY BM25 match instead of the top 10 cost an
 # emgl hit at 0.005. Off-topic abstention was identical at every band on all three.
+# Re-checked for the Qwen3-Embedding-4B space at its 0.42 floor (HCR-3, 2026-11-25): every
+# band from 0 to 0.02 kept the same hard-set hits and the same abstentions on the golden,
+# starter-pack and live corpora; near-floor density is LOWER there than bge-small's at 0.60
+# (rows within 0.002 under the floor per on-topic query: 3.05 vs 4.84 live, 0.39 vs 1.00
+# golden), so the one shared default stands.
 # ``HIPPO_DENSE_FLOOR_BAND`` overrides it; 0 turns the band off (byte-identical to the floor).
 _DENSE_FLOOR_BAND_DEFAULT = 0.002
 _BAND_CORROBORATION_DEPTH = 10  # = recall_abstain._AGREE_DEPTH, HOT-2's agreement depth
