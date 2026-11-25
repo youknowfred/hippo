@@ -442,15 +442,18 @@ def test_doctor_names_a_loaded_high_server(fakes, project, monkeypatch):
 # Setup: the one download, previewed with its size
 # --------------------------------------------------------------------------- #
 def test_fetch_previews_the_size_and_downloads_only_with_yes(tmp_path, monkeypatch, capsys):
+    from memory import rerank_mlx as R
+
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path))
     calls = []
     monkeypatch.setattr(E, "fetch", lambda model: calls.append(model) or "/snap")
+    monkeypatch.setattr(R, "fetch", lambda model: calls.append(model) or "/snap")
     assert setup_cli.main(["--profile", "--fetch"]) == 0
     out = capsys.readouterr().out
     assert "~4.2 GB" in out and "Nothing was downloaded" in out and calls == []
     assert setup_cli.main(["--profile", "high", "--fetch", "--yes"]) == 0
     out = capsys.readouterr().out
-    assert calls == [_SPACE] and "downloaded Qwen/Qwen3-Embedding-4B" in out
+    assert calls[0] == _SPACE and "downloaded Qwen/Qwen3-Embedding-4B" in out
 
 
 # --------------------------------------------------------------------------- #

@@ -24,8 +24,9 @@ Qwen3-Embedding is instruction-aware: a query is embedded as
 model's own: the hidden state of the final token (the tokenizer appends ``<|endoftext|>``).
 Batches are right-padded, which is exact for a causal model — a real token never attends to
 a later pad, and every row's positions start at 0 — so the last real token is gathered per
-row with no attention mask. All MLX work runs on ONE worker thread the embedder owns (MLX
-arrays and streams are not shared across threads); a document batch is fed to it in small
+row with no attention mask. All MLX work runs on the process's ONE MLX worker thread
+(``mlx_executor``; MLX arrays and streams are not shared across threads, and the rerankers
+submit there too); a document batch is fed to it in small
 slices so a query waiting behind a background build waits one slice, not the whole batch.
 """
 
@@ -191,20 +192,28 @@ def cache_dir() -> str:
     return os.path.join(platform_cache_dir(), "mlx")
 
 
-def snapshot_dir(model: str, root: Optional[str] = None) -> str:
-    spec = HIGH_MODELS[model]
+def spec_snapshot_dir(spec: Dict, root: Optional[str] = None) -> str:
+    """The HF-hub snapshot dir of a ``{"repo", "revision"}`` spec under the MLX cache —
+    shared with ``rerank_mlx``, whose pinned weights sit beside the embedder's."""
     repo_dir = "models--" + spec["repo"].replace("/", "--")
     return os.path.join(root or cache_dir(), repo_dir, "snapshots", spec["revision"])
 
 
+def snapshot_dir(model: str, root: Optional[str] = None) -> str:
+    return spec_snapshot_dir(HIGH_MODELS[model], root)
+
+
 def model_cached(model: str, root: Optional[str] = None) -> bool:
+    return snapshot_complete(snapshot_dir(model, root))
+
+
+def snapshot_complete(snap: str) -> bool:
     """Pure stat: the pinned snapshot holds a config, a tokenizer and a complete set of
     weight files — an unsharded ``*.safetensors``, or every ``-NNNNN-of-MMMMM`` shard.
     The file names are the evidence, not ``model.safetensors.index.json``: the 4B mxfp8
     conversion ships a stale index naming two shards it does not have (mlx_lm globs the
     files too). A snapshot link appears only once its file finished downloading, so a
     partial download reads as not cached."""
-    snap = snapshot_dir(model, root)
     if not (os.path.isfile(os.path.join(snap, "config.json"))
             and os.path.isfile(os.path.join(snap, "tokenizer.json"))):
         return False
@@ -254,10 +263,31 @@ def unavailable_reason(model: str) -> Optional[str]:
 
 def fetch(model: str) -> str:
     """Download ``model``'s pinned MLX weights into ``cache_dir()``. Setup only."""
+    return fetch_spec(HIGH_MODELS[model])
+
+
+def fetch_spec(spec: Dict) -> str:
     from huggingface_hub import snapshot_download
 
-    spec = HIGH_MODELS[model]
     return snapshot_download(spec["repo"], revision=spec["revision"], cache_dir=cache_dir())
+
+
+# --------------------------------------------------------------------------- #
+# The one MLX thread
+# --------------------------------------------------------------------------- #
+_POOL: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_POOL_LOCK = threading.Lock()
+
+
+def mlx_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """The process's single MLX worker. MLX arrays and streams are not shared across
+    threads, so every model this process serves through MLX — the embedder and the
+    rerankers (``rerank_mlx``) — submits its work here, one task at a time."""
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is None:
+            _POOL = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="hippo-mlx")
+        return _POOL
 
 
 # --------------------------------------------------------------------------- #
@@ -274,7 +304,7 @@ class _MLXEmbedder:
 
     def __init__(self, model: str, dim: int, snap: str) -> None:
         self.model_id, self.dim = model, dim
-        self._pool = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="hippo-mlx")
+        self._pool = mlx_executor()
         t0 = time.monotonic()
         self._pool.submit(self._load, snap).result()
         self.load_ms = (time.monotonic() - t0) * 1000.0
@@ -287,11 +317,12 @@ class _MLXEmbedder:
         from tokenizers import Tokenizer
 
         self._mx = mx
+        active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
+        base = int(active())  # a reranker may already share this process's MLX memory
         self._net, _cfg = load_model(Path(snap))
         self._net.eval()
         mx.eval(self._net.parameters())  # resident now, not on the first query
-        active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
-        self.resident_bytes = int(active())  # the weights' unified-memory footprint
+        self.resident_bytes = int(active()) - base  # the weights' unified-memory footprint
         self._tok = Tokenizer.from_file(os.path.join(snap, "tokenizer.json"))
         self._pad = self._tok.token_to_id("<|endoftext|>") or 0
         self._eos = self._pad

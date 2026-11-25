@@ -51,6 +51,7 @@ def high_index_dir(index_dir: str) -> str:
 
 class _State:
     def __init__(self) -> None:
+        self.rerank: Optional[str] = None  # HCR-4: the warm reranker, on the high profile
         self.status = "off"  # off | unavailable | loading | ready | failed
         self.reason = ""
         self.space: Optional[str] = None
@@ -113,9 +114,9 @@ def fresh(lean, high, space: str) -> bool:
 
 def status() -> Dict:
     """The heartbeat's ``high`` record; ``{}`` when the profile is not high."""
-    if _ST.status == "off":
+    if _ST.rerank is None and _ST.status == "off":
         return {}
-    return {
+    out = {
         "status": _ST.status,
         "space": _ST.space,
         "reason": _ST.reason,
@@ -123,6 +124,42 @@ def status() -> Dict:
         "load_ms": round(_ST.load_ms, 1) if _ST.load_ms is not None else None,
         "resident_bytes": _ST.resident_bytes,
     }
+    if _ST.rerank is not None:
+        from .rerank_mlx import status as rerank_status
+
+        rec = rerank_status(_ST.rerank)
+        if rec.get("load_ms") is not None:
+            rec["load_ms"] = round(rec["load_ms"], 1)
+        out["rerank"] = rec
+    return out
+
+
+def pin_blas_threads(environ=None) -> bool:
+    """HCR-2's measured follow-up, folded into HCR-4: on the high profile, one OpenBLAS
+    thread for this (the warm) server. OpenBLAS's thread pool beside Metal took warm recall
+    from a 114 ms to a 309-464 ms median; a reranker adds Metal work to the same budget.
+    OpenBLAS reads the variable when numpy loads, so ``mcp_server.main`` calls this first.
+    An explicit value (any) is left alone; lean and floor are left alone. True if pinned."""
+    env = os.environ if environ is None else environ
+    if env.get("OPENBLAS_NUM_THREADS") is not None:
+        return False
+    try:
+        from .retrieval_profile import resolve_retrieval_profile
+
+        if resolve_retrieval_profile() != "high":
+            return False
+    except Exception:
+        return False
+    env["OPENBLAS_NUM_THREADS"] = "1"
+    return True
+
+
+def _kick_rerank() -> None:
+    """High profile: the warm reranker loads once per process, in the background."""
+    from .rerank_mlx import WARM_MODEL, start_loading
+
+    _ST.rerank = WARM_MODEL
+    start_loading(WARM_MODEL)
 
 
 def kick(memory_dir) -> None:
@@ -131,7 +168,11 @@ def kick(memory_dir) -> None:
     from .build_index import dense_disabled
     from .retrieval_profile import resolve_retrieval_profile
 
-    if resolve_retrieval_profile() != "high" or dense_disabled():
+    if resolve_retrieval_profile() != "high":
+        _ST.status, _ST.engaged, _ST.rerank = "off", False, None
+        return
+    _kick_rerank()  # independent of the embedder: a reranker reorders lean hits too
+    if dense_disabled():
         _ST.status, _ST.engaged = "off", False
         return
     memory_dir = memory_dir() if callable(memory_dir) else memory_dir
@@ -217,18 +258,41 @@ def serving(memory_dir, lean_load) -> Iterator[None]:
     except Exception:
         plan = None
     _ST.engaged = bool(plan)
-    if not plan:
+    with _warm_reranker():
+        if not plan:
+            yield
+            return
+        from .embed_mlx import using_space
+        from .recall_tiers import INDEX_LOADER
+
+        token = INDEX_LOADER.set(lambda d: plan.get(d) or lean_load(d))
+        try:
+            with using_space(_ST.space):
+                yield
+        finally:
+            INDEX_LOADER.reset(token)
+
+
+@contextmanager
+def _warm_reranker() -> Iterator[None]:
+    """HCR-4: once the warm reranker has loaded, a served call scores with it (and
+    ``HIPPO_RERANK`` defaults ON inside). Until then — or off the high profile — the call
+    runs exactly as before. Never raises."""
+    model = None
+    try:
+        from .rerank_mlx import loaded
+
+        if _ST.rerank is not None and loaded(_ST.rerank) is not None:
+            model = _ST.rerank
+    except Exception:
+        model = None
+    if model is None:
         yield
         return
-    from .embed_mlx import using_space
-    from .recall_tiers import INDEX_LOADER
+    from .rerank_mlx import using_reranker
 
-    token = INDEX_LOADER.set(lambda d: plan.get(d) or lean_load(d))
-    try:
-        with using_space(_ST.space):
-            yield
-    finally:
-        INDEX_LOADER.reset(token)
+    with using_reranker(model):
+        yield
 
 
 def _plan(lean_load) -> Optional[Dict[str, object]]:
@@ -252,10 +316,13 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
 
 def _reset_for_tests() -> None:
     global _HIGH_CACHE
+    from .rerank_mlx import _reset_for_tests as _reset_rerank
+
     _ST.space = None  # a running loop exits at its next wake
     _ST.wake.set()
     _ST.__init__()
     _HIGH_CACHE = None
+    _reset_rerank()
 
 
 def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
@@ -285,4 +352,8 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
         bits.append(f"model load {h['load_ms'] / 1000:.1f} s")
     if h.get("resident_bytes"):
         bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident")
+    rr = h.get("rerank") if isinstance(h.get("rerank"), dict) else {}
+    if rr.get("model"):
+        bits.append(f"reranker {rr['model']} {rr.get('status') or 'idle'}"
+                    + (f" ({rr['reason']})" if rr.get("reason") else ""))
     return f"{meaning}; {', '.join(bits)}", ""

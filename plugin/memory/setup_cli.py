@@ -549,29 +549,48 @@ def _profile(args) -> int:
 
 
 def _fetch_high(args) -> int:
-    """HCR-2: the high embedder's one download — the pinned MLX weights, previewed with
-    their size first, fetched only with ``--yes``. Recall never downloads."""
+    """HCR-2/HCR-4: the high profile's one download — the embedder's and the two
+    rerankers' pinned MLX weights, previewed with their sizes first, fetched only with
+    ``--yes``. Recall never downloads."""
     from . import embed_mlx as E
+    from . import rerank_mlx as R
 
     flag, model = "hippo setup --profile --fetch", E.resolve_high_model()
-    spec = E.HIGH_MODELS[model]
+    wanted = [  # (model, spec, cached, snapshot dir, fetch)
+        (model, E.HIGH_MODELS[model], E.model_cached, E.snapshot_dir, E.fetch),
+    ] + [(m, R.RERANK_MODELS[m], R.model_cached, R.snapshot_dir, R.fetch)
+         for m in (R.WARM_MODEL, R.EXPLICIT_MODEL)]
     if not E.mlx_installed():
         print(f"{flag}: note: MLX is not installed — {E.INSTALL_HINT}.")
-    if E.model_cached(model):
-        print(f"{flag}: {model} is already downloaded at {E.snapshot_dir(model)}.")
+    missing = []
+    for m, spec, cached, snap, fetch in wanted:
+        if cached(m):
+            print(f"{flag}: {m} is already downloaded at {snap(m)}.")
+        else:
+            missing.append((m, spec, fetch))
+    if not missing:
         return 0
-    size = f"~{spec['download_bytes'] / 1e9:.1f} GB"
+
+    def _size(n: int) -> str:
+        return f"~{n / 1e9:.1f} GB"
+
     if not args.yes:
-        print(f"`{flag} --yes` would download {model} as {spec['repo']}@{spec['revision'][:12]} "
-              f"({size}) into {E.cache_dir()}. Nothing was downloaded.")
+        items = "; ".join(f"{m} as {spec['repo']}@{spec['revision'][:12]} "
+                          f"({_size(spec['download_bytes'])})" for m, spec, _f in missing)
+        total = _size(sum(spec["download_bytes"] for _m, spec, _f in missing))
+        print(f"`{flag} --yes` would download {items} — {total} in all — into "
+              f"{E.cache_dir()}. Nothing was downloaded.")
         return 0
-    try:
-        path = E.fetch(model)
-    except Exception as exc:
-        print(f"{flag}: download failed: {exc}. Recall stays on lean.")
-        return 1
-    print(f"{flag}: downloaded {model} ({size}) to {path}.")
-    return 0
+    rc = 0
+    for m, spec, fetch in missing:
+        try:
+            path = fetch(m)
+        except Exception as exc:
+            print(f"{flag}: {m} download failed: {exc}. Recall serves without it.")
+            rc = 1
+            continue
+        print(f"{flag}: downloaded {m} ({_size(spec['download_bytes'])}) to {path}.")
+    return rc
 
 
 # setting -> (its handler, one line for the bare `hippo setup` listing)
@@ -597,7 +616,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--profile", nargs="?", const="show", default=None,
                         metavar="PROFILE", help=_SETTINGS["profile"][1])
     parser.add_argument("--fetch", action="store_true",
-                        help="with --profile: download the high embedder's weights (preview without --yes)")
+                        help="with --profile: download the high embedder's and rerankers' weights (preview without --yes)")
     parser.add_argument("--remove", metavar="DIR", default=None,
                         help="with --worktree-copies: the one directory to remove")
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")
