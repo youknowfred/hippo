@@ -148,21 +148,47 @@ def test_the_walk_reaches_two_hops_where_one_hop_cannot(monkeypatch):
     assert 0 < s[2] < s[1]
 
 
-def test_a_node_several_seeds_point_at_outranks_a_single_seed_neighbor(monkeypatch):
+def test_a_two_hop_node_several_seeds_reach_outranks_one_only_one_reaches(monkeypatch):
     monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "2")
     edges: dict = {}
-    _link(edges, "s1", "shared")
-    _link(edges, "s2", "shared")
-    _link(edges, "s1", "solo")
-    entries = _entries("s1", "s2", "shared", "solo")
+    _link(edges, "s1", "m1")
+    _link(edges, "s2", "m2")
+    _link(edges, "m1", "shared")
+    _link(edges, "m2", "shared")
+    _link(edges, "m1", "solo")
+    entries = _entries("s1", "s2", "m1", "m2", "shared", "solo")
     penalized = [(0, 0.04, None), (1, 0.039, None)]
     out, injected, _e = RG._ppr_expand(penalized, entries, edges)
     s = _scores(out)
-    assert injected == {2, 3} and s[2] > s[3]
-    # GRA-1 gives both the same discount off s1: the graph is a hint there, a vote here
-    monkeypatch.setenv("HIPPO_HUB_DAMPING", "0")
-    s1 = _scores(RG._expand_neighbors(penalized, entries, edges)[0])
-    assert s1[2] == s1[3]
+    assert {4, 5} <= injected and s[4] > s[5]  # the walk votes; the 1-hop pull sees neither
+    _o, one_hop, _e2 = RG._expand_neighbors(penalized, entries, edges)
+    assert one_hop == {2, 3}
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_walk_is_a_superset_of_the_one_hop_pull(monkeypatch, seed):
+    """Every node GRA-1 endorses stays endorsed, at no less than GRA-1's score — the walk
+    may add MMR/knee protection, never remove it (the first live A/B's failure mode)."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "3")
+    rnd = random.Random(seed)
+    names = [f"n{i:02d}" for i in range(40)]
+    edges: dict = {n: _rec() for n in names}
+    for _ in range(70):
+        a, b = rnd.sample(names, 2)
+        if rnd.random() < 0.8:
+            _link(edges, a, b)
+        else:
+            _typed(edges, a, rnd.choice(["refines", "derives-from"]), b)
+    entries = _entries(*names)
+    order = rnd.sample(range(40), 40)
+    penalized = [(i, 0.05 - r * 0.001, None) for r, i in enumerate(order)]
+    drafts = {order[1]} if seed % 2 else set()
+    seen = {names[order[5]]} if seed % 3 == 0 else None
+    one = RG._expand_neighbors(penalized, entries, edges, None, drafts, expanded_before=seen)
+    walk = RG._ppr_expand(penalized, entries, edges, None, drafts, expanded_before=seen)
+    assert one[2] <= walk[2]
+    s1, s2 = _scores(one[0]), _scores(walk[0])
+    assert all(s2[j] >= s1[j] for j in s1)
 
 
 def test_no_reserved_slots_an_organic_score_that_is_as_good_wins(monkeypatch):
