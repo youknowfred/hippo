@@ -125,12 +125,17 @@ def status() -> Dict:
     }
 
 
-def kick(memory_dir: Optional[str]) -> None:
-    """Every served call: note the profile and tiers; start the loader thread once."""
+def kick(memory_dir) -> None:
+    """Every served call: note the profile and tiers; start the loader thread once.
+    ``memory_dir`` may be a zero-argument callable, resolved only on the high profile."""
     from .build_index import dense_disabled
     from .retrieval_profile import resolve_retrieval_profile
 
-    if not memory_dir or resolve_retrieval_profile() != "high" or dense_disabled():
+    if resolve_retrieval_profile() != "high" or dense_disabled():
+        _ST.status, _ST.engaged = "off", False
+        return
+    memory_dir = memory_dir() if callable(memory_dir) else memory_dir
+    if not memory_dir:
         _ST.status, _ST.engaged = "off", False
         return
     from . import embed_mlx as E
@@ -196,7 +201,7 @@ def refresh_tier(memory_dir: str, index_dir: str, space: str) -> bool:
 
 
 @contextmanager
-def serving(memory_dir: Optional[str], lean_load) -> Iterator[None]:
+def serving(memory_dir, lean_load) -> Iterator[None]:
     """Wrap one served call: on high, with the model loaded and every tier's high index
     fresh, each tier's index resolves to its high twin and the query embeds in the high
     space. Otherwise this is a no-op and the call serves lean, exactly as before."""
