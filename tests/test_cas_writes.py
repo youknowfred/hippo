@@ -130,6 +130,7 @@ NON_CORPUS_SITES = {
     ("eval_floor", "write_floor_sweep"): "derived report",
     ("salience_eval", "write_report"): "derived report",
     ("outcome_prior_eval", "write_report"): "derived report",
+    ("graph_ppr_eval", "write_report"): "derived report",
     ("init_project", "_copy_if_absent"): "seed copy of a packaged file",
     ("init_project", "init_project"): "fresh .format stamp at init",
     ("interview", "_write_state"): "telemetry bookkeeping",

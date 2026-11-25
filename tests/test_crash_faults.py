@@ -44,6 +44,7 @@ from memory import atomic as A
 from .crash_scenarios_conventions import scenarios as _conventions_scenarios
 from .crash_scenarios_floor_diet import scenarios as _floor_diet_scenarios
 from .crash_scenarios_retrieval_profile import scenarios as _retrieval_profile_scenarios
+from .crash_scenarios_graph_ppr import scenarios as _graph_ppr_scenarios
 from .crash_scenarios_binding import scenarios as _binding_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
@@ -125,6 +126,7 @@ CRASH_CONTRACT = {
     ("floor_diet", "_write_replay_cache"): ("intact",),  # NAT-3: derived replay cache; the diet still proposes
     ("retrieval_profile", "write_retrieval_profile"): ("detected",),  # HCR-1: raises; setup_cli prints "refused"; prior preset intact
     ("retrieval_profile", "remove_retrieval_profile"): ("detected",),  # HCR-1: same contract as the writer
+    ("graph_ppr_eval", "write_report"): ("detected",),  # HCR-5: error named, no torn A/B evidence
     ("derived_dirs", "_write_stub"): ("intact",),  # MIG-10: the move stands and the stub dir exists; only its note is missing
     ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
     ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
@@ -1072,6 +1074,7 @@ _SCENARIOS = [
     *_sections_scenarios(_arm, _snap, _assert_unchanged),  # HOT-11 (tests/crash_scenarios_sections.py)
     *_binding_scenarios(_arm, _snap, _assert_unchanged),  # FMT-2 site (tests/crash_scenarios_binding.py)
     *_retrieval_profile_scenarios(_arm, _snap, _assert_unchanged),  # HCR-1 (tests/crash_scenarios_retrieval_profile.py)
+    *_graph_ppr_scenarios(_arm, _snap, _assert_unchanged),  # HCR-5 (tests/crash_scenarios_graph_ppr.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
