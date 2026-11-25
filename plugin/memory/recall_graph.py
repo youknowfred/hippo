@@ -445,24 +445,306 @@ def _expand_neighbors(
                         cand = cand / div
                 if cand > injected.get(j, float("-inf")):
                     injected[j] = cand
-        if not injected and not endorsed_seeds:
+        return _apply_injection(penalized, entries, injected, endorsed_seeds, superseded, organic_score)
+    except Exception:
+        return penalized, set(), set()
+
+
+def _apply_injection(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    injected: dict,
+    endorsed_seeds: set,
+    superseded: Optional[Dict[int, List[str]]],
+    organic_score: Dict[int, float],
+) -> Tuple[List[Tuple[int, float, Optional[str]]], set, set]:
+    """The shared tail of both graph lanes: penalize each injected candidate exactly as an
+    organic one ("recent" invalidation halves it, "old" rides through as state, a live
+    supersedes target is halved), keep an organic tuple that already scores at least as
+    well, and re-sort. Returns ``(list, replaced indices, endorsed indices)``."""
+    if not injected and not endorsed_seeds:
+        return penalized, set(), set()
+    # Every resolvable seed-neighbor, organic-kept or not — plus seed-linked seeds.
+    endorsed = set(injected) | endorsed_seeds
+    replace: dict = {}  # entry idx -> (adj_score, state)
+    for j, cand in injected.items():
+        state = _invalidation_state(entries[j])
+        adj = cand * _INVALIDATION_PENALTY if state == "recent" else cand
+        if superseded and j in superseded:
+            adj *= _SUPERSEDED_PENALTY
+        if j in organic_score and organic_score[j] >= adj:
+            continue  # organic rank is already at least as good — keep it (and its label)
+        replace[j] = (adj, state)
+    if not replace:
+        return penalized, set(), endorsed
+    expanded = [t for t in penalized if t[0] not in replace]
+    expanded.extend((j, adj, state) for j, (adj, state) in replace.items())
+    expanded.sort(key=lambda triple: triple[1], reverse=True)
+    return expanded, set(replace), endorsed
+
+
+# --------------------------------------------------------------------------- #
+# HCR-5: the personalized-PageRank graph lane (HippoRAG-2 style), opt-in beside GRA-1.
+#
+# GRA-1 sees only the direct neighbors of its seeds. This lane walks the same edge set
+# (wikilinks both ways, typed refines / derives-from both ways, never supersedes /
+# contradicts) as a random walk that restarts at the seeds, so a memory two hops out — or
+# one reached from SEVERAL seeds at once — collects mass the 1-hop pull cannot see.
+#
+#   - Personalization: the seeds' fused, penalty-adjusted scores (the same top-N seeds
+#     GRA-1 uses, HIPPO_GRAPH_SEEDS; 0 disables this lane too), normalized to sum 1.
+#   - Graph: GRA-6's links.json via the ONE ``_load_hot_edges`` read recall() already did;
+#     no edges -> no expansion, exactly as GRA-1. Turned into CSR arrays once per edge-list
+#     object (memoized; the warm server pays it once per links.json change).
+#   - Walk: numpy power iteration, damping _PPR_DAMPING, over the seeds' _PPR_HOPS-hop ball
+#     (mass that walks out of the ball is dropped — truncated PPR; nodes further out could
+#     never win a slot anyway). This keeps the cost proportional to the neighborhood, not
+#     the corpus: well under 1 ms at 5k nodes (a test pins the budget).
+#   - Draft guard (RET-13 equivalence): a draft's OWN outbound refines / derives-from are
+#     not walkable, so a draft cannot manufacture corroboration from lineage it declared on
+#     itself; the reverse direction (a non-draft pulling in a draft that derives from it)
+#     walks as before. ``draft_seeds`` is recall()'s precomputed draft index set.
+#   - Candidates: the top _PPR_ENDORSE_MAX non-seed nodes by mass (at least _PPR_MIN_REL
+#     of the strongest) are ENDORSED, and each is injected at _NEIGHBOR_DISCOUNT x the top
+#     seed's score x (its mass / the strongest mass) — so the strongest graph candidate
+#     enters exactly where GRA-1's best 1-hop neighbor would, and the rest scale down by
+#     mass. They then go through ``_apply_injection`` — the same compete-for-top-k rule,
+#     invalidation and supersede penalties, and organic-score-wins tie rule as GRA-1; no
+#     reserved slots. Hub damping (HOT-9) and the once-per-session suppression apply as in
+#     GRA-1, and a seed adjacent to another seed is endorsed (GRF-2).
+#
+# Opt-in (HIPPO_GRAPH_PPR, falsy-set convention); off, recall never calls this and stays
+# byte-identical. Replacing GRA-1 is an owner decision on the committed A/B evidence.
+# --------------------------------------------------------------------------- #
+_PPR_DAMPING = 0.85
+_PPR_HOPS = 3
+_PPR_MAX_ITERS = 60
+_PPR_TOL = 1e-6  # L1 change in the mass vector; total mass is at most 1
+_PPR_BALL_MAX = 2048  # a hop that would grow the ball past this is not taken
+_PPR_ENDORSE_MAX = 10
+_PPR_MIN_REL = 0.1
+_PPR_MEMO: list = []  # [(edges object, graph)] — holds the object, so identity is safe
+
+
+def _graph_ppr_enabled() -> bool:
+    """True only when ``HIPPO_GRAPH_PPR`` is explicitly truthy — DEFAULT OFF, the same
+    falsy-set convention as ``_rerank_enabled()``."""
+    raw = os.environ.get("HIPPO_GRAPH_PPR", "").strip()
+    return raw not in ("", "0", "false", "False")
+
+
+def _ppr_graph(edges: dict) -> dict:
+    """CSR arrays for the walk, built once per edge-list object.
+
+    Node ids follow sorted stem order (deterministic across processes). Each directed
+    pair ``u -> v`` is one entry (set union, as GRA-1's neighbor set); ``typed_only``
+    marks a pair that exists ONLY because ``u`` declared refines / derives-from toward
+    ``v`` — the pairs the draft guard removes when ``u`` is a draft."""
+    if _PPR_MEMO and _PPR_MEMO[0][0] is edges:
+        return _PPR_MEMO[0][1]
+    import numpy as np
+
+    stems = set(edges)
+    for rec in edges.values():
+        to, ti = rec.get("typed_out") or {}, rec.get("typed_in") or {}
+        stems |= set(rec.get("out") or ()) | set(rec.get("in") or ())
+        for rel in ("refines", "derives-from"):
+            stems |= set(to.get(rel) or ()) | set(ti.get(rel) or ())
+    names = sorted(stems)
+    node = {s: n for n, s in enumerate(names)}
+    src: List[int] = []
+    dst: List[int] = []
+    typed_only: List[bool] = []
+    for u, name in enumerate(names):
+        rec = edges.get(name)
+        if not rec:
+            continue
+        to, ti = rec.get("typed_out") or {}, rec.get("typed_in") or {}
+        base = (
+            set(rec.get("out") or ()) | set(rec.get("in") or ())
+            | set(ti.get("refines") or ()) | set(ti.get("derives-from") or ())
+        )
+        own = set(to.get("refines") or ()) | set(to.get("derives-from") or ())
+        for v in sorted(base | own):
+            if v == name:
+                continue
+            src.append(u)
+            dst.append(node[v])
+            typed_only.append(v not in base)
+    n = len(names)
+    src_a = np.asarray(src, dtype=np.int64)
+    flag = np.asarray(typed_only, dtype=bool)
+    graph = {
+        "names": names,
+        "node": node,
+        "indptr": np.concatenate(([0], np.cumsum(np.bincount(src_a, minlength=n)))).astype(np.int64),
+        "src": src_a,
+        "dst": np.asarray(dst, dtype=np.int64),
+        "typed_only": flag,
+        "outdeg": np.bincount(src_a, minlength=n).astype(np.float64),
+        "typed_only_deg": np.bincount(src_a[flag], minlength=n).astype(np.float64),
+    }
+    _PPR_MEMO.clear()
+    _PPR_MEMO.append((edges, graph))
+    return graph
+
+
+def _csr_edges(indptr, nodes):
+    """Positions of every CSR entry whose source is in ``nodes`` (an int array)."""
+    import numpy as np
+
+    starts = indptr[nodes]
+    lens = indptr[nodes + 1] - starts
+    total = int(lens.sum())
+    if not total:
+        return np.zeros(0, dtype=np.int64)
+    return np.repeat(starts - (np.cumsum(lens) - lens), lens) + np.arange(total)
+
+
+def _ppr_mass(graph: dict, seed_nodes, seed_weights, draft_nodes) -> Tuple[object, object]:
+    """``(ball node ids, PPR mass per ball node)`` for one personalization.
+
+    Power iteration ``x <- (1 - d) p + d P^T x`` over the seeds' ``_PPR_HOPS``-hop ball,
+    with the draft guard applied to the walkable pairs and each step divided by the
+    node's full (draft-adjusted) out-degree, so mass leaving the ball is dropped."""
+    import numpy as np
+
+    indptr, src, dst = graph["indptr"], graph["src"], graph["dst"]
+    n = len(graph["names"])
+    is_draft = np.zeros(n, dtype=bool)
+    if draft_nodes:
+        is_draft[list(draft_nodes)] = True
+    blocked = graph["typed_only"] & is_draft[src] if draft_nodes else None
+
+    def _walkable(pos):
+        return pos if blocked is None else pos[~blocked[pos]]
+
+    in_ball = np.zeros(n, dtype=bool)
+    frontier = np.unique(np.asarray(seed_nodes, dtype=np.int64))
+    in_ball[frontier] = True
+    size = frontier.size
+    for _ in range(_PPR_HOPS):
+        nxt = dst[_walkable(_csr_edges(indptr, frontier))]
+        nxt = np.unique(nxt[~in_ball[nxt]])
+        if not nxt.size or size + nxt.size > _PPR_BALL_MAX:
+            break
+        in_ball[nxt] = True
+        size += nxt.size
+        frontier = nxt
+    ball = np.flatnonzero(in_ball)
+    pos = _walkable(_csr_edges(indptr, ball))
+    pos = pos[in_ball[dst[pos]]]
+    deg = graph["outdeg"] - (graph["typed_only_deg"] * is_draft if draft_nodes else 0.0)
+    ls = np.searchsorted(ball, src[pos])
+    ld = np.searchsorted(ball, dst[pos])
+    w = 1.0 / deg[src[pos]]
+    m = ball.size
+    p = np.zeros(m)
+    np.add.at(p, np.searchsorted(ball, np.asarray(seed_nodes, dtype=np.int64)), seed_weights)
+    restart = (1.0 - _PPR_DAMPING) * p
+    x = p
+    for _ in range(_PPR_MAX_ITERS):
+        nx = restart + _PPR_DAMPING * np.bincount(ld, weights=x[ls] * w, minlength=m)
+        if np.abs(nx - x).sum() < _PPR_TOL:
+            x = nx
+            break
+        x = nx
+    return ball, x
+
+
+def _ppr_expand(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    edges: Optional[dict],
+    superseded: Optional[Dict[int, List[str]]] = None,
+    draft_seeds: Optional[set] = None,
+    *,
+    expanded_before: Optional[set] = None,
+    notes: Optional[dict] = None,
+) -> Tuple[List[Tuple[int, float, Optional[str]]], set, set]:
+    """The PPR lane — ``_expand_neighbors``' exact signature and return shape (see the
+    section comment above). Never raises; any failure returns the input untouched."""
+    try:
+        if not edges or not penalized:
             return penalized, set(), set()
-        # Every resolvable seed-neighbor, organic-kept or not — plus seed-linked seeds.
-        endorsed = set(injected) | endorsed_seeds
-        replace: dict = {}  # entry idx -> (adj_score, state)
-        for j, cand in injected.items():
-            state = _invalidation_state(entries[j])
-            adj = cand * _INVALIDATION_PENALTY if state == "recent" else cand
-            if superseded and j in superseded:
-                adj *= _SUPERSEDED_PENALTY
-            if j in organic_score and organic_score[j] >= adj:
-                continue  # organic rank is already at least as good — keep it (and its label)
-            replace[j] = (adj, state)
-        if not replace:
-            return penalized, set(), endorsed
-        expanded = [t for t in penalized if t[0] not in replace]
-        expanded.extend((j, adj, state) for j, (adj, state) in replace.items())
-        expanded.sort(key=lambda triple: triple[1], reverse=True)
-        return expanded, set(replace), endorsed
+        seeds_n = _graph_seed_count()
+        if seeds_n <= 0:
+            return penalized, set(), set()
+        import numpy as np
+
+        graph = _ppr_graph(edges)
+        node = graph["node"]
+        seeds = [
+            (node[entries[i].get("name")], max(score, 0.0), i)
+            for i, score, _state in penalized[:seeds_n]
+            if entries[i].get("name") in node
+        ]
+        if not seeds:
+            return penalized, set(), set()
+        total = sum(s for _n, s, _i in seeds)
+        weights = [s / total if total > 0 else 1.0 / len(seeds) for _n, s, _i in seeds]
+        draft_nodes = {
+            node[entries[i].get("name")]
+            for i in (draft_seeds or ())
+            if 0 <= i < len(entries) and entries[i].get("name") in node
+        }
+        ball, mass = _ppr_mass(graph, [nd for nd, _s, _i in seeds], weights, draft_nodes)
+        names = graph["names"]
+        name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
+        seed_idxs = {i for _n, _s, i in seeds} | {i for i, _s, _st in penalized[:seeds_n]}
+
+        # GRF-2: a seed one walkable step from another seed is endorsed, never injected.
+        endorsed_seeds: set = set()
+        seed_node_to_idx = {nd: i for nd, _s, i in seeds}
+        for nd, _s, i in seeds:
+            for pos in range(int(graph["indptr"][nd]), int(graph["indptr"][nd + 1])):
+                v = int(graph["dst"][pos])
+                if v in seed_node_to_idx and v != nd:
+                    if graph["typed_only"][pos] and nd in draft_nodes:
+                        continue
+                    endorsed_seeds.add(seed_node_to_idx[v])
+
+        # Best mass first; ties by node id, which is sorted-stem order (deterministic).
+        order = np.lexsort((ball, -mass)).tolist()
+        fresh: List[Tuple[float, str, int]] = []
+        before: List[Tuple[float, int]] = []  # HOT-9: already entered by expansion
+        for k in order:
+            mval = float(mass[k])
+            if mval <= 0.0 or len(fresh) >= _PPR_ENDORSE_MAX:
+                break
+            stem = names[int(ball[k])]
+            j = name_to_idx.get(stem)
+            if j is None or j in seed_idxs:
+                continue
+            if expanded_before and stem in expanded_before:
+                before.append((mval, j))
+                continue
+            fresh.append((mval, stem, j))
+        top_score = penalized[0][1]
+        best = fresh[0][0] if fresh else (before[0][0] if before else 1.0)
+        if notes is not None:
+            for mval, j in before:
+                prior = notes.setdefault("expanded_before", {})
+                cand = top_score * _NEIGHBOR_DISCOUNT * min(1.0, mval / best)
+                prior[j] = max(prior.get(j, float("-inf")), cand)
+        median = None
+        if _hub_damping_on():
+            median = graph.get("median")
+            if median is None:
+                median = graph["median"] = _median_in_degree(edges)
+        injected: dict = {}
+        for mval, stem, j in fresh:
+            if mval < _PPR_MIN_REL * best:
+                break
+            cand = top_score * _NEIGHBOR_DISCOUNT * (mval / best)
+            if median is not None:
+                div = _hub_divisor(_in_degree(edges.get(stem) or {}), median)
+                if div > 1.0:
+                    if notes is not None:
+                        notes.setdefault("damped", {})[j] = (cand, cand / div)
+                    cand = cand / div
+            injected[j] = cand
+        organic_score = {i: score for i, score, _state in penalized}
+        return _apply_injection(penalized, entries, injected, endorsed_seeds, superseded, organic_score)
     except Exception:
         return penalized, set(), set()
