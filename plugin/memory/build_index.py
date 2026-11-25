@@ -154,11 +154,12 @@ def default_index_dir(memory_dir: str) -> str:
 
 
 def dense_disabled() -> bool:
-    """True when the dense path is explicitly suppressed (tests / forced BM25-only):
-    ``HIPPO_DISABLE=dense``, or the older ``HIPPO_DISABLE_DENSE`` (SRF-4, ``settings``)."""
+    """Dense suppressed: the kill switch (``HIPPO_DISABLE=dense``/legacy name; SRF-4) or
+    the ``floor`` retrieval profile (HCR-1) — one choke point, every consumer inherits."""
+    from .retrieval_profile import resolve_retrieval_profile
     from .settings import disabled
 
-    return disabled("dense")
+    return disabled("dense") or resolve_retrieval_profile() == "floor"
 
 
 # --------------------------------------------------------------------------- #

@@ -477,12 +477,82 @@ def _worktree_copies(args) -> int:
     return 0
 
 
+def _profile(args) -> int:
+    """HCR-1: the machine's retrieval profile (floor | lean | high) in the model preset
+    file. Bare ``--profile`` / ``--status`` shows the state (and the hardware-gated high
+    OFFER); ``--profile <name>`` previews; ``--yes`` writes; ``--off`` removes the key."""
+    from . import retrieval_profile as RP
+
+    flag = "hippo setup --profile"
+    active, source = RP.profile_source()
+    path = RP._preset_path()
+
+    def _state_lines() -> List[str]:
+        lines = [f"{flag}: active profile is `{active}` (via {source})."]
+        if active == "floor":
+            lines.append("  floor = BM25-only: the dense lane is off by policy.")
+        else:
+            from .build_index import resolve_embed_model
+
+            note = " (high runs lean's models until the big-model tier ships)" if active == "high" else ""
+            lines.append(f"  dense model: {resolve_embed_model()}{note}")
+        if source != "env" and os.environ.get(RP.ENV_VAR):
+            lines.append(f"  note: {RP.ENV_VAR}={os.environ[RP.ENV_VAR]!r} is set but not a "
+                         f"known profile; it is ignored (doctor flags this too).")
+        offer = RP.high_offer_line()
+        if offer:
+            lines.append(f"  {offer}")
+        return lines
+
+    if args.off:
+        if not args.yes:
+            print(f"`{flag} --off --yes` would remove the persisted profile "
+                  f"(back to the `{RP.DEFAULT_PROFILE}` default). Nothing was written.")
+            return 0
+        try:
+            removed = RP.remove_retrieval_profile()
+        except (ValueError, OSError) as exc:
+            print(f"{flag}: refused. {exc}. Nothing was written.")
+            return 1
+        print(f"{flag}: removed." if removed else f"{flag}: nothing persisted; already default.")
+        return 0
+
+    choice = args.profile
+    if choice in (None, "show") or args.status:
+        print("\n".join(_state_lines()))
+        return 0
+    choice = choice.strip().lower()
+    if choice not in RP.PROFILES:
+        print(f"{flag}: unknown profile {choice!r} (one of: {', '.join(RP.PROFILES)}).")
+        return 2
+    if not args.yes:
+        where = path or "<CLAUDE_PLUGIN_DATA unset>"
+        print(f"`{flag} {choice} --yes` would persist retrieval_profile={choice!r} in "
+              f"{where} (currently `{active}` via {source}). Nothing was written.")
+        return 0
+    try:
+        written = RP.write_retrieval_profile(choice)
+    except (ValueError, OSError) as exc:
+        print(f"{flag}: refused. {exc}. Nothing was written.")
+        return 1
+    extra = ""
+    if choice == "high" and not RP.qualifies_for_high():
+        extra = (" Note: this machine is under the high offer's hardware bar "
+                 "(arm64 macOS, >= 64 GiB); high still resolves safely, but the "
+                 "big models will be heavy here.")
+    if choice == "high":
+        extra += " Until the big-model tier ships, high runs lean's models — this records the opt-in."
+    print(f"{flag}: wrote retrieval_profile={choice!r} to {written}.{extra}")
+    return 0
+
+
 # setting -> (its handler, one line for the bare `hippo setup` listing)
 _SETTINGS = {
     "warm": (_warm, "warm recall: the session's MCP server answers each prompt's recall"),
     "user_tier": (_user_tier, "a local git home for the user tier (git init; never pushes or pulls)"),
     "worktree_copies": (_worktree_copies, "old index/telemetry copies in worktrees: list them, remove one at a time"),
     "conventions": (_conventions, "refresh the corpus's CONVENTIONS.md to the plugin's version, keeping local lines"),
+    "profile": (_profile, "the machine's retrieval profile: floor (BM25-only) | lean (default) | high (big-model)"),
 }
 
 
@@ -496,6 +566,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--user-tier", action="store_true", help=_SETTINGS["user_tier"][1])
     parser.add_argument("--worktree-copies", action="store_true", help=_SETTINGS["worktree_copies"][1])
     parser.add_argument("--conventions", action="store_true", help=_SETTINGS["conventions"][1])
+    parser.add_argument("--profile", nargs="?", const="show", default=None,
+                        metavar="PROFILE", help=_SETTINGS["profile"][1])
     parser.add_argument("--remove", metavar="DIR", default=None,
                         help="with --worktree-copies: the one directory to remove")
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")
