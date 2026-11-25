@@ -355,99 +355,118 @@ def _expand_neighbors(
         seeds_n = _graph_seed_count()
         if seeds_n <= 0:
             return penalized, set(), set()
-        seeds = penalized[:seeds_n]
-        seed_idxs = {i for i, _score, _state in seeds}
-        # Entry "name" == file stem == the edge list's node identity (both come from the
-        # same os.path.splitext(basename) in compute_corpus / LinkGraph).
-        name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
+        injected, endorsed_seeds = _one_hop_candidates(
+            penalized, seeds_n, entries, edges, draft_seeds, expanded_before, notes
+        )
         organic_score = {i: score for i, score, _state in penalized}
-        injected: dict = {}  # entry idx -> best discounted seed score
-        median = _median_in_degree(edges) if _hub_damping_on() else None  # HOT-9: once per load
-        endorsed_seeds: set = set()  # seeds that are other seeds' 1-hop neighbors (GRF-2)
-        for si, sscore, _sstate in seeds:
-            rec = edges.get(entries[si].get("name"))
-            if not rec:
-                continue
-            # RET-13 (owner-directed): a memory a seed REFINES or DERIVES-FROM is usually
-            # also relevant to the same query in practice, so those typed relations now
-            # seed the SAME 1-hop pull as untyped [[wikilinks]] -- widening the traversal
-            # SOURCE only. supersedes/contradicts keep their existing dedicated handling
-            # (penalty/annotation below) and are deliberately NOT added here, unchanged.
-            #
-            # ONE exception: a DRAFT seed's own outbound refines/derives-from are BOTH
-            # excluded. A dream-generated draft declares `derives-from: [children]` on
-            # ITSELF (DRM-6) — letting that self-declared lineage seed expansion would let
-            # an unproven draft manufacture apparent corroboration from its own children
-            # regardless of query relevance, defeating the draft-quarantine guard ("a draft
-            # must never answer alone" — recall()'s all-draft-results collapse). The same
-            # risk applies to `refines`: nothing stops a hand- or agent-authored draft from
-            # declaring `refines: [x]` on itself the exact same way — dream.py's auto-apply
-            # firewall only blocks ITS OWN automated refines-writing pass from touching
-            # drafts, it cannot block a hand-authored frontmatter line — so both outbound
-            # typed relations get the same exclusion, not just derives-from. The REVERSE
-            # direction (a non-draft seed pulling in a draft that refines/derives FROM it)
-            # is unaffected — that draft still enters at the standard discount and still
-            # can't answer alone (the quarantine lives in the emission-time all-draft
-            # collapse, not here). ``draft_seeds`` is a caller-precomputed index set (never
-            # a fresh ``.get("confidence")`` read here) — confidence reads stay confined to
-            # recall() itself, a closed-set AST invariant a dedicated test pins.
-            typed_out = rec.get("typed_out") or {}
-            typed_in = rec.get("typed_in") or {}
-            seed_is_draft = bool(draft_seeds and si in draft_seeds)
-            refines_out = set() if seed_is_draft else typed_out.get("refines", set())
-            derives_out = set() if seed_is_draft else typed_out.get("derives-from", set())
-            neighbor_stems = (
-                rec.get("out", set())
-                | rec.get("in", set())
-                | refines_out
-                | derives_out
-                | typed_in.get("refines", set())
-                | typed_in.get("derives-from", set())
-            )
-            # SORTED iteration (GRF-2, found by MSR-1's pass^k probe): two siblings of
-            # one seed inject at the IDENTICAL discounted score, and the emission
-            # sort is stable — so their relative rank inherits INSERTION order, which
-            # for a str-set comprehension is per-process hash order. n=2-era fixtures
-            # never saw it (both siblings were any-of expected, a swap moved nothing);
-            # the grown multi-hop set pins single stems and caught the flake. Sorting
-            # here makes tie order deterministic (seed rank, then stem name) at a cost
-            # of O(deg log deg) on a handful of neighbors.
-            for stem in sorted(neighbor_stems):
-                j = name_to_idx.get(stem)
-                if j is None:
-                    continue
-                if j in seed_idxs:
-                    # GRF-2: a seed that is ANOTHER seed's 1-hop neighbor is ENDORSED —
-                    # the graph vouches for it exactly as it vouches for a non-seed
-                    # neighbor — but never score-injected (a top seed already ranks as
-                    # well as it can; there is no better score to give it). Endorsement
-                    # is what exempts it from the knee and the MMR diversity penalty:
-                    # two linked cluster members ranking top-of-list is the graph
-                    # AGREEING with the ranking, and MMR must not punish the pair for
-                    # resembling each other (the mixed-mode 0.0 leg the T9 re-measure
-                    # attributed to exactly this displacement).
-                    if j != si:
-                        endorsed_seeds.add(j)
-                    continue
-                cand = sscore * _NEIGHBOR_DISCOUNT
-                if expanded_before and stem in expanded_before:
-                    if notes is not None:  # HOT-9: once per session by expansion
-                        prior = notes.setdefault("expanded_before", {})
-                        prior[j] = max(prior.get(j, float("-inf")), cand)
-                    continue
-                if median is not None:
-                    div = _hub_divisor(_in_degree(edges.get(stem) or {}), median)
-                    if div > 1.0:
-                        if notes is not None:
-                            was = notes.setdefault("damped", {}).get(j)
-                            if was is None or cand > was[0]:
-                                notes["damped"][j] = (cand, cand / div)
-                        cand = cand / div
-                if cand > injected.get(j, float("-inf")):
-                    injected[j] = cand
         return _apply_injection(penalized, entries, injected, endorsed_seeds, superseded, organic_score)
     except Exception:
         return penalized, set(), set()
+
+
+def _one_hop_candidates(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    seeds_n: int,
+    entries: List[dict],
+    edges: dict,
+    draft_seeds: Optional[set],
+    expanded_before: Optional[set],
+    notes: Optional[dict],
+) -> Tuple[dict, set]:
+    """GRA-1's candidate pass, shared by both graph lanes: ``(injected, endorsed_seeds)`` —
+    entry index -> best discounted (hub-damped) seed score for every resolvable 1-hop
+    neighbor of the top ``seeds_n`` entries, and the seeds that are another seed's
+    neighbor (GRF-2). The rules are documented on ``_expand_neighbors``."""
+    seeds = penalized[:seeds_n]
+    seed_idxs = {i for i, _score, _state in seeds}
+    # Entry "name" == file stem == the edge list's node identity (both come from the
+    # same os.path.splitext(basename) in compute_corpus / LinkGraph).
+    name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
+    injected: dict = {}  # entry idx -> best discounted seed score
+    median = _median_in_degree(edges) if _hub_damping_on() else None  # HOT-9: once per load
+    endorsed_seeds: set = set()  # seeds that are other seeds' 1-hop neighbors (GRF-2)
+    for si, sscore, _sstate in seeds:
+        rec = edges.get(entries[si].get("name"))
+        if not rec:
+            continue
+        # RET-13 (owner-directed): a memory a seed REFINES or DERIVES-FROM is usually
+        # also relevant to the same query in practice, so those typed relations now
+        # seed the SAME 1-hop pull as untyped [[wikilinks]] -- widening the traversal
+        # SOURCE only. supersedes/contradicts keep their existing dedicated handling
+        # (penalty/annotation below) and are deliberately NOT added here, unchanged.
+        #
+        # ONE exception: a DRAFT seed's own outbound refines/derives-from are BOTH
+        # excluded. A dream-generated draft declares `derives-from: [children]` on
+        # ITSELF (DRM-6) — letting that self-declared lineage seed expansion would let
+        # an unproven draft manufacture apparent corroboration from its own children
+        # regardless of query relevance, defeating the draft-quarantine guard ("a draft
+        # must never answer alone" — recall()'s all-draft-results collapse). The same
+        # risk applies to `refines`: nothing stops a hand- or agent-authored draft from
+        # declaring `refines: [x]` on itself the exact same way — dream.py's auto-apply
+        # firewall only blocks ITS OWN automated refines-writing pass from touching
+        # drafts, it cannot block a hand-authored frontmatter line — so both outbound
+        # typed relations get the same exclusion, not just derives-from. The REVERSE
+        # direction (a non-draft seed pulling in a draft that refines/derives FROM it)
+        # is unaffected — that draft still enters at the standard discount and still
+        # can't answer alone (the quarantine lives in the emission-time all-draft
+        # collapse, not here). ``draft_seeds`` is a caller-precomputed index set (never
+        # a fresh ``.get("confidence")`` read here) — confidence reads stay confined to
+        # recall() itself, a closed-set AST invariant a dedicated test pins.
+        typed_out = rec.get("typed_out") or {}
+        typed_in = rec.get("typed_in") or {}
+        seed_is_draft = bool(draft_seeds and si in draft_seeds)
+        refines_out = set() if seed_is_draft else typed_out.get("refines", set())
+        derives_out = set() if seed_is_draft else typed_out.get("derives-from", set())
+        neighbor_stems = (
+            rec.get("out", set())
+            | rec.get("in", set())
+            | refines_out
+            | derives_out
+            | typed_in.get("refines", set())
+            | typed_in.get("derives-from", set())
+        )
+        # SORTED iteration (GRF-2, found by MSR-1's pass^k probe): two siblings of
+        # one seed inject at the IDENTICAL discounted score, and the emission
+        # sort is stable — so their relative rank inherits INSERTION order, which
+        # for a str-set comprehension is per-process hash order. n=2-era fixtures
+        # never saw it (both siblings were any-of expected, a swap moved nothing);
+        # the grown multi-hop set pins single stems and caught the flake. Sorting
+        # here makes tie order deterministic (seed rank, then stem name) at a cost
+        # of O(deg log deg) on a handful of neighbors.
+        for stem in sorted(neighbor_stems):
+            j = name_to_idx.get(stem)
+            if j is None:
+                continue
+            if j in seed_idxs:
+                # GRF-2: a seed that is ANOTHER seed's 1-hop neighbor is ENDORSED —
+                # the graph vouches for it exactly as it vouches for a non-seed
+                # neighbor — but never score-injected (a top seed already ranks as
+                # well as it can; there is no better score to give it). Endorsement
+                # is what exempts it from the knee and the MMR diversity penalty:
+                # two linked cluster members ranking top-of-list is the graph
+                # AGREEING with the ranking, and MMR must not punish the pair for
+                # resembling each other (the mixed-mode 0.0 leg the T9 re-measure
+                # attributed to exactly this displacement).
+                if j != si:
+                    endorsed_seeds.add(j)
+                continue
+            cand = sscore * _NEIGHBOR_DISCOUNT
+            if expanded_before and stem in expanded_before:
+                if notes is not None:  # HOT-9: once per session by expansion
+                    prior = notes.setdefault("expanded_before", {})
+                    prior[j] = max(prior.get(j, float("-inf")), cand)
+                continue
+            if median is not None:
+                div = _hub_divisor(_in_degree(edges.get(stem) or {}), median)
+                if div > 1.0:
+                    if notes is not None:
+                        was = notes.setdefault("damped", {}).get(j)
+                        if was is None or cand > was[0]:
+                            notes["damped"][j] = (cand, cand / div)
+                    cand = cand / div
+            if cand > injected.get(j, float("-inf")):
+                injected[j] = cand
+    return injected, endorsed_seeds
 
 
 def _apply_injection(
@@ -504,11 +523,13 @@ def _apply_injection(
 #     not walkable, so a draft cannot manufacture corroboration from lineage it declared on
 #     itself; the reverse direction (a non-draft pulling in a draft that derives from it)
 #     walks as before. ``draft_seeds`` is recall()'s precomputed draft index set.
-#   - Candidates: the top _PPR_ENDORSE_MAX non-seed nodes by mass (at least _PPR_MIN_REL
-#     of the strongest) are ENDORSED, and each is injected at _NEIGHBOR_DISCOUNT x the top
-#     seed's score x (its mass / the strongest mass) — so the strongest graph candidate
-#     enters exactly where GRA-1's best 1-hop neighbor would, and the rest scale down by
-#     mass. They then go through ``_apply_injection`` — the same compete-for-top-k rule,
+#   - Candidates: GRA-1's own 1-hop candidates (``_one_hop_candidates``), PLUS the top
+#     _PPR_ENDORSE_MAX non-seed nodes by mass (at least _PPR_MIN_REL of the strongest), each
+#     injected at _NEIGHBOR_DISCOUNT x the top seed's score x (its mass / the strongest
+#     mass); a node in both keeps the higher score. So the lane is a superset of the 1-hop
+#     pull — it can endorse more, never less (the first A/B showed a smaller endorsed set
+#     changing what MMR protects) — and no graph candidate enters above GRA-1's ceiling.
+#     They then go through ``_apply_injection`` — the same compete-for-top-k rule,
 #     invalidation and supersede penalties, and organic-score-wins tie rule as GRA-1; no
 #     reserved slots. Hub damping (HOT-9) and the once-per-session suppression apply as in
 #     GRA-1, and a seed adjacent to another seed is endorsed (GRF-2).
@@ -693,17 +714,6 @@ def _ppr_expand(
         name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
         seed_idxs = {i for _n, _s, i in seeds} | {i for i, _s, _st in penalized[:seeds_n]}
 
-        # GRF-2: a seed one walkable step from another seed is endorsed, never injected.
-        endorsed_seeds: set = set()
-        seed_node_to_idx = {nd: i for nd, _s, i in seeds}
-        for nd, _s, i in seeds:
-            for pos in range(int(graph["indptr"][nd]), int(graph["indptr"][nd + 1])):
-                v = int(graph["dst"][pos])
-                if v in seed_node_to_idx and v != nd:
-                    if graph["typed_only"][pos] and nd in draft_nodes:
-                        continue
-                    endorsed_seeds.add(seed_node_to_idx[v])
-
         # Best mass first; ties by node id, which is sorted-stem order (deterministic).
         order = np.lexsort((ball, -mass)).tolist()
         fresh: List[Tuple[float, str, int]] = []
@@ -744,6 +754,17 @@ def _ppr_expand(
                         notes.setdefault("damped", {})[j] = (cand, cand / div)
                     cand = cand / div
             injected[j] = cand
+        # Superset of the 1-hop pull: every neighbor GRA-1 would endorse stays endorsed, at no
+        # less than GRA-1's score. Endorsement is what exempts a candidate from the knee and
+        # from MMR's diversity re-cut, so a walk that endorsed FEWER nodes changed which hits
+        # MMR protected and cost an organic top-10 hit on the live corpus (the first A/B).
+        hop_injected, hop_seeds = _one_hop_candidates(
+            penalized, seeds_n, entries, edges, draft_seeds, expanded_before, notes
+        )
+        for j, cand in hop_injected.items():
+            if cand > injected.get(j, float("-inf")):
+                injected[j] = cand
+        endorsed_seeds = hop_seeds  # GRF-2: a seed next to another seed (the 1-hop pass's rule)
         organic_score = {i: score for i, score, _state in penalized}
         return _apply_injection(penalized, entries, injected, endorsed_seeds, superseded, organic_score)
     except Exception:
