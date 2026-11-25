@@ -162,6 +162,8 @@ NON_CORPUS_SITES = {
     ("index_sections", "_write_manifest"): "gitignored derived sub-index manifest, rebuilt whole by every index build",
     ("citation_binding", "_write_doc"): "gitignored derived citation-binding sidecar, rebuilt by every index build",
     ("session_consent", "_write_note"): "per-session PreToolUse note in the gitignored telemetry dir (OUT-5)",
+    ("retrieval_profile", "write_retrieval_profile"): "machine model preset (one interactive setup writer; last-writer-wins is the want) (HCR-1)",
+    ("retrieval_profile", "remove_retrieval_profile"): "machine model preset (one interactive setup writer; last-writer-wins is the want) (HCR-1)",
 }
 
 

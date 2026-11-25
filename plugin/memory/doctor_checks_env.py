@@ -112,6 +112,43 @@ def check_bootstrap(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"bootstrap check failed: {exc}."}
 
 
+def check_retrieval_profile(ctx: DoctorContext) -> Dict[str, str]:
+    """HCR-1: the machine's retrieval profile — which one, decided where, what it resolves
+    to — plus the hardware-gated high OFFER and any value the resolver had to ignore.
+
+    ok on every clean state (floor/lean/high are all legitimate); warn only when an env
+    var or preset key holds something outside PROFILES (the resolver silently fell
+    through — the one state a user cannot see without this line).
+    """
+    try:
+        from . import retrieval_profile as RP
+
+        profile, source = RP.profile_source()
+        if profile == "floor":
+            meaning = "BM25-only; dense lane off by policy"
+        else:
+            from .build_index import resolve_embed_model
+
+            meaning = f"dense {resolve_embed_model()}"
+            if profile == "high":
+                meaning += " (lean's models until the big-model tier ships)"
+        msg = f"retrieval profile: {profile} (via {source}) — {meaning}."
+        ignored = RP.ignored_values()
+        if ignored:
+            named = "; ".join(f"{lvl} value {raw!r} ignored" for lvl, raw in ignored)
+            return {
+                "status": "warn",
+                "message": f"{msg} {named} — not a known profile "
+                f"(one of: {', '.join(RP.PROFILES)}).",
+            }
+        offer = RP.high_offer_line()
+        if offer:
+            msg = f"{msg} {offer}."
+        return {"status": "ok", "message": msg}
+    except Exception as exc:
+        return {"status": "warn", "message": f"retrieval-profile check failed: {exc}."}
+
+
 def check_venv(ctx: DoctorContext) -> Dict[str, str]:
     """All required deps import cleanly from the plugin-data venv.
 

@@ -53,6 +53,7 @@ from .doctor_checks_env import (
     _iter_memory_files_safe,
     _REQUIRED_DEPS,
     check_bootstrap,
+    check_retrieval_profile,
     check_venv,
     check_corpus_exists,
     check_symlink,
@@ -364,6 +365,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
     ("attention_cost", check_attention_cost),  # CLM-9: full attention with SessionStarts at the cap
     ("settings", check_settings),  # SRF-4: legacy env/config names in use + their new spelling; a plaintext key file
+    ("retrieval_profile", check_retrieval_profile),  # HCR-1: floor|lean|high, source, the high offer
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
