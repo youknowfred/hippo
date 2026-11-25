@@ -39,7 +39,9 @@ counted as ``failed``.
 
 Read-only: a served call reads the index on disk through an in-process cache that reloads
 whenever the manifest or matrix changes (a stat on every call) and never builds one
-(``recall_tiers.INDEX_LOADER``), so it writes no corpus or index file. The telemetry the
+(``recall_tiers.INDEX_LOADER``), so it writes no corpus or index file. (On the high profile
+a background thread in this server keeps the ``<index>/high/`` sibling index caught up for
+the big embedder — ``recall_warm_high``; the served call itself still only reads.) The telemetry the
 spawned hook writes (recall ledger, episode buffer, daily rollup) is written here too, keyed
 by the hook's session id, after the answer goes out (``defer``/``drain``).
 """
@@ -337,6 +339,10 @@ def _publish(d: str, sid: str, sess: _Session, *, state: str, accept: bool) -> N
         "last_ms": round(sess.last_ms, 1) if sess.last_ms is not None else None,
         "updated": round(time.time(), 3),
     }
+    from .recall_warm_high import status as high_status
+
+    if high_status():
+        doc["high"] = high_status()  # HCR-2: the big model's state, for doctor; absent off high
     try:
         write_json_atomic(heartbeat_path(d, sid), doc, indent=None)
     except Exception:
@@ -520,12 +526,14 @@ def _failed(d: str, sid: str, sess: _Session, project: str) -> str:
 
 def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_ref: float) -> str:
     from .recall_hook import hook_envelope, run_recall
+    from .recall_warm_high import serving
 
     _publish(d, sid, sess, state="serving", accept=True)
     prompt = args.get("prompt")
     raw_query = prompt.strip() if isinstance(prompt, str) else ""
     try:
-        with read_only_index(), _launch_dir(project):
+        # HCR-2: on the high profile, the big model's index once it has caught up; else lean.
+        with read_only_index(), _launch_dir(project), serving(_corpus_dirs(project)[0], _CACHE.load):
             out = run_recall(
                 raw_query,
                 session_id=sid,

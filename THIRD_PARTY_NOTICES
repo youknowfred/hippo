@@ -73,3 +73,22 @@ Each ONNX repackaging carries the same license as its source model. See
 `plugin/memory/build_index.py` (`_HF_SOURCE_REPO_BY_MODEL`, `resolve_embed_model`)
 for the exact model resolution and cache paths, and `HIPPO_EMBED_MODEL` to override
 the model.
+
+## Optional: the high retrieval profile (`plugin/requirements-high.txt`)
+
+Installed only by hand, on an Apple Silicon Mac that opts into the `high` profile;
+never by bootstrap, never on lean or floor. `mlx-lm` brings `transformers` and its
+own tree; `pip show` on the venv is authoritative.
+
+| Package | License |
+|---------|---------|
+| `mlx` | MIT |
+| `mlx-lm` | MIT |
+
+Its embedder is downloaded only by `hippo setup --profile high --fetch --yes`, at a
+pinned revision (`plugin/memory/embed_mlx.py`, `HIGH_MODELS`):
+
+| Role | Model (card) | License | Artifact fetched |
+|------|--------------|---------|------------------|
+| High (default) | [`Qwen/Qwen3-Embedding-4B`](https://huggingface.co/Qwen/Qwen3-Embedding-4B) | Apache-2.0 | [`mlx-community/Qwen3-Embedding-4B-mxfp8`](https://huggingface.co/mlx-community/Qwen3-Embedding-4B-mxfp8) (~4.2 GB) |
+| High (8B knob) | [`Qwen/Qwen3-Embedding-8B`](https://huggingface.co/Qwen/Qwen3-Embedding-8B) | Apache-2.0 | [`mlx-community/Qwen3-Embedding-8B-mxfp8`](https://huggingface.co/mlx-community/Qwen3-Embedding-8B-mxfp8) (~7.8 GB) |
