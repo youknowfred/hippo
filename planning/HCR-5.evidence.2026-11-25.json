@@ -7,7 +7,8 @@
   "command": "PYTHONPATH=plugin python -m memory.eval_recall --memory-dir <corpus> --index-dir <index> --hard-set <fixture> --telemetry-dir <dir> --ab HIPPO_GRAPH_PPR  (bm25_queries runs: same, under HIPPO_DISABLE_DENSE=1)",
   "corpora": {
     "live_corpus": "this repo's own .claude/memory (108 memories) with its project-local fixture .claude/memory/.audit-fixtures/recall_hard_set.yaml (16 single-hop rows, 0 multi-hop)",
-    "starter_packs": "the CI corpus: plugin/assets packs seeded per tests/fixtures/recall_hard_set.yaml's header (22 memories) with that fixture (10 multi-hop, 22 single-hop)"
+    "starter_packs": "the CI corpus: plugin/assets packs seeded per tests/fixtures/recall_hard_set.yaml's header (22 memories) with that fixture (10 multi-hop, 22 single-hop)",
+    "live_corpus_grown": "the same live corpus after its private fixture grew to 27 rows (16 single-hop + 11 multi-hop, added 2026-11-25 at the owner's request; 6 rows whose answer is one link from the memory the query leans on, 5 two links away; queries written before any recall run and not tuned). The corpus and fixture are private (gitignored), so these runs carry counts only: no queries, no memory names."
   },
   "runs": {
     "live_corpus_dense": {
@@ -346,6 +347,214 @@
         }
       },
       "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "live_corpus_grown_dense": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "dense",
+        "query_mode": "dense+bm25",
+        "backend": "dense+bm25",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 27,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 11,
+            "n": 11
+          },
+          "single-hop": {
+            "resolvable_n": 16,
+            "n": 16
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.32878787878787874,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7604166666666667,
+          "n": 16
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.7272727272727273,
+          "mrr": 0.29707792207792205,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7604166666666667,
+          "n": 16
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": -0.0909,
+          "mrr": -0.0317,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 16
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": false,
+      "reachability": {
+        "off": {
+          "expected_stems": 11,
+          "seed_rank_0": 6,
+          "reachable_at_1": 4,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 11,
+          "seed_rank_0": 6,
+          "reachable_at_1": 4,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 2,
+          "closer_under_on": 1,
+          "farther_under_on": 1
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 38.42,
+          "p95": 67.33,
+          "n": 135
+        },
+        "on": {
+          "p50": 29.76,
+          "p95": 52.54,
+          "n": 135
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "live_corpus_grown_bm25_queries": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "bm25-only",
+        "query_mode": "bm25-only",
+        "backend": "bm25-only",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 27,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 11,
+            "n": 11
+          },
+          "single-hop": {
+            "resolvable_n": 16,
+            "n": 16
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.28874458874458875,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7208333333333332,
+          "n": 16
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.28874458874458875,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7208333333333332,
+          "n": 16
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 11
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 16
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": false,
+      "reachability": {
+        "off": {
+          "expected_stems": 11,
+          "seed_rank_0": 6,
+          "reachable_at_1": 4,
+          "reachable_at_2": 0,
+          "unreachable": 1,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 11,
+          "seed_rank_0": 6,
+          "reachable_at_1": 4,
+          "reachable_at_2": 0,
+          "unreachable": 1,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 0,
+          "closer_under_on": 0,
+          "farther_under_on": 0
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 2.12,
+          "p95": 2.28,
+          "n": 135
+        },
+        "on": {
+          "p50": 2.4,
+          "p95": 2.7,
+          "n": 135
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
     }
   },
   "latency_interleaved_dense": {
@@ -375,6 +584,7 @@
       }
     }
   },
-  "reading": "No precision loss anywhere (single-hop delta 0 on the live corpus under both query modes; +0.004 MRR on the starter packs). Multi-hop: +0.046 MRR at recall ceiling on the starter packs (n=10), one expected stem unreachable -> ranked as a seed; but that graph has 10 walkable pairs and no 2-hop structure, and the live corpus, whose 718-pair graph is where a multi-hop walk should pay, has no multi-hop fixture rows, so its associative gain is unmeasured. Latency: interleaved dense p50 +1.1 to +1.7 ms on a 15-20 ms call, p95 within noise; BM25-query p50 +0.2 to +0.3 ms.",
-  "recommendation": "No flip yet: directionally positive with no regression, but not the affirmative multi-hop evidence the acceptance asks for. Grow the live fixture to >= 10 multi-hop rows (owner-confirmed, per row) and re-run eval --ab HIPPO_GRAPH_PPR; flip if multi-hop gains there with single-hop unchanged. Soaking HIPPO_GRAPH_PPR=1 locally meanwhile carries no observed risk."
+  "reading": "Live corpus with multi-hop rows (the decisive run): dense multi-hop recall 0.818 -> 0.727 (-1 row of 11), MRR 0.329 -> 0.297; single-hop unchanged (0.9375 / 0.760); BM25 queries: every delta 0. Starter packs: multi-hop MRR +0.046 at recall ceiling on a 10-pair graph. Net: on the graph where the walk should pay, it regressed by one row; the mechanism is the endorsement set's interaction with MMR, not the walk's reach (one 2-hop-ish row gained 8 -> 3). Latency: interleaved dense p50 +1.1 to +1.7 ms on a 15-20 ms call, p95 within noise; BM25-query p50 +0.2 to +0.3 ms.",
+  "recommendation": "NO FLIP. The lane as built does not beat the 1-hop pull on the live graph (-1 multi-hop recall row of 11, single-hop flat). The design question it surfaced: how the walk's endorsed set should relate to GRA-1's (e.g. keep every 1-hop neighbor GRA-1 endorses and add the walk's top-mass nodes, so the walk can only add MMR/knee protection, never remove it). Any such variant must be judged on rows it was not designed against: these 11 are now in-sample.",
+  "per_row_diagnosis_live_grown_dense": "Recall@10 rank of the expected memory, OFF -> ON, over the 11 multi-hop rows: 8 rows unchanged (6 hits, 2 misses under both); 1 row gained (rank 8 -> 3); 2 rows lost (rank 5 -> 7, and rank 2 -> outside the top 10). The lost top-10 hit was dropped as mmr_displaced: the walk endorses a different, smaller set than the 1-hop pull (10 vs 18 on that query), endorsed memories are exempt from MMR's diversity re-cut, so changing the endorsed set changed which candidates MMR protected and an organic rank-2 hit lost its slot."
 }

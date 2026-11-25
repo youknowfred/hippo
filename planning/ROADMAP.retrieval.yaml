@@ -230,23 +230,24 @@ workstream:
           memory.graph_ppr_eval (eval --ab HIPPO_GRAPH_PPR) on
           ab_runner.run_flag_arms + GRF-4's audit and warm latency per arm.
         ab_result: >-
-          planning/HCR-5.evidence.2026-11-25.json (four runs, OFF-arm
-          byte-identity self-check PASS on all four). Live corpus (108 memories,
-          718 walkable pairs; fixture 16 single-hop, 0 multi-hop): single-hop
-          Δrecall 0, ΔMRR 0 under dense and under BM25 queries — no precision
-          loss, though the arms differ (the lane is live); reachability SKIPPED
-          (no multi-hop rows), so the rich graph's associative gain is
-          UNMEASURED. Starter-pack CI corpus (22 memories, 10 pairs; fixture 10
-          multi-hop + 22 single-hop): dense multi-hop recall 1.0 -> 1.0 (at
-          ceiling), MRR 0.279 -> 0.324 (+0.046); single-hop MRR +0.004; GRF-4
-          ranked-as-seed 2 -> 3, unreachable 5 -> 4; BM25 queries: all Δ 0.
-          Latency (interleaved OFF/ON in one process): dense p50 +1.1 ms
-          live / +1.7 ms starter on a 15-20 ms call, p95 within noise; BM25
-          queries p50 +0.2-0.3 ms.
-          Read: directionally positive, no precision loss, but the only
-          multi-hop rows sit on a graph with no 2-hop structure — not yet the
-          affirmative multi-hop evidence the acceptance asks for. GRA-1 stays
-          the default; the flip remains an owner decision.
+          planning/HCR-5.evidence.2026-11-25.json (six runs, OFF-arm
+          byte-identity self-check PASS on all six). DECISIVE RUN — live corpus
+          (108 memories, 718 walkable pairs) after its private fixture grew to
+          16 single-hop + 11 multi-hop rows (owner-requested, 2026-11-25):
+          dense multi-hop recall 0.818 -> 0.727 (-1 row of 11), MRR 0.329 ->
+          0.297; single-hop unchanged (0.9375 / 0.760); BM25 queries: all Δ 0.
+          Per row: 1 gained (rank 8 -> 3), 2 lost (5 -> 7; 2 -> out of top 10,
+          dropped as mmr_displaced — the walk endorses a different, smaller
+          set than the 1-hop pull, and endorsement is MMR's exemption, so an
+          organic hit lost its protected slot). Starter-pack CI corpus (22
+          memories, 10 pairs): multi-hop MRR 0.279 -> 0.324 at recall ceiling;
+          single-hop MRR +0.004. Latency (interleaved): dense p50 +1.1-1.7 ms
+          on a 15-20 ms call, p95 within noise; BM25 p50 +0.2-0.3 ms.
+          Read: NO FLIP — the lane as built regresses the live graph by one
+          multi-hop row. Open design question: make the walk's endorsed set a
+          superset of GRA-1's (it may add protection, never remove it), judged
+          on rows it was not designed against (these 11 are now in-sample).
+          GRA-1 stays the default.
 
       - id: HCR-6
         title: Evidence spine + docs capstone — bench-before-flip made mechanical
