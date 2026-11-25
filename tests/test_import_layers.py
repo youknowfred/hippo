@@ -38,9 +38,10 @@ FOUNDATION_PREFIXES = ("provenance", "trust", "staleness", "telemetry")
 # The recall orchestrator: the ``recall`` façade (``recall()`` itself) plus every
 # ``recall_*`` sibling that imports the façade or another orchestrator member, i.e. the
 # entry points layered ON recall(): ``recall_hook`` (the prompt hook / CLI), ``recall_view``
-# (the inspect/why views) and ``recall_warm`` (the warm-path runner, which calls
-# ``recall_hook``). Importing any of them drags in the whole engine.
-RECALL_ORCHESTRATOR = frozenset({"recall", "recall_hook", "recall_view", "recall_warm"})
+# (the inspect/why views), ``recall_warm`` (the warm-path runner, which calls
+# ``recall_hook``) and ``recall_warm_high`` (its high-profile half, which reads
+# ``recall_warm``'s index cache and heartbeats). Importing any of them drags in the whole engine.
+RECALL_ORCHESTRATOR = frozenset({"recall", "recall_hook", "recall_view", "recall_warm", "recall_warm_high"})
 
 # Leaf helpers: ``recall_*`` siblings the façade imports that never import the façade or
 # any orchestrator member themselves (rankers, budget, query hygiene, the graph plane,

@@ -132,7 +132,16 @@ workstream:
           build_index_dense (IDX-1 binding), recall_warm SERVE/COLD budgets,
           recall_rank.embed_query/run_bounded. 8-bit 4B ≈ 4 GB disk / resident
           RAM in the warm server; 8B ≈ 8.5 GB — estimates, bench-stamped in
-          HCR-6.
+          HCR-6. MEASURED 2026-11-25 (bench/high_embed.py, owner's 128 GB
+          M-series Mac, hippo's own corpus: 108 memories + 272 body chunks;
+          4B mxfp8, full 2560 dims): weights 4.16 GB download; cold load
+          1.0-2.2 s in a background thread (off the serving path); 3.86 GiB
+          MLX-resident (process RSS +3.8 GB); high index built in ~100 s
+          (~1,350 tok/s); query embed ~80 ms warm; warm served recall end to
+          end median 309-464 ms, max 619-851 ms of the 1500 ms budget (every
+          call embedding with the 4B), falling to median 114 / max 181 ms with
+          OPENBLAS_NUM_THREADS=1 — the excess is OpenBLAS's thread pool beside
+          Metal in MMR and the dense matmul, not the model.
         acceptance: >-
           High profile builds its own bound matrix; warm recall serves dense
           hits from the 4B model inside SERVE_BUDGET_MS on the owner's machine

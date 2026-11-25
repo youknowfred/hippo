@@ -14,8 +14,8 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
 * **Only this server builds or reads it.** On the first warm call of a high-profile
   session the server starts one daemon thread that loads the model (off the serving path,
   so the cold load never counts against ``COLD_BUDGET_MS``) and then keeps every recall
-  tier's ``high/`` index caught up with its lean twin — offline, bounded, resumable
-  (``build_index``'s COR-3 slices). Until the model is loaded and EVERY tier's high index
+  tier's ``high/`` index caught up with its lean twin — offline (the high embedder never
+  downloads) and incremental (rows reused by hash). Until the model is loaded and EVERY tier's high index
   holds exactly the lean index's entries and chunks (same hashes, dense-ready, same space),
   warm calls serve lean like any other warm call. The switch is all-or-nothing per call
   because ``recall_tiers`` drops dense entirely when merged tiers disagree on the model.
@@ -42,7 +42,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 HIGH_SUBDIR = "high"
 REFRESH_EVERY_S = 30.0  # idle re-check; a served call on a changed lean index wakes it now
-_MAX_PASSES = 64  # bounded convergence: each pass embeds what the refresh budget allows
+_MAX_PASSES = 8  # each pass embeds every missing row; more passes only chase a moving lean index
 
 
 def high_index_dir(index_dir: str) -> str:
@@ -192,8 +192,13 @@ def refresh_tier(memory_dir: str, index_dir: str, space: str) -> bool:
         if fresh(lean, high, space):
             return True
         before = _rows_done(high, space)
+        # Unbounded (``allow_download=True`` is build_index's one-batch online path): this
+        # thread has no hook deadline, and the lean refresh's 15 s budget never fits a 64-doc
+        # slice of a 4B model (measured: such a build never converged). The high embedder
+        # itself never downloads, whatever this flag says, and feeds its worker in short
+        # slices, so a served call is never queued behind the whole batch.
         with using_space(space):
-            build_index(memory_dir, hdir, allow_download=False)
+            build_index(memory_dir, hdir, allow_download=True)
         after = load_index(hdir)
         if not fresh(lean, after, space) and _rows_done(after, space) <= before:
             return False  # no progress (the model is failing): the next wake retries
