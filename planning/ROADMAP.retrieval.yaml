@@ -192,7 +192,7 @@ workstream:
         title: PPR graph lane — personalized PageRank over links.json (all profiles)
         priority: P0
         effort: M
-        status: pending
+        status: partial         # 2026-11-25: lane + A/B rig built behind HIPPO_GRAPH_PPR (default OFF); the flip awaits the owner
         gated_on: []            # independent of HCR-1..4; lands even if the MLX tier stalls
         problem: >-
           GRA-1's 1-hop discount pull sees only direct neighbors of 3 seeds; the
@@ -214,6 +214,39 @@ workstream:
           category deltas) showing multi-hop/associative gains without
           precision loss; latency delta indistinguishable; flip recorded as a
           dated owner decision here.
+        as_built: >-
+          2026-11-25. recall_graph._ppr_expand beside GRA-1's _expand_neighbors,
+          same signature and return shape; recall() picks it only under
+          HIPPO_GRAPH_PPR (falsy-set, default OFF — off never calls it). Seeds =
+          GRA-1's (HIPPO_GRAPH_SEEDS, 3), personalization = their fused
+          penalty-adjusted scores, damping 0.85, numpy power iteration over the
+          seeds' 3-hop ball of links.json (CSR memoized per edge-list object;
+          ~0.3 ms median at 5k nodes, test-pinned < 1 ms). Edge set and the
+          draft guard are GRA-1/RET-13's exactly. Top 10 nodes by mass are
+          endorsed and injected at 0.5 x top seed x relative mass, then share
+          GRA-1's injection tail (_apply_injection: no reserved slots,
+          invalidation + supersede penalties, organic-wins ties); hub damping,
+          the once-per-session rule and GRF-2 seed endorsement hold. Rig:
+          memory.graph_ppr_eval (eval --ab HIPPO_GRAPH_PPR) on
+          ab_runner.run_flag_arms + GRF-4's audit and warm latency per arm.
+        ab_result: >-
+          planning/HCR-5.evidence.2026-11-25.json (four runs, OFF-arm
+          byte-identity self-check PASS on all four). Live corpus (108 memories,
+          718 walkable pairs; fixture 16 single-hop, 0 multi-hop): single-hop
+          Δrecall 0, ΔMRR 0 under dense and under BM25 queries — no precision
+          loss, though the arms differ (the lane is live); reachability SKIPPED
+          (no multi-hop rows), so the rich graph's associative gain is
+          UNMEASURED. Starter-pack CI corpus (22 memories, 10 pairs; fixture 10
+          multi-hop + 22 single-hop): dense multi-hop recall 1.0 -> 1.0 (at
+          ceiling), MRR 0.279 -> 0.324 (+0.046); single-hop MRR +0.004; GRF-4
+          ranked-as-seed 2 -> 3, unreachable 5 -> 4; BM25 queries: all Δ 0.
+          Latency (interleaved OFF/ON in one process): dense p50 +1.1 ms
+          live / +1.7 ms starter on a 15-20 ms call, p95 within noise; BM25
+          queries p50 +0.2-0.3 ms.
+          Read: directionally positive, no precision loss, but the only
+          multi-hop rows sit on a graph with no 2-hop structure — not yet the
+          affirmative multi-hop evidence the acceptance asks for. GRA-1 stays
+          the default; the flip remains an owner decision.
 
       - id: HCR-6
         title: Evidence spine + docs capstone — bench-before-flip made mechanical
