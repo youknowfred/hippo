@@ -617,13 +617,25 @@ _RERANK_TIMEOUT_SECS = 5.0  # override: HIPPO_RERANK_TIMEOUT -- matches DENSE_QU
 # the same "small offline ONNX model, cold-load-dominated" cost class; 2s left too little
 # headroom for a legitimate cold load to complete and was timing out productive work, not
 # just runaway calls.
+#
+# HCR-4: a second backend behind the SAME function. When a Qwen3 reranker is active in the
+# calling context (rerank_mlx.using_reranker — entered only by the warm server's high-profile
+# served call, 0.6B, and by recall_view on the high profile, 4B), the scores come from it
+# through MLX instead; same run_bounded bound shape, same degrade-to-fused-order contract,
+# same rule-pointer exclusion and COR-8 reorder-only rule. Outside those contexts nothing
+# here changes (the spawned hook, lean, floor).
 
 
 def _rerank_enabled() -> bool:
-    """True only when ``HIPPO_RERANK`` is explicitly truthy — DEFAULT OFF, same falsy-set
-    convention as ``_salience_enabled()``/``_outcome_prior_enabled()``."""
+    """True when ``HIPPO_RERANK`` is explicitly truthy — DEFAULT OFF, same falsy-set
+    convention as ``_salience_enabled()``/``_outcome_prior_enabled()``. Unset, it is ON
+    only inside the warm server's high-profile served call (``rerank_mlx.default_on``)."""
     raw = os.environ.get("HIPPO_RERANK", "").strip()
-    return raw not in ("", "0", "false", "False")
+    if raw == "":
+        from .rerank_mlx import default_on
+
+        return default_on()
+    return raw not in ("0", "false", "False")
 
 
 def _rerank_timeout_secs() -> float:
@@ -652,21 +664,35 @@ def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
     the same pattern ``embed_query`` already uses, so a cold model load can never block a
     caller past its own timeout budget. Degrades to the ORIGINAL order on ANY failure — no
     cached model, fastembed unavailable, timeout, any exception — never downloads, never
-    raises.
+    raises. The MLX backend (an active ``rerank_mlx`` reranker) obeys all of the above,
+    under ``rerank_mlx.bound_secs``.
     """
     rule_hits = [h for h in hits if h.get("corpus") == "rule"]
     corpus_hits = [h for h in hits if h.get("corpus") != "rule"]
     if len(corpus_hits) < 2:
         return hits  # nothing meaningful to reorder
     try:
-        from .build_index import _get_cross_encoder
+        from .rerank_mlx import active_reranker
 
-        def _rerank_call():
-            model = _get_cross_encoder(allow_download=False)
-            descriptions = [h.get("description") or "" for h in corpus_hits]
-            return list(model.rerank(query, descriptions))
+        mlx_model = active_reranker()
+        if mlx_model is not None:
+            from .rerank_mlx import bound_secs, score
 
-        scores = run_bounded(_rerank_call, _rerank_timeout_secs())
+            def _rerank_call():
+                descriptions = [h.get("description") or "" for h in corpus_hits]
+                return score(mlx_model, query, descriptions)
+
+            seconds = bound_secs(mlx_model, _rerank_timeout_secs())
+        else:
+            from .build_index import _get_cross_encoder
+
+            def _rerank_call():
+                model = _get_cross_encoder(allow_download=False)
+                descriptions = [h.get("description") or "" for h in corpus_hits]
+                return list(model.rerank(query, descriptions))
+
+            seconds = _rerank_timeout_secs()
+        scores = run_bounded(_rerank_call, seconds)
         order = sorted(range(len(corpus_hits)), key=lambda i: scores[i], reverse=True)
         return [corpus_hits[i] for i in order] + rule_hits
     except Exception:
