@@ -27,14 +27,24 @@ and timings only — never a query or a memory name.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import os
 import shutil
+import signal
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import ExitStack
+
+_T0 = time.monotonic()
+
+
+def _log(msg: str) -> None:
+    """Progress to stderr (counts and phases only); ``kill -USR1`` dumps every stack."""
+    print(f"[{time.monotonic() - _T0:7.1f}s] {msg}", file=sys.stderr, flush=True)
 
 from bench.high_embed import PROMPTS
 
@@ -57,6 +67,7 @@ def main(argv=None) -> int:
     ap.add_argument("--rounds", type=int, default=3, help="passes over the prompts per arm")
     ap.add_argument("--skip-ab", action="store_true")
     args = ap.parse_args(argv)
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
 
     src = os.path.abspath(args.memory_dir)
     hard_set = args.hard_set or os.path.join(src, ".audit-fixtures", "recall_hard_set.yaml")
@@ -108,6 +119,7 @@ def main(argv=None) -> int:
         W.drain()
         return out, ms
 
+    _log("lean index built")
     t0 = time.monotonic()
     serve("kick", PROMPTS[0])  # the process's first served call: starts both loads
     while (H.status().get("status") == "loading"
@@ -128,6 +140,7 @@ def main(argv=None) -> int:
             time.sleep(0.25)
         report["high_index_ready_s_after_kick"] = round(time.monotonic() - t0, 1)
 
+    _log("models loaded, high index fresh")
     # Every ON call must score through the 0.6B; record each scoring's size and time.
     rr = R.loaded(R.WARM_MODEL)
     real_score = rr.score
@@ -179,6 +192,7 @@ def main(argv=None) -> int:
     report["breaker_trips"] = {arm: {"tripped": trips[arm], "calls": len(arms[arm])} for arm in arms}
     report["served_on_the_high_index"] = engaged
 
+    _log("served arms done")
     # The explicit surface: the 4B, loaded on first use.
     explicit = {"available": R.explicit_model() == R.EXPLICIT_MODEL}
     if explicit["available"]:
@@ -187,6 +201,7 @@ def main(argv=None) -> int:
             t = time.monotonic()
             V.describe(p, memory_dir=md)
             ms.append((time.monotonic() - t) * 1000.0)
+            _log(f"describe {len(ms)}: {ms[-1]:.0f} ms")
         explicit["first_call_ms"] = round(ms[0], 1)
         explicit["describe_ms_after_first"] = _summary(ms[1:])
         explicit["reranker"] = R.status(R.EXPLICIT_MODEL)
@@ -199,7 +214,8 @@ def main(argv=None) -> int:
         bases = [("lean_index", idx, None)]
         if st.get("status") == "ready":
             bases.append(("high_index", H.high_index_dir(idx), space))
-        models = [R.WARM_MODEL] + ([R.EXPLICIT_MODEL] if explicit["available"] else [])
+        # None: the fastembed MiniLM (today's rerank), for reference beside the Qwen3 pair.
+        models = [None, R.WARM_MODEL] + ([R.EXPLICIT_MODEL] if explicit["available"] else [])
         for base, index_dir, sp in bases:
             for model in models:
                 with ExitStack() as stack:
@@ -207,11 +223,13 @@ def main(argv=None) -> int:
                         stack.enter_context(E.using_space(sp))
                     stack.enter_context(R.using_reranker(model))
                     t = time.monotonic()
+                    _log(f"A/B {base} {model or 'MiniLM'} starts")
                     res = run_flag_arms("HIPPO_RERANK", memory_dir=md, index_dir=index_dir,
                                         hard_set_path=hard_set, k=RC.DEFAULT_K,
                                         telemetry_dir=os.path.join(tmp, "telemetry"))
                     res["wall_s"] = round(time.monotonic() - t, 1)
-                runs[f"{base}/{model.split('/')[-1]}"] = res
+                    _log(f"A/B {base} {model or 'MiniLM'} done in {res['wall_s']} s")
+                runs[f"{base}/{(model or 'ms-marco-MiniLM-L-6-v2').split('/')[-1]}"] = res
         report["ab"] = runs
     print(json.dumps(report, indent=2))
     shutil.rmtree(tmp, ignore_errors=True)
