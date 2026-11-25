@@ -226,8 +226,12 @@ def _isolate_claude_user_settings(tmp_path, monkeypatch):
 def _no_mlx_weight_downloads(monkeypatch):
     """HCR-4: ``embed_mlx.fetch_spec`` is the one door every MLX weight download goes
     through (the embedder's and both rerankers'); a test that reaches it unpatched would
-    pull gigabytes into its tmp dir. It fails the test instead."""
-    from memory import embed_mlx
+    pull gigabytes into its tmp dir. It fails the test instead. (A copy of this conftest
+    run where ``memory`` is not importable has nothing to guard.)"""
+    try:
+        from memory import embed_mlx
+    except ImportError:
+        return
 
     def _refuse(spec):
         pytest.fail(f"a test tried to download MLX weights ({spec.get('repo')})")
