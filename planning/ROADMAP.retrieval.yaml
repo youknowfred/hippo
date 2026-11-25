@@ -153,7 +153,7 @@ workstream:
         title: Floor recalibration for the Qwen3 embedding space
         priority: P0
         effort: S
-        status: pending
+        status: partial         # 2026-11-25: 4B calibrated (floor 0.42, gate 0.48/0.46, band unchanged) — planning/HCR-3.evidence.2026-11-25.json; 8B not run (weights not fetched)
         gated_on: [HCR-2]
         problem: >-
           The RET-1 floor is calibrated per model; an uncalibrated model id
