@@ -3,9 +3,9 @@
 The high-ceiling retrieval roadmap (``planning/ROADMAP.retrieval.yaml``, ratified
 2026-11-25) tiers recall by machine: ``floor`` is BM25-only (the dense lane off by
 POLICY, not merely degraded on a cold cache), ``lean`` is today's default stack, and
-``high`` is the big-model profile later HCR items hang real models off — under HCR-1
-it still resolves to lean's models, so selecting it is safe anywhere and means
-"opted in", never "faster today".
+``high`` is the big-model profile: HCR-2 serves Qwen3-Embedding through MLX in the HOT-6
+warm server (``embed_mlx``, ``recall_warm_high``) while the spawned hook keeps lean — so
+selecting it is safe anywhere; where the big model cannot run, recall stays lean.
 
 Resolution mirrors ``build_index.resolve_embed_model`` exactly — env > persisted
 preset > default — and shares its preset FILE: the profile is a second key in
@@ -180,5 +180,5 @@ def high_offer_line() -> Optional[str]:
     return (
         f"this machine qualifies for the high retrieval profile "
         f"({mem // 2**30} GiB, arm64) — opt in with `hippo setup --profile high --yes` "
-        f"(today high runs lean's models; the big-model tier ships next)"
+        f"(Qwen3-Embedding via MLX in warm recall; fetch its weights with --fetch)"
     )

@@ -124,15 +124,15 @@ def check_retrieval_profile(ctx: DoctorContext) -> Dict[str, str]:
         from . import retrieval_profile as RP
 
         profile, source = RP.profile_source()
-        if profile == "floor":
-            meaning = "BM25-only; dense lane off by policy"
-        else:
+        meaning, note = "BM25-only; dense lane off by policy", ""
+        if profile != "floor":
             from .build_index import resolve_embed_model
+            from .recall_warm_high import doctor_meaning  # HCR-2: what high does here
 
-            meaning = f"dense {resolve_embed_model()}"
-            if profile == "high":
-                meaning += " (lean's models until the big-model tier ships)"
+            meaning, note = doctor_meaning(f"dense {resolve_embed_model()}", profile)
         msg = f"retrieval profile: {profile} (via {source}) — {meaning}."
+        if note:
+            return {"status": "warn", "message": f"{msg} {note}"}
         ignored = RP.ignored_values()
         if ignored:
             named = "; ".join(f"{lvl} value {raw!r} ignored" for lvl, raw in ignored)

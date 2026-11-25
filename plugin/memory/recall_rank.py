@@ -333,13 +333,22 @@ def _query_vector(query: str):
     """``query``'s embedding, wall-clock-bounded (a cold/wiped model cache aborts to BM25
     instead of blocking; offline-guarded in build_index). Raises like ``embed_query``."""
     last = getattr(_QVEC, "last", None)
+    space = _embed_space()  # HCR-2: a vector is reused only inside the space it was embedded in
     if (last is not None and getattr(_QVEC, "window", None) == query and last[0] == query
-            and last[1] is embed_query):
+            and last[1] is embed_query and last[3] == space):
         return last[2]
     _QVEC.last = None  # a failed embed must never leave an older vector to be reused
     qvec = run_bounded(lambda: embed_query(query, allow_download=False), DENSE_QUERY_TIMEOUT_SECS)
-    _QVEC.last = (query, embed_query, qvec)
+    _QVEC.last = (query, embed_query, qvec, space)
     return qvec
+
+
+def _embed_space() -> str:
+    """The embedding space a query embeds in here: ``DEFAULT_MODEL`` everywhere except
+    inside the warm server's high half (``embed_mlx.using_space``)."""
+    from .embed_mlx import active_space
+
+    return active_space() or DEFAULT_MODEL
 
 
 def _dense_rank_rows(
@@ -397,7 +406,7 @@ def _dense_rank_rows(
 
             why_out.append(unavailable_reason(index))
         return []
-    if index.model and index.model != DEFAULT_MODEL:
+    if index.model and index.model != _embed_space():
         if why_out is not None:
             why_out.append("model_mismatch")
         return []
