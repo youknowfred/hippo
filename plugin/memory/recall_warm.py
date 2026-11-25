@@ -533,7 +533,7 @@ def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_re
     raw_query = prompt.strip() if isinstance(prompt, str) else ""
     try:
         # HCR-2: on the high profile, the big model's index once it has caught up; else lean.
-        with read_only_index(), _launch_dir(project), serving(_corpus_dirs(project)[0], _CACHE.load):
+        with read_only_index(), _launch_dir(project), serving(lambda: _corpus_dirs(project)[0], _CACHE.load):
             out = run_recall(
                 raw_query,
                 session_id=sid,
