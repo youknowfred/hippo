@@ -1,0 +1,251 @@
+# ============================================================================
+# hippo — the high-ceiling retrieval profile (EXECUTABLE roadmap)
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS.retrieval.md (RATIFIED as recommended,
+# Fred, in-session, 2026-11-25). One workstream — HCR — that adds an opt-in
+# `high` retrieval profile (Qwen3-Embedding-4B/8B dense + Qwen3-Reranker via
+# MLX, warm-mode-first) and a PPR graph lane for ALL profiles, while leaving
+# lean (bge-small) the default and BM25-only the floor.
+#
+# HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
+# MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
+# BND, FLT/HYG/PUB/EVD, RWY/OBS/HOT/CLM/TND/FMT/SRF/PLT/NAT/CON, or any
+# ROADMAP.v1/v2 id (checked by grep at authoring).
+#
+# Companion documents:
+#   planning/EXPLORATIONS.retrieval.md — the design + candidate field + verdicts
+#   ic-memobot docs/plans/active/trustgraph-for-agent-memory-exploration-2026-06-23.md
+#     — the standing TrustGraph rejection this exploration re-affirmed
+# ============================================================================
+
+meta:
+  title: hippo — high-ceiling retrieval profile (HCR workstream)
+  repo: youknowfred/hippo
+  authored: 2026-11-25
+  baseline_ref: b1554d2          # main HEAD (v1.47.0) at authoring time
+  baseline_state: >-
+    main @ v1.47.0. Recall is hybrid BM25 (PRF-1 postings + RET-2 body chunks) +
+    dense bge-small-en-v1.5 (384-dim ONNX int8, fastembed 0.7.4) under the RET-1
+    calibrated floor / HOT-10 soft band, RRF k=60, invalidation + supersede
+    penalties, GRA-1 1-hop expansion (3 seeds, 0.5 discount), RCL-4 MMR; RCL-5/
+    RET-16 cross-encoder rerank (Xenova/ms-marco-MiniLM-L-6-v2) unconditional on
+    explicit surfaces, HIPPO_RERANK-gated + 5s-bounded on the hot path. Budgets:
+    GATE_P95_MS=300 (spawn), SERVE_BUDGET_MS=1500 / COLD_BUDGET_MS=4000 (HOT-6
+    warm server, breaker-protected). Dense degrades to BM25-only on a cold
+    cache. IDX-1 binds each dense matrix to its manifest by model id; floors
+    are keyed per model id (_DENSE_FLOOR_BY_MODEL); resolve_embed_model honors
+    HIPPO_EMBED_MODEL and bootstrap config. ab_runner.run_flag_arms is the
+    generalized A/B rig; GRF-4 is the typed-2-hop reachability instrument.
+  source: >-
+    EXPLORATIONS.retrieval.md (2026-11-25): stack inventory read against the
+    tree, candidate field surveyed with fresh web grounding (RTEB/MTEB state as
+    of 2026-11-23: Qwen3-Embedding-8B #1 open on RTEB; no Qwen4/Qwen3.5
+    retrieval family exists; fastembed 0.7.4 ceiling checked in-venv against
+    its live supported-model lists; llama.cpp rerank + MLX conversion
+    availability verified). TrustGraph re-rejected — the 2026-06-23 ops
+    rationale is RAM-independent.
+  method: >-
+    Same discipline as ROADMAP.dream.yaml. BENCH-BEFORE-FLIP is this
+    workstream's law: every latency number in the exploration is an ESTIMATE
+    until measured on the owner's hardware through the existing instruments
+    (ab_runner arms, QUA-6 golden-set deltas, bench cold/warm percentiles,
+    warm-budget telemetry) — no default flips, no budget raises, and no
+    1-hop-lane removal without a dated evidence file. The lean profile and the
+    BM25-only floor are load-bearing fallbacks, never touched by HCR items.
+    implementation_notes are BINDING but SNAPSHOT guidance: re-verify each
+    named symbol against the live tree before coding.
+  owner_decisions:
+    - date: 2026-11-25
+      decisions: >-
+        Ratified as recommended ("okay i approve as recommended"), resolving:
+        (Q1) embedder = Qwen3-Embedding-4B default with 8B knob; (Q2) runtime =
+        MLX-only high profile, llama.cpp GGUF named as the future
+        cross-platform seam; (Q3) HIPPO_RERANK defaults ON (Qwen3-Reranker-
+        0.6B) inside the high profile's warm mode, 4B on explicit surfaces;
+        (Q4) PPR replaces GRA-1 1-hop expansion, gated on the A/B evidence
+        file with GRF-4 as instrument.
+
+workstream:
+  - id: HCR
+    name: High-ceiling retrieval profile (Qwen3 dense + rerank via MLX, PPR lane)
+    extends: >-
+      resolve_embed_model/_DENSE_FLOOR_BY_MODEL/IDX-1 manifest binding (model-id
+      seam), HOT-6 warm server (big-model amortization), RCL-5/RET-16 rerank
+      seam, GRA-1 expansion in recall_graph.py, ab_runner + GRF-4 + QUA-6 (gates)
+    goal: >-
+      Let a 128 GB Mac spend its ceiling on recall quality — a 2025-class
+      instruction-aware embedder and a modern reranker riding the warm server —
+      while every machine below the bar keeps exactly today's lean/floor
+      behavior, and the graph lane gets the HippoRAG-2 associative upgrade for
+      free on all profiles.
+    items:
+
+      - id: HCR-1
+        title: Profile plumbing — retrieval_profile config, setup offer, doctor surface
+        priority: P0
+        effort: S
+        status: pending
+        problem: >-
+          There is no named tier between "the one embed model" and the BM25
+          floor; the high profile needs a durable, per-machine switch that
+          composes with (not replaces) HIPPO_EMBED_MODEL.
+        design: >-
+          A retrieval_profile key (floor|lean|high, default lean) in the same
+          bootstrap config file that carries embed_model; HIPPO_RETRIEVAL_PROFILE
+          env override with the resolve_embed_model precedence shape (env >
+          config > default); `hippo setup` offers high on arm64-darwin with
+          sysctl hw.memsize >= 64 GiB (an OFFER at setup, never a silent flip);
+          a doctor check states the active profile, its models and their cache
+          state. HCR-1 ships the switch with high resolving to lean's models —
+          later items hang real models off it, so the item is shippable alone.
+        acceptance: >-
+          Profile resolves by the documented precedence everywhere models are
+          chosen; doctor names it; setup offer appears only on qualifying
+          hardware; all three profiles green on the existing suite.
+
+      - id: HCR-2
+        title: MLX embedder backend — Qwen3-Embedding-4B (8B knob) behind the dense seam
+        priority: P0
+        effort: L
+        status: pending
+        gated_on: [HCR-1]
+        problem: >-
+          bge-small-en-v1.5 (2023, 384-dim, ~512-token budget) is the quality
+          ceiling of the dense lane; fastembed 0.7.4's in-family headroom tops
+          out at 2024-class or wrong-license models (jina-v3 is CC-BY-NC).
+        design: >-
+          An MLX runner (high-profile-only optional dependency, its own
+          requirements extra; never imported on lean/floor) implementing the
+          embed seam (document embed at build, embed_query at recall) for
+          Qwen/Qwen3-Embedding-4B (default) and -8B (knob), Apache-2.0,
+          instruction-aware — the query side carries a fixed task instruction.
+          Warm-first posture: only the HOT-6 warm server loads the model; the
+          spawn hook never does and serves the LEAN index (the existing claim
+          protocol already arbitrates). Per-profile index: IDX-1's manifest
+          already binds model id + matrix, so lean and high indexes coexist
+          without tearing; MRL truncation (native 2560 vs 1024/2048) is decided
+          by the HCR-6 bench, recorded in the manifest. Offline posture
+          mirrors OSP-4: stat-check the model cache BEFORE import; cold cache
+          degrades to lean, never downloads at recall time.
+        implementation_notes: >-
+          build_index.resolve_embed_model, _MODEL_CACHE_REPOS (OSP-4 pattern),
+          build_index_dense (IDX-1 binding), recall_warm SERVE/COLD budgets,
+          recall_rank.embed_query/run_bounded. 8-bit 4B ≈ 4 GB disk / resident
+          RAM in the warm server; 8B ≈ 8.5 GB — estimates, bench-stamped in
+          HCR-6.
+        acceptance: >-
+          High profile builds its own bound matrix; warm recall serves dense
+          hits from the 4B model inside SERVE_BUDGET_MS on the owner's machine
+          (measured, not assumed); spawn path untouched (lean index, 300 ms
+          gate still green); cold-cache and no-MLX environments degrade to
+          lean with a doctor note, never an exception.
+
+      - id: HCR-3
+        title: Floor recalibration for the Qwen3 embedding space
+        priority: P0
+        effort: S
+        status: pending
+        gated_on: [HCR-2]
+        problem: >-
+          The RET-1 floor is calibrated per model; an uncalibrated model id
+          falls to the conservative 0.50 default, which is a guess in a space
+          whose cosine scale nobody measured — and Qwen3's instruction-aware
+          query side shifts the distribution.
+        design: >-
+          Re-run the RET-1 method verbatim (QUA-6 golden hard-set on-topic
+          queries vs clearly-off-topic probes, warm real model, floor set to
+          the low side of the separation gap) for 4B and 8B with the
+          production query instruction; add both to _DENSE_FLOOR_BY_MODEL with
+          the calibration recorded in the commit body; re-check the HOT-10
+          soft band width against the new space's near-floor density.
+        acceptance: >-
+          Off-topic probes abstain, hard-set recall at or above lean's on the
+          golden corpus, floors landed as table entries with dated calibration
+          evidence.
+
+      - id: HCR-4
+        title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit
+        priority: P1
+        effort: M
+        status: pending
+        gated_on: [HCR-2]
+        problem: >-
+          The rerank lane is a 2022 6-layer MiniLM, and it is off by default on
+          the hot path because the spawn process pays its cold load per prompt
+          — an objection warm mode removes, which nothing yet exploits.
+        design: >-
+          Per-profile reranker ids through the ONE shared _cross_encoder_rerank
+          function (an MLX path beside the fastembed path, same run_bounded
+          shape, same degrade-to-fused-order-on-any-failure contract): high
+          profile warm mode runs Qwen3-Reranker-0.6B with HIPPO_RERANK
+          defaulting ON there (Q3, ratified); explicit surfaces (/hippo:recall,
+          MCP recall) get Qwen3-Reranker-4B; spawn path and lean profile keep
+          today's behavior exactly. Rule-pointer exclusion and COR-8
+          score-immutability carry over untouched.
+        acceptance: >-
+          Warm reranked recall stays inside SERVE_BUDGET_MS at the production
+          candidate count on the owner's machine (measured); breaker telemetry
+          shows no trip-rate regression over a soak window; QUA-6 ordering
+          deltas favor or tie the reranked arm before the default stays ON.
+
+      - id: HCR-5
+        title: PPR graph lane — personalized PageRank over links.json (all profiles)
+        priority: P0
+        effort: M
+        status: pending
+        gated_on: []            # independent of HCR-1..4; lands even if the MLX tier stalls
+        problem: >-
+          GRA-1's 1-hop discount pull sees only direct neighbors of 3 seeds; the
+          associative value of the corpus graph (multi-hop bridges dream keeps
+          finding) never reaches ranking — the exact gap HippoRAG-2 (arXiv
+          2502.14802) closes with PPR, on a graph hippo already persists.
+        design: >-
+          Replace the 1-hop pull in recall_graph.py with power-iteration PPR
+          over GRA-6's links.json: personalization vector = the fused,
+          penalty-adjusted scores of the top-k hits; damping ~0.85; PPR mass
+          re-scored into candidates under the existing compete-for-top-k rule
+          (no reserved slots, typed-edge penalties still apply AFTER). Numpy
+          only, no new deps, budget-asserted sub-ms at 5k nodes. Ships behind
+          HIPPO_GRAPH_PPR beside GRA-1 for the soak, then REPLACES it on the
+          dated evidence flip (Q4, ratified) — the flag then retires rather
+          than living as a fork.
+        acceptance: >-
+          A/B evidence file (ab_runner arm, GRF-4 reachability + QUA-6
+          category deltas) showing multi-hop/associative gains without
+          precision loss; latency delta indistinguishable; flip recorded as a
+          dated owner decision here.
+
+      - id: HCR-6
+        title: Evidence spine + docs capstone — bench-before-flip made mechanical
+        priority: P1
+        effort: M
+        status: pending
+        gated_on: [HCR-2, HCR-3, HCR-4, HCR-5]
+        problem: >-
+          The workstream's law (no flips without evidence) needs an instrument
+          that makes the comparison one command, or it decays into vibes; and
+          an unphotographed profile is support debt.
+        design: >-
+          A profile A/B harness on the ab_runner shape (lean vs high over the
+          live corpus: QUA-6 deltas by category, token-injection cost, warm/
+          cold latency percentiles, resident-RAM stamp; OFF-arm byte-identity
+          self-check as ever); the MRL-dims decision for HCR-2 taken from its
+          output; bench gates unchanged for lean/floor and stamped for high.
+          Docs capstone: README + concepts page get the profile ladder, the
+          setup offer, the degrade story, and the TrustGraph position (link
+          the exploration; the question will be asked again).
+        acceptance: >-
+          One command emits the lean-vs-high evidence file; every HCR default
+          flip in this file cites one; docs photograph the ladder end to end.
+
+  # Severed / explicitly out of scope (dated at ratification, 2026-11-25):
+  #   - TrustGraph platform adoption — standing rejection re-affirmed; ops
+  #     rationale is RAM-independent (EXPLORATIONS.retrieval.md §TL;DR, §2-E).
+  #   - External model servers (Ollama / LM Studio / llama-server) as a recall
+  #     dependency — against the no-server posture; revisit only as an owner-
+  #     commissioned provider knob.
+  #   - llama.cpp GGUF high profile — the named cross-platform seam, unbuilt
+  #     until a non-Mac high-profile machine exists (Q2, ratified).
+  #   - A local generative tier (Qwen3.8-Flash-Next for dream/triage via
+  #     llm_client) — EXPLORATIONS.retrieval.md §5; its own exploration if
+  #     pursued; license field unverified at drafting.
