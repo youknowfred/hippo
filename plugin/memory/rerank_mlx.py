@@ -14,9 +14,8 @@ named here. A reranker is active only inside ``using_reranker`` (a ContextVar, c
 * **The explicit surfaces** (``recall_view.describe``: ``/hippo:recall`` and the MCP
   ``recall`` tool), on the high profile, when ``EXPLICIT_MODEL`` (Qwen3-Reranker-4B) is
   servable here. Nothing turns rerank on there that was not already on (the explicit
-  surface always reranked); only the model changes. The first call in a process loads it
-  inside the shared rerank bound; a load that outlives the bound finishes in the
-  background, and that call keeps its fused order.
+  surface always reranked); only the model changes. The first call in a process loads it,
+  inside ``EXPLICIT_TIMEOUT_SECS``.
 
 The spawned hook enters neither, and lean and floor never resolve a model, so on every
 path but those two ``active_reranker()`` is None and the seam runs exactly as before.
@@ -65,6 +64,12 @@ EXPLICIT_MODEL = "Qwen/Qwen3-Reranker-4B"  # /hippo:recall and the MCP recall to
 # lands inside the budget. HIPPO_RERANK_TIMEOUT, when set, overrides it (as it does the
 # shared 5 s bound everywhere else).
 WARM_TIMEOUT_SECS = 0.8
+# The explicit 4B's bound. Measured on the owner's 128 GB Mac: load ~3.5 s, then ~3.3 s to
+# score a /hippo:recall's hits, so the shared 5 s bound abandoned every first call. An
+# abandoned scoring keeps the process's one MLX thread busy (run_bounded cannot cancel it),
+# and the next warm prompt's query embed waited up to ~1.1 s behind it. The explicit
+# surface has no per-prompt budget to protect, so it waits for the answer instead.
+EXPLICIT_TIMEOUT_SECS = 15.0
 
 # The task line every pair carries (the model card's <Instruct>). Kept beside, not shared
 # with, embed_mlx.QUERY_INSTRUCTION: HCR-3's floor is calibrated on that one.
@@ -131,10 +136,10 @@ def explicit_model() -> Optional[str]:
 
 def bound_secs(model: str, shared: float) -> float:
     """The run_bounded bound for ``model``: ``HIPPO_RERANK_TIMEOUT`` when set, else the
-    warm model's own tight bound, else the shared rerank bound."""
+    model's own bound (the warm model's tight one, the explicit model's generous one)."""
     if (os.environ.get("HIPPO_RERANK_TIMEOUT") or "").strip():
         return shared
-    return WARM_TIMEOUT_SECS if model == WARM_MODEL else shared
+    return WARM_TIMEOUT_SECS if model == WARM_MODEL else EXPLICIT_TIMEOUT_SECS
 
 
 # --------------------------------------------------------------------------- #
@@ -330,14 +335,29 @@ def status(model: str) -> Dict:
     return rec
 
 
+_BUSY: Dict[str, threading.Lock] = {m: threading.Lock() for m in RERANK_MODELS}
+
+
 def score(model: str, query: str, docs: List[str]) -> List[float]:
     """Scores from ``model`` — the seam's MLX call, run inside ``run_bounded``. The warm
     model scores only once loaded (its load is the background thread's); the explicit
-    model loads here on first use."""
-    rr = loaded(model) if model == WARM_MODEL else reranker(model)
-    if rr is None:
-        raise RerankUnavailable(f"{model} is still loading")
-    scores = list(rr.score(query, docs))
+    model loads here on first use.
+
+    One scoring per model at a time, and a call that finds one still running fails at
+    once (the seam keeps the fused order). ``run_bounded`` cannot cancel a scoring that
+    outlived its bound: it keeps the one MLX thread busy, and without this every later
+    call would queue behind it, time out in turn, and leave work behind for the next
+    (measured on the 4B: every explicit call pinned at its 5 s bound)."""
+    busy = _BUSY[model]
+    if not busy.acquire(blocking=False):
+        raise RerankUnavailable(f"{model} is still scoring an earlier call")
+    try:
+        rr = loaded(model) if model == WARM_MODEL else reranker(model)
+        if rr is None:
+            raise RerankUnavailable(f"{model} is still loading")
+        scores = list(rr.score(query, docs))
+    finally:
+        busy.release()
     if len(scores) != len(docs):
         raise RerankUnavailable("the reranker returned the wrong number of scores")
     return scores
@@ -346,3 +366,4 @@ def score(model: str, query: str, docs: List[str]) -> List[float]:
 def _reset_for_tests() -> None:
     _LOADED.clear()
     _STATUS.clear()
+    _BUSY.update({m: threading.Lock() for m in RERANK_MODELS})  # a leftover scoring keeps its old one
