@@ -338,7 +338,10 @@ def _query_vector(query: str):
             and last[1] is embed_query and last[3] == space):
         return last[2]
     _QVEC.last = None  # a failed embed must never leave an older vector to be reused
-    qvec = run_bounded(lambda: embed_query(query, allow_download=False), DENSE_QUERY_TIMEOUT_SECS)
+    from .embed_mlx import abandon_on_timeout
+
+    with abandon_on_timeout():  # HCR-2: a timed-out embed still queued for MLX never runs
+        qvec = run_bounded(lambda: embed_query(query, allow_download=False), DENSE_QUERY_TIMEOUT_SECS)
     _QVEC.last = (query, embed_query, qvec, space)
     return qvec
 
