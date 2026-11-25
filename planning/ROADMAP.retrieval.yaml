@@ -176,7 +176,7 @@ workstream:
         title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit
         priority: P1
         effort: M
-        status: pending
+        status: done            # 2026-11-25: measured on the owner's Mac; planning/HCR-4.evidence.2026-11-25.json
         gated_on: [HCR-2]
         problem: >-
           The rerank lane is a 2022 6-layer MiniLM, and it is off by default on
@@ -196,6 +196,47 @@ workstream:
           candidate count on the owner's machine (measured); breaker telemetry
           shows no trip-rate regression over a soak window; QUA-6 ordering
           deltas favor or tie the reranked arm before the default stays ON.
+        as_built: >-
+          2026-11-25. rerank_mlx beside the seam: _cross_encoder_rerank scores
+          through MLX when a Qwen3 reranker is active in the calling context (a
+          ContextVar run_bounded carries), else through fastembed's MiniLM as
+          before. Two callers enter one: recall_warm_high.serving on the high
+          profile once the 0.6B has loaded in the background (kick starts it,
+          independent of the embedder; HIPPO_RERANK unset means ON there, an
+          explicit falsy value still means off; bound 0.8 s so a slow rerank
+          degrades inside SERVE_BUDGET_MS), and recall_view.describe on the
+          high profile when the 4B is servable (loaded on first use inside its
+          own 15 s bound; a failed load is remembered and the process falls
+          back to the MiniLM). One scoring per model at a time: a call that
+          finds one still running keeps the fused order at once, because
+          run_bounded cannot cancel an abandoned scoring and the next call
+          would queue behind it on the one MLX thread. Spawned hook, lean and floor enter neither.
+          Scoring is the model card's yes/no prompt, right-padded and gathered
+          at the last real token, on embed_mlx.mlx_executor (now the process's
+          one MLX thread for embedder and rerankers). Weights: mlx-community
+          Qwen3-Reranker-{0.6B,4B}-mxfp8, revision-pinned (629 MB / 4.16 GB),
+          fetched only by `hippo setup --profile high --fetch --yes`. The
+          high-profile warm server pins OPENBLAS_NUM_THREADS=1 before numpy
+          loads (HCR-2's measured excess). Instrument: bench/high_rerank.py
+          (served latency ON vs OFF interleaved at k=10, breaker trips, the
+          4B's describe latency, run_flag_arms per reranker over the lean and
+          high indexes; counts only).
+        ab_result: >-
+          2026-11-25, planning/HCR-4.evidence.2026-11-25.json (owner's 128 GB
+          Mac, live corpus, 38-row private fixture). Budget: warm served recall
+          with the 0.6B ON over the hook's 13-21-candidate pool, median 592 /
+          max 756 ms of 1500; every ON call reranked inside its 0.8 s bound; 0
+          breaker trips in 72 calls (a bench soak; the live soak continues in
+          use). Explicit 4B: 2.1 s median per /hippo:recall, 8.6 s first call
+          (6.2 s load). QUA-6: both Qwen3 rerankers raise MRR in every category
+          on both indexes (0.6B +0.025..+0.052, 4B +0.008..+0.096) and tie
+          recall@10; the MiniLM loses 0.07-0.12 MRR everywhere. The 0.6B's
+          default ON in high warm mode stays. It does NOT close HCR-3's
+          high-vs-lean recall gap (30-31/38 vs 33/38): the seam reorders the
+          final list, so recall@10 cannot move — that needs a deeper rerank
+          pool or an upstream fix. First measurement found a queueing bug
+          (24/36 warm calls past the bound, every explicit call pinned at 5 s),
+          fixed before these numbers; both runs are in the evidence file.
 
       - id: HCR-5
         title: PPR graph lane — personalized PageRank over links.json (all profiles)

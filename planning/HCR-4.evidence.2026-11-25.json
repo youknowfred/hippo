@@ -1,0 +1,618 @@
+{
+ "item": "HCR-4",
+ "flag": "HIPPO_RERANK",
+ "date": "2026-11-25",
+ "machine": "owner's 128 GB Apple Silicon Mac (arm64 darwin), Python 3.11.13, mlx 0.32.5, mlx-lm 0.32.2, OPENBLAS_NUM_THREADS=1; the desktop's own load (load average 7-8) was present throughout",
+ "weights": {
+  "Qwen/Qwen3-Reranker-0.6B": "mlx-community/Qwen3-Reranker-0.6B-mxfp8@a82f9f1c5dcb",
+  "Qwen/Qwen3-Reranker-4B": "mlx-community/Qwen3-Reranker-4B-mxfp8@25f203a237b8",
+  "Qwen/Qwen3-Embedding-4B": "mlx-community/Qwen3-Embedding-4B-mxfp8@c738b4ebab1e (full width; this branch's dense floor is the 0.50 default, HCR-3's 0.42 is in #236)"
+ },
+ "command": "OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:.:<mlx scratch> python -m bench.high_rerank --memory-dir <live corpus> --mlx-cache <mlx cache> --fastembed-cache <fastembed cache> [--skip-ab]",
+ "corpus": "this repo's own .claude/memory (108 memories, 272 body chunks) with its private fixture .claude/memory/.audit-fixtures/recall_hard_set.yaml (16 single-hop + 22 multi-hop rows). The corpus and fixture are private: counts only, no queries, no memory names.",
+ "budget": {
+  "code_ref": "the commit adding this file (the busy guard and the explicit model's own bound)",
+  "load": {
+   "embedder": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 929.4,
+    "resident_bytes": 4148542464
+   },
+   "warm_reranker": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 705.6,
+    "resident_bytes": 614481920,
+    "model": "Qwen/Qwen3-Reranker-0.6B"
+   },
+   "high_index_ready_s_after_kick": 51.3
+  },
+  "warm_served_ms": {
+   "rerank_on": {
+    "n": 36,
+    "median": 592.4,
+    "p95": 685.2,
+    "max": 755.5
+   },
+   "rerank_off": {
+    "n": 36,
+    "median": 67.0,
+    "p95": 145.0,
+    "max": 252.6
+   }
+  },
+  "warm_rerank_scoring_ms": {
+   "n": 36,
+   "median": 519.4,
+   "p95": 593.5,
+   "max": 599.2
+  },
+  "candidates_per_rerank": {
+   "min": 13,
+   "max": 21,
+   "median": 21.0
+  },
+  "on_calls_past_the_rerank_bound": 0,
+  "breaker_trips": {
+   "rerank_on": {
+    "tripped": 0,
+    "calls": 36
+   },
+   "rerank_off": {
+    "tripped": 0,
+    "calls": 36
+   }
+  },
+  "served_on_the_high_index": {
+   "rerank_on": 36,
+   "rerank_off": 36
+  },
+  "explicit": {
+   "available": true,
+   "first_call_ms": 8578.0,
+   "describe_ms_after_first": {
+    "n": 11,
+    "median": 2109.1,
+    "p95": 2257.5,
+    "max": 2438.9
+   },
+   "reranker": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 6236.439375003101,
+    "resident_bytes": 4150721536,
+    "model": "Qwen/Qwen3-Reranker-4B"
+   }
+  },
+  "reading": "Warm served recall with the 0.6B ON by default at the production pool (the hook over-fetches k=10 to 13-21 candidates): median 592 ms, max 756 ms of the 1500 ms budget, every ON call reranked inside the 0.8 s bound, 0 breaker trips in 72 calls. The explicit 4B: 2.1 s median per /hippo:recall after a first call of 8.6 s (6.2 s load)."
+ },
+ "budget_before_the_fix": {
+  "code_ref": "d9c3701 (#237 as first opened)",
+  "warm_served_ms": {
+   "rerank_on": {
+    "n": 36,
+    "median": 914.4,
+    "p95": 1114.5,
+    "max": 1381.4
+   },
+   "rerank_off": {
+    "n": 36,
+    "median": 119.3,
+    "p95": 208.4,
+    "max": 629.9
+   }
+  },
+  "warm_rerank_scoring_ms": {
+   "n": 36,
+   "median": 899.3,
+   "p95": 1365.4,
+   "max": 3924.9
+  },
+  "candidates_per_rerank": {
+   "min": 13,
+   "max": 21,
+   "median": 21.0
+  },
+  "on_calls_past_the_rerank_bound": 24,
+  "breaker_trips": {
+   "rerank_on": {
+    "tripped": 0,
+    "calls": 36
+   },
+   "rerank_off": {
+    "tripped": 0,
+    "calls": 36
+   }
+  },
+  "served_on_the_high_index": {
+   "rerank_on": 36,
+   "rerank_off": 36
+  },
+  "explicit": {
+   "available": true,
+   "first_call_ms": 5045.3,
+   "describe_ms_after_first": {
+    "n": 11,
+    "median": 3339.2,
+    "p95": 5075.1,
+    "max": 5091.5
+   },
+   "reranker": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 3472.687166999094,
+    "resident_bytes": 4150721536,
+    "model": "Qwen/Qwen3-Reranker-4B"
+   }
+  },
+  "reading": "No breaker trips (max 1381 ms), but 24 of 36 ON calls ran past the 0.8 s bound and served the fused order, and every explicit 4B call pinned at its 5 s bound: a scoring that outlives run_bounded keeps the one MLX thread busy and the next call queued behind it. Unloaded, the 0.6B scores 20 real descriptions in ~340 ms; the excess was the queue. Fixed by failing a call fast while the model is still scoring, and a 15 s bound for the explicit 4B."
+ },
+ "shared_thread_repro": {
+  "query_embed_alone_ms": {
+   "median": 58,
+   "max": 76
+  },
+  "next_embed_after_an_abandoned_embed_ms": {
+   "median": 205,
+   "max": 238
+  },
+  "one_4b_scoring_of_10_descriptions_ms": 1364,
+  "next_embed_behind_an_abandoned_4b_scoring_ms": {
+   "median": 688,
+   "max": 1110
+  },
+  "reading": "The embedder's own abandoned query embed delays the next by one short embed (pre-existing in #235, bounded, no cascade). An abandoned 4B scoring on the shared thread delayed the next warm prompt's embed by up to 1.1 s; the 15 s explicit bound keeps a normal explicit call from being abandoned."
+ },
+ "ab": {
+  "code_ref": "d9c3701 + the bench's MiniLM arm (scoring is unchanged by the later fix; HIPPO_RERANK_TIMEOUT=60 in these runs, so no arm degraded)",
+  "summary": {
+   "lean_index/ms-marco-MiniLM-L-6-v2": {
+    "fused_hits": 33,
+    "reranked_hits": 33,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": -0.1082,
+     "single-hop": -0.0743
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   },
+   "lean_index/Qwen3-Reranker-0.6B": {
+    "fused_hits": 33,
+    "reranked_hits": 33,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": 0.048,
+     "single-hop": 0.0521
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   },
+   "lean_index/Qwen3-Reranker-4B": {
+    "fused_hits": 33,
+    "reranked_hits": 33,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": 0.0091,
+     "single-hop": 0.0958
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   },
+   "high_index/ms-marco-MiniLM-L-6-v2": {
+    "fused_hits": 30,
+    "reranked_hits": 30,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": -0.1197,
+     "single-hop": -0.0755
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   },
+   "high_index/Qwen3-Reranker-0.6B": {
+    "fused_hits": 30,
+    "reranked_hits": 30,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": 0.0245,
+     "single-hop": 0.0432
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   },
+   "high_index/Qwen3-Reranker-4B": {
+    "fused_hits": 30,
+    "reranked_hits": 30,
+    "of": 38,
+    "mrr_delta": {
+     "multi-hop": 0.0082,
+     "single-hop": 0.0692
+    },
+    "recall_delta": {
+     "multi-hop": 0.0,
+     "single-hop": 0.0
+    }
+   }
+  },
+  "runs": {
+   "lean_index/ms-marco-MiniLM-L-6-v2": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "BAAI/bge-small-en-v1.5",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.4295454545454545,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.7604166666666667,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.32132034632034634,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.686111111111111,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": -0.1082,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": -0.0743,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 65.5
+   },
+   "lean_index/Qwen3-Reranker-0.6B": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "BAAI/bge-small-en-v1.5",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.4295454545454545,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.7604166666666667,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.4775252525252526,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.8125,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": 0.048,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": 0.0521,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 312.4
+   },
+   "lean_index/Qwen3-Reranker-4B": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "BAAI/bge-small-en-v1.5",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.4295454545454545,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.7604166666666667,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.8181818181818182,
+      "mrr": 0.43863636363636355,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.9375,
+      "mrr": 0.85625,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": 0.0091,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": 0.0958,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 1531.6
+   },
+   "high_index/ms-marco-MiniLM-L-6-v2": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "Qwen/Qwen3-Embedding-4B",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.4311868686868687,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.6651785714285714,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.3114718614718615,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.589657738095238,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": -0.1197,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": -0.0755,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 203.3
+   },
+   "high_index/Qwen3-Reranker-0.6B": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "Qwen/Qwen3-Embedding-4B",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.4311868686868687,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.6651785714285714,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.45573593073593077,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.7083333333333334,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": 0.0245,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": 0.0432,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 386.5
+   },
+   "high_index/Qwen3-Reranker-4B": {
+    "ok": true,
+    "condition": {
+     "index_mode": "dense",
+     "query_mode": "dense+bm25",
+     "backend": "dense+bm25",
+     "model": "Qwen/Qwen3-Embedding-4B",
+     "corpus_n": 108,
+     "hard_set_n": 38,
+     "resolvable_by_category": {
+      "multi-hop": {
+       "resolvable_n": 22,
+       "n": 22
+      },
+      "single-hop": {
+       "resolvable_n": 16,
+       "n": 16
+      }
+     }
+    },
+    "off_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.4311868686868687,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.6651785714285714,
+      "n": 16
+     }
+    },
+    "on_by_category": {
+     "multi-hop": {
+      "recall": 0.7727272727272727,
+      "mrr": 0.4393939393939394,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.8125,
+      "mrr": 0.734375,
+      "n": 16
+     }
+    },
+    "deltas": {
+     "multi-hop": {
+      "recall": 0.0,
+      "mrr": 0.0082,
+      "n": 22
+     },
+     "single-hop": {
+      "recall": 0.0,
+      "mrr": 0.0692,
+      "n": 16
+     }
+    },
+    "identical_arms": false,
+    "off_arm_self_check": "pass \u2014 flag-off runs byte-identical before and after the ON arm",
+    "wall_s": 1472.4
+   }
+  }
+ },
+ "readings": {
+  "ordering": "Both Qwen3 rerankers favor the reranked arm on MRR in every category on both indexes (0.6B: +0.048/+0.052 lean, +0.025/+0.043 high, multi-hop/single-hop; 4B: +0.009/+0.096 lean, +0.008/+0.069 high) and tie on recall@10. The 2022 MiniLM loses MRR everywhere (-0.108/-0.074 lean, -0.120/-0.076 high), the evidence for keeping it off the hot path.",
+  "default": "The acceptance holds for the 0.6B's default ON in high-profile warm mode: inside the budget, no trip-rate regression in this soak, QUA-6 deltas favor the reranked arm.",
+  "hcr3_gap": "Reranking does not close the high-vs-lean recall gap, by construction: the seam reorders the final list, so recall@10 is identical with it on or off (here high 30/38 vs lean 33/38 at this branch's 0.50 floor; #236's 0.42 floor gives 31/38). The lost rows never reach the reranker. Closing it needs a deeper rerank pool (reranking the top ~30 fused candidates before the top-k cut) or a fix upstream in the floor/embedder. Not run on the #236 merge for that reason: recall@10 is invariant under this seam whatever the floor.",
+  "aside": "The best MRR of any arm is lean + the 0.6B (single-hop 0.8125, multi-hop 0.4775 vs lean fused 0.7604/0.4295 and high + 0.6B 0.7083/0.4557). Turning the 0.6B on for lean's warm path too is an owner's call, not built here."
+ }
+}

@@ -286,19 +286,27 @@ def describe(
     """
     if memory_dir is None:
         memory_dir, repo_root = resolve_dirs()
+    # HCR-4: on the high profile, where this machine can serve it, the explicit surface's
+    # rerank (below, and recall()'s own when HIPPO_RERANK is on) scores with the 4B
+    # Qwen3 reranker; everywhere else this is None and the MiniLM reranks, as before.
+    from .rerank_mlx import explicit_model, using_reranker
+
+    reranker = explicit_model()
     corpora_res: Optional[dict] = None
     if all_projects:
         from .recall import recall_all_projects
 
-        corpora_res = recall_all_projects(
-            query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
-        )
+        with using_reranker(reranker):
+            corpora_res = recall_all_projects(
+                query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+            )
         hits = corpora_res["hits"]
     else:
         _t0 = time.perf_counter() if channel == "mcp" else 0.0
-        hits = recall(
-            query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
-        )
+        with using_reranker(reranker):
+            hits = recall(
+                query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+            )
         if channel == "mcp":
             _log_channel_event(
                 hits,
@@ -327,7 +335,8 @@ def describe(
     # same query/hit set. When the flag is off (the common case for this explicit surface,
     # which never needed a flag), this is the ONLY rerank, exactly as before.
     if not _rerank_enabled():
-        hits = _cross_encoder_rerank(query, hits)
+        with using_reranker(reranker):
+            hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
     from .ledger import load as _load_ledger  # LDG-1: a cited tracker id's status, dated
 
