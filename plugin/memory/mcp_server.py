@@ -521,6 +521,11 @@ def _write(stdout, obj: Dict[str, Any]) -> None:
 
 
 def main(argv=None) -> int:
+    # HCR-4: one OpenBLAS thread for a high-profile warm server — before anything loads
+    # numpy, which is when OpenBLAS reads it (nothing this module imports at load does).
+    from .recall_warm_high import pin_blas_threads
+
+    pin_blas_threads()
     return serve()
 
 
