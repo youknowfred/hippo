@@ -161,6 +161,32 @@ def using_space(space: str) -> Iterator[None]:
         _ACTIVE.reset(token)
 
 
+class EmbedAbandoned(RuntimeError):
+    """A queued embed dropped because its caller had already stopped waiting."""
+
+
+_GIVEN_UP: ContextVar[Optional[threading.Event]] = ContextVar("hippo_embed_given_up", default=None)
+
+
+@contextmanager
+def abandon_on_timeout() -> Iterator[None]:
+    """Wrap a bounded embed call. ``run_bounded`` can make its caller stop waiting but
+    cannot cancel the work, so an embed still queued for the MLX thread would run anyway
+    and the next prompt's query would wait behind it. Leaving this block by an exception
+    (the bound's ``DenseTimeout``) marks every embed started inside it as abandoned; the
+    embedder drops the parts that have not begun. One already running finishes. Outside a
+    high space nothing reads the mark."""
+    mark = threading.Event()
+    token = _GIVEN_UP.set(mark)
+    try:
+        yield
+    except BaseException:
+        mark.set()
+        raise
+    finally:
+        _GIVEN_UP.reset(token)
+
+
 def manifest_fields(space: str) -> Dict:
     """Extra manifest keys a build in ``space`` records; ``{}`` for a lean id, so a lean
     manifest is byte-identical to one written before this module existed."""
@@ -317,9 +343,18 @@ class _MLXEmbedder:
         mx.eval(pooled)
         return np.array(pooled)
 
+    def _slice(self, batch: List[List[int]], given_up: Optional[threading.Event]):
+        """One queued forward pass, dropped unrun when its caller stopped waiting while it
+        sat in the queue (behind a build slice or a model load): the worker goes straight
+        to the next caller's query instead of first embedding one nobody will read."""
+        if given_up is not None and given_up.is_set():
+            raise EmbedAbandoned()
+        return self._forward(batch)
+
     def _encode(self, texts: List[str]):
         import numpy as np
 
+        given_up = _GIVEN_UP.get()
         ids = self._ids(texts)
         order = sorted(range(len(ids)), key=lambda i: len(ids[i]))
         out: List = [None] * len(ids)
@@ -329,7 +364,7 @@ class _MLXEmbedder:
             while end < len(order) and len(ids[order[end]]) * (end - start + 1) <= _SLICE_TOKENS:
                 end += 1
             part = order[start:end]
-            vecs = self._pool.submit(self._forward, [ids[i] for i in part]).result()
+            vecs = self._pool.submit(self._slice, [ids[i] for i in part], given_up).result()
             for pos, i in enumerate(part):
                 out[i] = vecs[pos]
             start = end

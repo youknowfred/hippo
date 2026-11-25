@@ -191,6 +191,59 @@ def test_run_bounded_carries_the_active_space_into_its_worker():
     assert B.run_bounded(E.active_space, 5.0) is None
 
 
+def _bare_embedder(ran):
+    import concurrent.futures
+
+    emb = object.__new__(E._MLXEmbedder)
+    emb.dim = 4
+    emb._pool = concurrent.futures.ThreadPoolExecutor(1)
+    emb._ids = lambda texts: [[1, 2, 3] for _ in texts]
+    emb._forward = lambda batch: (ran.append(len(batch)), np.zeros((len(batch), 4), dtype="float32"))[1]
+    return emb
+
+
+def test_a_query_embed_abandoned_while_queued_never_reaches_the_model():
+    import threading
+
+    ran: list = []
+    emb = _bare_embedder(ran)
+    gate = threading.Event()
+    emb._pool.submit(gate.wait)  # the one MLX thread is busy (a build slice, a model load)
+    with pytest.raises(B.DenseTimeout):
+        with E.abandon_on_timeout():
+            B.run_bounded(lambda: list(emb.query_embed(["where is the zebra runbook"])), 0.05)
+    gate.set()
+    emb._pool.submit(lambda: None).result(timeout=5)  # the queue has drained
+    assert ran == []
+    list(emb.query_embed(["the next prompt"]))  # the next caller is served as ever
+    assert ran == [1]
+    emb._pool.shutdown()
+
+
+def test_an_embed_inside_its_bound_and_a_document_build_are_untouched():
+    ran: list = []
+    emb = _bare_embedder(ran)
+    with E.abandon_on_timeout():
+        assert len(B.run_bounded(lambda: list(emb.query_embed(["q"])), 5.0)) == 1
+    assert len(list(emb.embed(["doc one", "doc two"]))) == 2
+    assert sum(ran) == 3 and E._GIVEN_UP.get() is None
+    emb._pool.shutdown()
+
+
+def test_the_query_path_marks_a_timed_out_embed_abandoned(monkeypatch):
+    marks: list = []
+
+    def timed_out(fn, seconds):
+        marks.append(E._GIVEN_UP.get())
+        raise B.DenseTimeout()
+
+    monkeypatch.setattr(RR, "run_bounded", timed_out)
+    RR._QVEC.last = None
+    with pytest.raises(B.DenseTimeout):
+        RR._query_vector("where is the zebra runbook")
+    assert marks[0] is not None and marks[0].is_set() and E._GIVEN_UP.get() is None
+
+
 def test_queries_carry_the_one_instruction_and_documents_do_not():
     emb = object.__new__(E._MLXEmbedder)
     seen = []
