@@ -36,6 +36,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -74,7 +75,9 @@ MODEL_PRESET_KEY = "high_embed_model"
 DIM_PRESET_KEY = "high_embed_dim"
 _MIN_DIM = 32  # Qwen3-Embedding's documented MRL floor
 _MAX_TOKENS = 1024  # longest input embedded; hippo's docs and body chunks sit far below it
-_SLICE_TOKENS = 4096  # padded tokens per forward pass: bounds a waiting query's wait
+# Padded tokens per forward pass: bounds a waiting query's wait. Measured on the 4B (M-series,
+# 128 GB): ~1,350 tok/s up to ~1.2k tokens a pass, falling to ~600 tok/s at ~4k.
+_SLICE_TOKENS = 1024
 
 _ACTIVE: "ContextVar[Optional[str]]" = ContextVar("hippo_embed_space", default=None)
 
@@ -195,24 +198,29 @@ def snapshot_dir(model: str, root: Optional[str] = None) -> str:
 
 
 def model_cached(model: str, root: Optional[str] = None) -> bool:
-    """Pure stat (plus one small JSON read): the pinned snapshot holds a config, a
-    tokenizer and every weight shard its index names. A partial download is not cached."""
+    """Pure stat: the pinned snapshot holds a config, a tokenizer and a complete set of
+    weight files — an unsharded ``*.safetensors``, or every ``-NNNNN-of-MMMMM`` shard.
+    The file names are the evidence, not ``model.safetensors.index.json``: the 4B mxfp8
+    conversion ships a stale index naming two shards it does not have (mlx_lm globs the
+    files too). A snapshot link appears only once its file finished downloading, so a
+    partial download reads as not cached."""
     snap = snapshot_dir(model, root)
     if not (os.path.isfile(os.path.join(snap, "config.json"))
             and os.path.isfile(os.path.join(snap, "tokenizer.json"))):
         return False
     try:
-        with open(os.path.join(snap, "model.safetensors.index.json"), encoding="utf-8") as fh:
-            shards = set((json.load(fh).get("weight_map") or {}).values())
-    except Exception:
-        shards = set()
-    if shards:
-        return all(os.path.isfile(os.path.join(snap, s)) for s in shards)
-    try:
-        return any(n.endswith(".safetensors") and os.path.isfile(os.path.join(snap, n))
-                   for n in os.listdir(snap))
+        weights = [n for n in os.listdir(snap)
+                   if n.endswith(".safetensors") and os.path.isfile(os.path.join(snap, n))]
     except OSError:
         return False
+    shards = [m for m in (_SHARD_RE.search(n) for n in weights) if m]
+    if not shards:
+        return bool(weights)
+    want = {int(m.group(2)) for m in shards}
+    return len(want) == 1 and {int(m.group(1)) for m in shards} == set(range(1, want.pop() + 1))
+
+
+_SHARD_RE = re.compile(r"-(\d+)-of-(\d+)\.safetensors$")
 
 
 def apple_silicon() -> bool:

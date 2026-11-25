@@ -204,24 +204,31 @@ def test_queries_carry_the_one_instruction_and_documents_do_not():
 # --------------------------------------------------------------------------- #
 # Offline posture: stat before import, never a download
 # --------------------------------------------------------------------------- #
-def _fake_snapshot(root, model=_SPACE, shards=("model.safetensors",), present=None):
+def _fake_snapshot(root, model=_SPACE, files=("model.safetensors",)):
     snap = E.snapshot_dir(model, root)
     os.makedirs(snap, exist_ok=True)
-    for name in ("config.json", "tokenizer.json"):
+    for name in ("config.json", "tokenizer.json") + tuple(files):
         open(os.path.join(snap, name), "w").close()
-    with open(os.path.join(snap, "model.safetensors.index.json"), "w") as fh:
-        json.dump({"weight_map": {f"w{i}": s for i, s in enumerate(shards)}}, fh)
-    for s in shards if present is None else present:
-        open(os.path.join(snap, s), "w").close()
     return snap
 
 
-def test_model_cached_needs_every_shard_its_index_names(tmp_path):
+def test_model_cached_needs_a_complete_set_of_weight_files(tmp_path):
     root = str(tmp_path / "mlx")
     assert not E.model_cached(_SPACE, root)
-    _fake_snapshot(root, shards=("a.safetensors", "b.safetensors"), present=("a.safetensors",))
+    _fake_snapshot(root, files=())
+    assert not E.model_cached(_SPACE, root)  # config and tokenizer alone are not a model
+    snap = _fake_snapshot(root, files=("model-00001-of-00002.safetensors",))
     assert not E.model_cached(_SPACE, root)  # a partial download is not a cache
-    open(os.path.join(E.snapshot_dir(_SPACE, root), "b.safetensors"), "w").close()
+    open(os.path.join(snap, "model-00002-of-00002.safetensors"), "w").close()
+    assert E.model_cached(_SPACE, root)
+
+
+def test_a_stale_shard_index_does_not_hide_a_complete_unsharded_model(tmp_path):
+    """The real 4B mxfp8 snapshot: one model.safetensors, an index naming two shards."""
+    root = str(tmp_path / "mlx")
+    snap = _fake_snapshot(root)
+    with open(os.path.join(snap, "model.safetensors.index.json"), "w") as fh:
+        json.dump({"weight_map": {"a": "model-00001-of-00002.safetensors"}}, fh)
     assert E.model_cached(_SPACE, root)
 
 
