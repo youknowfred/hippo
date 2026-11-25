@@ -106,6 +106,10 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", project)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    # Ranking knobs a developer's shell may carry (a project's settings export them into
+    # its sessions): these tests assert what the shipped floor and seed count serve.
+    for knob in ("HIPPO_DENSE_FLOOR", "HIPPO_GRAPH_SEEDS"):
+        monkeypatch.delenv(knob, raising=False)
     idx = B.default_index_dir(md)
     return {"project": project, "md": md, "idx": idx, "data": data, "high": H.high_index_dir(idx)}
 
