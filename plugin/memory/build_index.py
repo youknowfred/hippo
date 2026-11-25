@@ -29,6 +29,7 @@ BM25-only index without error (``dense_ready=false``); recall still works on BM2
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import hashlib
 import json
 import math
@@ -112,11 +113,7 @@ def resolve_embed_model() -> str:
     read/parse problem (missing file, missing ``CLAUDE_PLUGIN_DATA``, corrupt JSON, non-dict
     JSON, non-string field) silently falls through to the next precedence level rather than
     blocking module import or a recall call. Module-level ``DEFAULT_MODEL`` calls this ONCE at
-    import time (unchanged usage everywhere else in the module — ``_get_model``/``_MODEL_CACHE``/
-    ``_HF_SOURCE_REPO_BY_MODEL`` keep reading the same module-level constant as before); a
-    process that needs to pick up a preset written by another process (e.g. a test simulating
-    bootstrap-then-recall in one run) re-resolves explicitly rather than relying on the module
-    being re-imported.
+    import time; a process that needs a preset another process wrote re-resolves explicitly.
     """
     env_override = os.environ.get("HIPPO_EMBED_MODEL")
     if env_override:
@@ -225,7 +222,7 @@ def run_bounded(fn, seconds: float):
     if seconds <= 0:
         return fn()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(fn)
+    future = executor.submit(contextvars.copy_context().run, fn)  # HCR-2: the active space rides along
     try:
         return future.result(timeout=seconds)
     except concurrent.futures.TimeoutError:
@@ -1006,14 +1003,16 @@ def _get_model(allow_download: bool):
     cache miss raises immediately instead of triggering a synchronous ~130 MB download. The
     build path (``allow_download=True``) is the ONLY place a download may happen.
 
-    OSP-4: for the offline path, a cheap filesystem pre-check
-    (``_fastembed_model_cached``) runs BEFORE the fastembed import -- on a cold/wiped cache
-    (the common case on a fresh machine) this raises immediately without importing fastembed
-    at all, so the caller falls back to BM25 in microseconds instead of needing a wall-clock
-    timeout to bound an import+load that was never going to succeed.
+    OSP-4: for the offline path, a filesystem pre-check (``_fastembed_model_cached``) runs
+    BEFORE the fastembed import, so a cold/wiped cache falls back to BM25 in microseconds.
+    HCR-2: inside a high space (``embed_mlx.using_space``) the MLX embedder answers instead.
     """
     if dense_disabled():
         raise DenseUnavailable("dense disabled via HIPPO_DISABLE_DENSE", "dense_disabled")
+    from .embed_mlx import active_space, high_embedder
+
+    if active_space():  # HCR-2: only recall_warm_high enters a high space; never downloads
+        return high_embedder(active_space())
     key = (DEFAULT_MODEL, bool(allow_download))
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
@@ -1267,8 +1266,9 @@ def build_index(
         for chunk in body_chunks_by_entry.get(entry_idx, []):
             body_chunks.append({"entry": entry_idx, "hash": chunk["hash"], "tokens": chunk["tokens"], "text": chunk["text"]})
 
-    want_dense = not dense_disabled()
-    dense_rows = None
+    from .embed_mlx import active_space, manifest_fields
+
+    space, want_dense, dense_rows = active_space() or DEFAULT_MODEL, not dense_disabled(), None
     dense_ready = False
     if want_dense:
         try:
@@ -1287,7 +1287,7 @@ def build_index(
             # old body_chunks blocks -- a chunk hash-hit is exactly as cache-reusable as an
             # entry hash-hit (same incremental-embed contract, same manifest, same dense.npy).
             old_row_by_hash: Dict[str, int] = {}
-            if old_manifest and old_dense is not None and old_manifest.get("model") == DEFAULT_MODEL:
+            if old_manifest and old_dense is not None and old_manifest.get("model") == space:
                 for e in old_manifest.get("entries", []):
                     if "row" in e and e["row"] is not None and 0 <= e["row"] < len(old_dense):
                         old_row_by_hash[e["hash"]] = e["row"]
@@ -1415,9 +1415,9 @@ def build_index(
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        # A partially-embedded (dense_ready=False) manifest still names the model so the
-        # next build's cache-reuse check (old_manifest.get("model") == DEFAULT_MODEL) fires.
-        "model": DEFAULT_MODEL if dense_rows is not None else None,
+        # A partially-embedded manifest still names its model (space) so the next build reuses rows.
+        "model": space if dense_rows is not None else None,
+        **(manifest_fields(space) if dense_rows is not None else {}),  # HCR-2: high only; lean adds none
         "dense_ready": dense_ready,
         "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),

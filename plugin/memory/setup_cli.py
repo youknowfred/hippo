@@ -493,9 +493,10 @@ def _profile(args) -> int:
             lines.append("  floor = BM25-only: the dense lane is off by policy.")
         else:
             from .build_index import resolve_embed_model
+            from .recall_warm_high import doctor_meaning  # HCR-2: the big model's state here
 
-            note = " (high runs lean's models until the big-model tier ships)" if active == "high" else ""
-            lines.append(f"  dense model: {resolve_embed_model()}{note}")
+            meaning, note = doctor_meaning(f"dense model: {resolve_embed_model()}", active)
+            lines.append(f"  {meaning}" + (f"\n  {note}" if note else ""))
         if source != "env" and os.environ.get(RP.ENV_VAR):
             lines.append(f"  note: {RP.ENV_VAR}={os.environ[RP.ENV_VAR]!r} is set but not a "
                          f"known profile; it is ignored (doctor flags this too).")
@@ -520,7 +521,7 @@ def _profile(args) -> int:
     choice = args.profile
     if choice in (None, "show") or args.status:
         print("\n".join(_state_lines()))
-        return 0
+        return _fetch_high(args) if getattr(args, "fetch", False) and not args.status else 0
     choice = choice.strip().lower()
     if choice not in RP.PROFILES:
         print(f"{flag}: unknown profile {choice!r} (one of: {', '.join(RP.PROFILES)}).")
@@ -541,8 +542,35 @@ def _profile(args) -> int:
                  "(arm64 macOS, >= 64 GiB); high still resolves safely, but the "
                  "big models will be heavy here.")
     if choice == "high":
-        extra += " Until the big-model tier ships, high runs lean's models — this records the opt-in."
+        extra += (" High serves its MLX embedder through warm recall only (`hippo setup --warm`); "
+                  "the spawned hook keeps lean.")
     print(f"{flag}: wrote retrieval_profile={choice!r} to {written}.{extra}")
+    return _fetch_high(args) if getattr(args, "fetch", False) else 0
+
+
+def _fetch_high(args) -> int:
+    """HCR-2: the high embedder's one download — the pinned MLX weights, previewed with
+    their size first, fetched only with ``--yes``. Recall never downloads."""
+    from . import embed_mlx as E
+
+    flag, model = "hippo setup --profile --fetch", E.resolve_high_model()
+    spec = E.HIGH_MODELS[model]
+    if not E.mlx_installed():
+        print(f"{flag}: note: MLX is not installed — {E.INSTALL_HINT}.")
+    if E.model_cached(model):
+        print(f"{flag}: {model} is already downloaded at {E.snapshot_dir(model)}.")
+        return 0
+    size = f"~{spec['download_bytes'] / 1e9:.1f} GB"
+    if not args.yes:
+        print(f"`{flag} --yes` would download {model} as {spec['repo']}@{spec['revision'][:12]} "
+              f"({size}) into {E.cache_dir()}. Nothing was downloaded.")
+        return 0
+    try:
+        path = E.fetch(model)
+    except Exception as exc:
+        print(f"{flag}: download failed: {exc}. Recall stays on lean.")
+        return 1
+    print(f"{flag}: downloaded {model} ({size}) to {path}.")
     return 0
 
 
@@ -568,6 +596,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--conventions", action="store_true", help=_SETTINGS["conventions"][1])
     parser.add_argument("--profile", nargs="?", const="show", default=None,
                         metavar="PROFILE", help=_SETTINGS["profile"][1])
+    parser.add_argument("--fetch", action="store_true",
+                        help="with --profile: download the high embedder's weights (preview without --yes)")
     parser.add_argument("--remove", metavar="DIR", default=None,
                         help="with --worktree-copies: the one directory to remove")
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")

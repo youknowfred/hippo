@@ -232,11 +232,11 @@ def test_cli_preview_writes_nothing(plugin_data, capsys):
     assert not os.path.exists(os.path.join(str(plugin_data), "model.json"))
 
 
-def test_cli_yes_writes_and_names_the_hcr2_gap(plugin_data, capsys, monkeypatch):
+def test_cli_yes_writes_and_names_the_warm_only_rule(plugin_data, capsys, monkeypatch):
     monkeypatch.setattr(RP, "qualifies_for_high", lambda: True)
     assert setup_cli.main(["--profile", "high", "--yes"]) == 0
     out = capsys.readouterr().out
-    assert "lean's models" in out
+    assert "warm recall only" in out and "spawned hook keeps lean" in out
     assert RP.profile_source() == ("high", "preset")
 
 

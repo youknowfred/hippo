@@ -1,0 +1,14 @@
+# The HIGH retrieval profile's optional extra (HCR-2) — Apple Silicon macOS only.
+#
+# NOT part of requirements.txt and never installed by bootstrap: lean (the default) and
+# floor never import these, CI runs Linux where MLX has no wheels, and a machine without
+# them simply serves lean (doctor says why). Opt in on an arm64 Mac, into hippo's venv:
+#   "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m pip install -r requirements-high.txt
+#   hippo setup --profile high --fetch --yes     # the pinned weights, ~4.2 GB (8B: ~7.8 GB)
+#   hippo setup --warm --yes                     # high serves only through warm recall
+#
+# mlx: Apple's array framework (MIT). mlx-lm: the Qwen3 architecture and the quantized
+# (mxfp8) weight loader (MIT); it brings transformers, which hippo itself never imports.
+# Bounded both sides, the SEC-11 rule requirements.txt follows. mxfp8 needs mlx >= 0.29.
+mlx>=0.29,<1
+mlx-lm>=0.28,<1
