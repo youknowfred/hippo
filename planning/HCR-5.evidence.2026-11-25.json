@@ -8,7 +8,8 @@
   "corpora": {
     "live_corpus": "this repo's own .claude/memory (108 memories) with its project-local fixture .claude/memory/.audit-fixtures/recall_hard_set.yaml (16 single-hop rows, 0 multi-hop)",
     "starter_packs": "the CI corpus: plugin/assets packs seeded per tests/fixtures/recall_hard_set.yaml's header (22 memories) with that fixture (10 multi-hop, 22 single-hop)",
-    "live_corpus_grown": "the same live corpus after its private fixture grew to 27 rows (16 single-hop + 11 multi-hop, added 2026-11-25 at the owner's request; 6 rows whose answer is one link from the memory the query leans on, 5 two links away; queries written before any recall run and not tuned). The corpus and fixture are private (gitignored), so these runs carry counts only: no queries, no memory names."
+    "live_corpus_grown": "the same live corpus after its private fixture grew to 27 rows (16 single-hop + 11 multi-hop, added 2026-11-25 at the owner's request; 6 rows whose answer is one link from the memory the query leans on, 5 two links away; queries written before any recall run and not tuned). The corpus and fixture are private (gitignored), so these runs carry counts only: no queries, no memory names.",
+    "heldout": "11 more multi-hop rows on the live corpus (7 one link, 4 two links from the memory each query leans on; pairs the first 11 did not use), written and frozen before any v2 code existed (frozen at 77724a9, file sha256 972ed5e0126eaca85db72b522fd7419b53104dea317655708aebfe9976810692; the file is private). Also admitted to the live fixture, which is now 16 single-hop + 22 multi-hop."
   },
   "runs": {
     "live_corpus_dense": {
@@ -555,6 +556,583 @@
         }
       },
       "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_live_heldout_dense": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "dense",
+        "query_mode": "dense+bm25",
+        "backend": "dense+bm25",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 11,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 11,
+            "n": 11
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.5303030303030303,
+          "n": 11
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.5303030303030303,
+          "n": 11
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 11
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": false,
+      "reachability": {
+        "off": {
+          "expected_stems": 11,
+          "seed_rank_0": 7,
+          "reachable_at_1": 3,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 11,
+          "seed_rank_0": 7,
+          "reachable_at_1": 3,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 0
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 171.46,
+          "p95": 396.57,
+          "n": 55
+        },
+        "on": {
+          "p50": 200.56,
+          "p95": 349.02,
+          "n": 55
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_live_heldout_bm25_queries": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "bm25-only",
+        "query_mode": "bm25-only",
+        "backend": "bm25-only",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 11,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 11,
+            "n": 11
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.6136363636363636,
+          "n": 11
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.6136363636363636,
+          "n": 11
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 11
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": true,
+      "identical_arms_note": "self-check pass — the ranking view did not move under the flag; NOT a finding about the lane",
+      "reachability": {
+        "off": {
+          "expected_stems": 11,
+          "seed_rank_0": 8,
+          "reachable_at_1": 2,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 11,
+          "seed_rank_0": 8,
+          "reachable_at_1": 2,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 0
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 5.17,
+          "p95": 8.84,
+          "n": 55
+        },
+        "on": {
+          "p50": 5.38,
+          "p95": 7.68,
+          "n": 55
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_live_full_fixture_dense": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "dense",
+        "query_mode": "dense+bm25",
+        "backend": "dense+bm25",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 38,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 22,
+            "n": 22
+          },
+          "single-hop": {
+            "resolvable_n": 16,
+            "n": 16
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.4295454545454545,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7604166666666667,
+          "n": 16
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.7727272727272727,
+          "mrr": 0.4068181818181818,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7604166666666667,
+          "n": 16
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": -0.0455,
+          "mrr": -0.0227,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 16
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": false,
+      "reachability": {
+        "off": {
+          "expected_stems": 22,
+          "seed_rank_0": 13,
+          "reachable_at_1": 7,
+          "reachable_at_2": 2,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 22,
+          "seed_rank_0": 12,
+          "reachable_at_1": 8,
+          "reachable_at_2": 2,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 1
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 106.05,
+          "p95": 198.94,
+          "n": 190
+        },
+        "on": {
+          "p50": 53.84,
+          "p95": 166.19,
+          "n": 190
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_live_full_fixture_bm25_queries": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "bm25-only",
+        "query_mode": "bm25-only",
+        "backend": "bm25-only",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 108,
+        "hard_set_n": 38,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 22,
+            "n": 22
+          },
+          "single-hop": {
+            "resolvable_n": 16,
+            "n": 16
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 108,
+          "walkable_pairs": 718,
+          "mean_out_degree": 6.65
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.45119047619047614,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7208333333333332,
+          "n": 16
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 0.8181818181818182,
+          "mrr": 0.45119047619047614,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7208333333333332,
+          "n": 16
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 22
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 16
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": true,
+      "identical_arms_note": "self-check pass — the ranking view did not move under the flag; NOT a finding about the lane",
+      "reachability": {
+        "off": {
+          "expected_stems": 22,
+          "seed_rank_0": 14,
+          "reachable_at_1": 6,
+          "reachable_at_2": 1,
+          "unreachable": 1,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 22,
+          "seed_rank_0": 14,
+          "reachable_at_1": 6,
+          "reachable_at_2": 1,
+          "unreachable": 1,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 0
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 2.67,
+          "p95": 7.12,
+          "n": 190
+        },
+        "on": {
+          "p50": 4.24,
+          "p95": 6.64,
+          "n": 190
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_starter_packs_dense": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "dense",
+        "query_mode": "dense+bm25",
+        "backend": "dense+bm25",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 22,
+        "hard_set_n": 32,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 10,
+            "n": 10
+          },
+          "single-hop": {
+            "resolvable_n": 22,
+            "n": 22
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 22,
+          "walkable_pairs": 10,
+          "mean_out_degree": 0.45
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 1.0,
+          "mrr": 0.2785714285714286,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 1.0,
+          "mrr": 0.9015151515151516,
+          "n": 22
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 1.0,
+          "mrr": 0.3244047619047619,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 1.0,
+          "mrr": 0.9053030303030304,
+          "n": 22
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0458,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0038,
+          "n": 22
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": false,
+      "reachability": {
+        "off": {
+          "expected_stems": 12,
+          "seed_rank_0": 2,
+          "reachable_at_1": 5,
+          "reachable_at_2": 0,
+          "unreachable": 5,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 12,
+          "seed_rank_0": 3,
+          "reachable_at_1": 5,
+          "reachable_at_2": 0,
+          "unreachable": 4,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 1
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 80.56,
+          "p95": 174.28,
+          "n": 160
+        },
+        "on": {
+          "p50": 69.91,
+          "p95": 180.06,
+          "n": 160
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
+    },
+    "v2_starter_packs_bm25_queries": {
+      "ok": true,
+      "schema": 1,
+      "flag": "HIPPO_GRAPH_PPR",
+      "generated_at": "2026-11-25",
+      "condition": {
+        "index_mode": "bm25-only",
+        "query_mode": "bm25-only",
+        "backend": "bm25-only",
+        "model": "BAAI/bge-small-en-v1.5",
+        "corpus_n": 22,
+        "hard_set_n": 32,
+        "resolvable_by_category": {
+          "multi-hop": {
+            "resolvable_n": 10,
+            "n": 10
+          },
+          "single-hop": {
+            "resolvable_n": 22,
+            "n": 22
+          }
+        },
+        "k": 10,
+        "graph": {
+          "nodes": 22,
+          "walkable_pairs": 10,
+          "mean_out_degree": 0.45
+        }
+      },
+      "off_by_category": {
+        "multi-hop": {
+          "recall": 1.0,
+          "mrr": 0.35345238095238096,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 1.0,
+          "mrr": 0.9045454545454544,
+          "n": 22
+        }
+      },
+      "on_by_category": {
+        "multi-hop": {
+          "recall": 1.0,
+          "mrr": 0.35345238095238096,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 1.0,
+          "mrr": 0.9045454545454544,
+          "n": 22
+        }
+      },
+      "deltas": {
+        "multi-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 10
+        },
+        "single-hop": {
+          "recall": 0.0,
+          "mrr": 0.0,
+          "n": 22
+        }
+      },
+      "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+      "identical_arms": true,
+      "identical_arms_note": "self-check pass — the ranking view did not move under the flag; NOT a finding about the lane",
+      "reachability": {
+        "off": {
+          "expected_stems": 12,
+          "seed_rank_0": 4,
+          "reachable_at_1": 7,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "on": {
+          "expected_stems": 12,
+          "seed_rank_0": 4,
+          "reachable_at_1": 7,
+          "reachable_at_2": 1,
+          "unreachable": 0,
+          "seeds_per_row": 3
+        },
+        "moved_rows": {
+          "n": 0
+        }
+      },
+      "latency_ms": {
+        "off": {
+          "p50": 1.5,
+          "p95": 3.15,
+          "n": 160
+        },
+        "on": {
+          "p50": 2.47,
+          "p95": 6.79,
+          "n": 160
+        }
+      },
+      "footer": "measures only — HIPPO_GRAPH_PPR stays default-OFF and the 1-hop lane stays; replacing it is a separate dated owner decision on affirmative evidence, never an automatic consequence of this report."
     }
   },
   "latency_interleaved_dense": {
@@ -584,7 +1162,40 @@
       }
     }
   },
-  "reading": "Live corpus with multi-hop rows (the decisive run): dense multi-hop recall 0.818 -> 0.727 (-1 row of 11), MRR 0.329 -> 0.297; single-hop unchanged (0.9375 / 0.760); BM25 queries: every delta 0. Starter packs: multi-hop MRR +0.046 at recall ceiling on a 10-pair graph. Net: on the graph where the walk should pay, it regressed by one row; the mechanism is the endorsement set's interaction with MMR, not the walk's reach (one 2-hop-ish row gained 8 -> 3). Latency: interleaved dense p50 +1.1 to +1.7 ms on a 15-20 ms call, p95 within noise; BM25-query p50 +0.2 to +0.3 ms.",
-  "recommendation": "NO FLIP. The lane as built does not beat the 1-hop pull on the live graph (-1 multi-hop recall row of 11, single-hop flat). The design question it surfaced: how the walk's endorsed set should relate to GRA-1's (e.g. keep every 1-hop neighbor GRA-1 endorses and add the walk's top-mass nodes, so the walk can only add MMR/knee protection, never remove it). Any such variant must be judged on rows it was not designed against: these 11 are now in-sample.",
-  "per_row_diagnosis_live_grown_dense": "Recall@10 rank of the expected memory, OFF -> ON, over the 11 multi-hop rows: 8 rows unchanged (6 hits, 2 misses under both); 1 row gained (rank 8 -> 3); 2 rows lost (rank 5 -> 7, and rank 2 -> outside the top 10). The lost top-10 hit was dropped as mmr_displaced: the walk endorses a different, smaller set than the 1-hop pull (10 vs 18 on that query), endorsed memories are exempt from MMR's diversity re-cut, so changing the endorsed set changed which candidates MMR protected and an organic rank-2 hit lost its slot."
+  "reading": "v1: on the live graph, dense multi-hop recall 0.818 -> 0.727 (-1 of 11), MRR 0.329 -> 0.297. v2 (superset), judged on held-out rows: every delta 0 (n=11, dense and BM25). v2 on the full 22-row live fixture: dense multi-hop -1 row (-0.0455 recall, -0.0227 MRR), single-hop unchanged, BM25 all 0. Starter packs, both versions: multi-hop MRR +0.046 at recall ceiling. Neither version beats the 1-hop pull on the live graph; the residual loss runs through MMR's protected set, not the walk's reach.",
+  "recommendation": "NO FLIP, for either version. On this corpus the walk adds nothing the 1-hop pull does not already reach (held-out: 0) and costs one in-sample row through MMR. Keep the lane default-OFF with its A/B rig as the instrument to re-run when the corpus or the dense model changes (HCR-2's larger embedder changes what reaches the top-3 seeds); GRA-1 stays the default.",
+  "per_row_diagnosis_live_grown_dense": "Recall@10 rank of the expected memory, OFF -> ON, over the 11 multi-hop rows: 8 rows unchanged (6 hits, 2 misses under both); 1 row gained (rank 8 -> 3); 2 rows lost (rank 5 -> 7, and rank 2 -> outside the top 10). The lost top-10 hit was dropped as mmr_displaced: the walk endorses a different, smaller set than the 1-hop pull (10 vs 18 on that query), endorsed memories are exempt from MMR's diversity re-cut, so changing the endorsed set changed which candidates MMR protected and an organic rank-2 hit lost its slot.",
+  "lane_versions": {
+    "v1 (08acec0)": "the walk's own endorsed set: top 10 non-seed nodes by PPR mass",
+    "v2 (b796923)": "superset of the 1-hop pull: GRA-1's candidates plus the walk's top-mass nodes, higher score kept"
+  },
+  "runs_note": "runs without a v2_ prefix measured v1 (08acec0); v2_ runs measured b796923",
+  "v2_per_row_diagnosis": "Held-out 11 (dense and BM25): no expected memory changes rank. In-sample 11 (dense): v1's gain (8 -> 3) and its 5 -> 7 loss are both gone; the rank 2 -> outside-top-10 loss remains, again mmr_displaced: added endorsed nodes still reshape MMR's final cut even though no 1-hop endorsement is removed.",
+  "latency_interleaved_dense_v2": {
+    "method": "one process, warm index, the fixture queries x5 rounds, OFF/ON alternated per query with the order flipped each round",
+    "starter_packs": {
+      "off": {
+        "p50": 20.52,
+        "p95": 36.59,
+        "n": 160
+      },
+      "on": {
+        "p50": 20.39,
+        "p95": 38.39,
+        "n": 160
+      }
+    },
+    "live_corpus": {
+      "off": {
+        "p50": 24.34,
+        "p95": 45.06,
+        "n": 190
+      },
+      "on": {
+        "p50": 24.73,
+        "p95": 45.53,
+        "n": 190
+      }
+    }
+  }
 }
