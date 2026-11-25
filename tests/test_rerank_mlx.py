@@ -116,6 +116,30 @@ def test_any_failure_keeps_the_fused_order(fake, monkeypatch, failure):
         assert RR._cross_encoder_rerank("q", _hits()) == _hits()
 
 
+def test_a_call_that_finds_a_scoring_still_running_fails_fast(fake, monkeypatch):
+    """An abandoned scoring keeps the one MLX thread busy; the next call must not queue
+    behind it (and time out in turn) — it keeps the fused order at once."""
+    import threading
+
+    gate, entered = threading.Event(), threading.Event()
+
+    class _Slow(_FakeQwenReranker):
+        def score(self, query, docs):
+            entered.set()
+            gate.wait(5)
+            return [0.0, 1.0]
+
+    monkeypatch.setattr(R, "BACKEND", _Slow)
+    monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "0.05")
+    with R.using_reranker(_BIG):
+        assert RR._cross_encoder_rerank("q", _hits()) == _hits()  # times out, keeps running
+        assert entered.wait(2)
+        t = time.monotonic()
+        assert RR._cross_encoder_rerank("q", _hits()) == _hits()
+        assert time.monotonic() - t < 0.04  # refused at once, not after its own bound
+    gate.set()
+
+
 def test_a_failed_load_is_remembered_and_the_explicit_surface_falls_back(fake, monkeypatch):
     monkeypatch.setattr(R, "unavailable_reason", _only_failures)
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
@@ -138,7 +162,7 @@ def _only_failures(model):
 def test_bounds(monkeypatch):
     monkeypatch.delenv("HIPPO_RERANK_TIMEOUT", raising=False)
     assert R.bound_secs(_SMALL, 5.0) == R.WARM_TIMEOUT_SECS
-    assert R.bound_secs(_BIG, 5.0) == 5.0
+    assert R.bound_secs(_BIG, 5.0) == R.EXPLICIT_TIMEOUT_SECS
     monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "2")
     assert R.bound_secs(_SMALL, 2.0) == 2.0
 
