@@ -124,12 +124,22 @@ releases:
       - "The seven-day minimum age, the sixteenth of headroom and the `budgets.floor_headroom_bytes` key are defaults chosen from one corpus's measurement; the owner has not ruled on them"
   - version: v1.47.0
     theme: "The floor diet as one list (NAT-3, on the owner's ruling V2Q-35: `hippo tend diet` reviews every demotion and one verdict applies the reviewed list by its digest, each line judged again at its turn; a diet item names the other pointers on its line; a line the tend state keeps is proposed past). No new roadmap item"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "The reviewed list has only met fixtures: it has not run on a live corpus"
       - "Lines that carry more than one pointer are single verdicts, and the other pointers on a line are still not weighed. How many of emgl's floor lines are such lines is not counted"
       - "`hippo tend` judges every diet line against the floor as it is, so with lanes declared it can show a line as safe that stops being safe once earlier lines go (8 shown and 4 safe on a fixture). The review weighs the floor again after each line; the queue's list is unchanged"
+  - version: v1.48.0
+    theme: "Retrieval profiles (the HCR workstream of ROADMAP.retrieval.yaml, ratified 2026-11-25: a per-machine profile, floor | lean | high; high is Qwen3-Embedding-4B through MLX on Apple Silicon, served by warm recall only, with the 8B as a knob; the explicit surfaces on high rerank the top 30; the PPR graph lane was built, measured flat and removed). lean is the default and is unchanged. No ROADMAP.v2 item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "high does not beat lean at plain recall on hippo's corpus (31/38 against 33/38, top 10); only the explicit surfaces' 30-hit rerank does (34/38)"
+      - "Every number is one machine and three corpora (golden, starter packs, hippo's own). No field corpus has run high"
+      - "The 4B's gate at 0.60/0.60 stops 44 of 300 replayed prompts that 0.48/0.46 admitted; whether those injections were wanted is not known (the replay has no labels). The 8B's gate was not swept"
+      - "lean's row-count rule costs the starter packs 5 of 32 hard-set rows in hook mode; a six-row cap restores 2. Left as is by the owner's ruling until it is read on emgl and Skyline"
+      - "Hook-mode hard-set numbers count a floor-collapsed expected memory as a miss (7 of 38 rows on hippo's corpus); no instrument reports both readings yet"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
