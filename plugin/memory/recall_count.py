@@ -46,8 +46,22 @@ from .recall_abstain import _AGREE_DEPTH, _STRONG_DESC_TERMS, _ranks
 # Per embedding model, in that model's cosine space (like ``recall_abstain._COSINE_BY_MODEL``):
 # ``band`` is how far under the query's best cosine a row may sit and still count as near it;
 # ``wide`` is the margin over the dense floor at which the whole of ``k`` is served.
+#
+# Qwen/Qwen3-Embedding-4B (HCR-3, the high profile at full width; real warm model on three
+# corpora, hook mode, planning/HCR-3.count.evidence.2026-11-25.json). The entry had to cost no
+# hard-set row, and in this space that bounds both numbers. ``band`` 0.12 is the 75th-percentile
+# gap of the corpus that asks for the most (0.124 on the live corpus; 0.0 and 0.055 on the two
+# public ones): every band under 0.12 cut an expected starter-pack row. ``wide`` 0.14 is the
+# largest margin that cut none (0.15 cut one): the instruction-aware space puts an on-topic
+# best cosine a median 0.27 over its 0.42 floor (10th percentile 0.145) and every measured
+# off-topic best at most 0.035 over it, so the narrow rule lands on the weak tenth of on-topic
+# prompts and on whatever leaks. Measured: hard sets 18/18, 31/32, 26/38 on and off; rows
+# served on leaked off-topic probes 75 -> 38; over 300 replayed prompts of the live corpus
+# 9.41 -> 8.06 rows per injecting prompt (the median stays 10; lean's entry reads 5 there).
+# Like the floor, the key is the space id: a truncated ``model@dim`` width is not covered.
 _COUNT_BY_MODEL: Dict[str, Dict[str, float]] = {
     "BAAI/bge-small-en-v1.5": {"band": 0.05, "wide": 0.18},
+    "Qwen/Qwen3-Embedding-4B": {"band": 0.12, "wide": 0.14},
 }
 # The first servable rows in rank order are served whatever their evidence.
 _LEAD_ROWS = 1

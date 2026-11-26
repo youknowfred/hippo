@@ -4,7 +4,7 @@ salience evidence (MSR-5), hot-path latency (INT-5, KPI-3), the recall channel/b
 drop-autopsy trio (MSR-3, SIG-3, MSR-4), injection precision (SIG-4, KPI-2), the rules-plane
 checks (RUL-1, RUL-2, RUL-4), and the T11 succession/update instruments.
 
-These three travel together because they are one instrument in three parts — RET-9's two
+These travel together because they are one instrument in parts — RET-9's two
 halves plus the structural statement they are read against:
 
 - ``check_abstention_cold_start`` (RET-11) is the STRUCTURAL half: on the BM25-only path
@@ -14,6 +14,9 @@ halves plus the structural statement they are read against:
 - ``check_floor_calibration`` (GRF-3) is the CALIBRATION half: it compares the configured
   dense floor to the number ``eval_floor.floor_sweep`` recommended, so the detector's "this
   floor is too permissive" can be answered with "raise it to what".
+- ``check_high_space_calibration`` (HCR-3) is that half again for the high profile's
+  embedding space: is the resolved space calibrated at all, and its own sweep against its
+  own floor. It prints nothing off the high profile.
 
 All three are advisory by construction (inv4): they name both numbers and a remedy, and a
 HUMAN edits ``recall._DENSE_FLOOR_BY_MODEL`` or sets ``HIPPO_DENSE_FLOOR``. Nothing here —
@@ -25,7 +28,7 @@ name below so the check IDs and their order are unchanged.
 from __future__ import annotations
 
 import os
-from typing import Dict
+from typing import Dict, Optional
 
 from .doctor_checks_env import DoctorContext
 
@@ -202,6 +205,59 @@ def _count_band_note(sweep: dict):
     )
 
 
+def _compare(lead: str, sweep: dict, configured: float, *, gap_ok: bool = False) -> Dict[str, str]:
+    """One sweep against the floor configured for the space it was measured in: ok inside
+    ``_FLOOR_CAL_TOLERANCE``, else a warn naming both numbers and the remedy. Shared by the
+    lean line and the high-space line, so the two read the same way.
+
+    ``gap_ok`` (the high line): a floor anywhere inside a cleanly separated corpus's gap is
+    ok. The sweep recommends the gap's midpoint, but the high space's floor was set on the
+    LOW side of a wide clean gap on purpose (RET-1's rule; it keeps the weakest real query),
+    so against the midpoint a correct floor would warn on every corpus. Inside the gap no
+    probe leaks and no query is cut at the dense lane, which is what the line is for."""
+    recommended = sweep.get("recommended")
+    if not isinstance(recommended, (int, float)):
+        return {"status": "ok", "message": f"{lead}: recorded sweep is unreadable."}
+    delta = round(float(recommended) - float(configured), 4)
+    overlap = " (no clean on/off-topic separation on this corpus)" if sweep.get("overlap") else ""
+    count_note, count_warn = _count_band_note(sweep)
+    lo, hi = sweep.get("off_max"), sweep.get("on_min")
+    if (gap_ok and not sweep.get("overlap") and isinstance(lo, (int, float))
+            and isinstance(hi, (int, float)) and lo < configured <= hi):
+        return {
+            "status": "warn" if count_warn else "ok",
+            "message": f"{lead}: configured {configured} sits inside this corpus's clean gap "
+            f"(off-topic max {lo}, on-topic min {hi}; the sweep's midpoint is {recommended})."
+            f"{count_note}",
+        }
+    if abs(delta) <= _FLOOR_CAL_TOLERANCE:
+        return {
+            "status": "warn" if count_warn else "ok",
+            "message": f"{lead}: configured {configured} ≈ recommended "
+            f"{recommended} (Δ{delta:+}){overlap}.{count_note}",
+        }
+    # ABS-4: on an OVERLAPPING corpus the recommendation is a trade, not a fix — name
+    # its measured cost instead of pointing at the table, or this repeats the powerless
+    # remedy ABS-2 removed one check over.
+    if sweep.get("overlap"):
+        remedy = (
+            f"adopting it would cut {sweep.get('cut_on')} real quer(ies) and still leak "
+            f"{sweep.get('leaked_off')} of {sweep.get('off_n')} probes THROUGH THE DENSE "
+            "LANE, which BM25 admits past anyway — evidence, not a fix"
+        )
+    else:
+        remedy = (
+            "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
+            "advisory only, nothing auto-writes"
+        )
+    return {
+        "status": "warn",
+        "message": f"{lead}: configured {configured} vs sweep-recommended "
+        f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
+        f"{remedy}.{count_note}",
+    }
+
+
 def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
     """GRF-3 (RET-9's calibration half): configured dense floor vs the persisted sweep.
 
@@ -252,38 +308,101 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                         f"since it ran on {sweep.get('generated_at') or 'an unknown date'}) — "
                         "re-run `hippo eval --floor-sweep`.",
                     }
-        configured = _dense_floor(sweep.get("model"))
-        recommended = sweep.get("recommended")
-        if not isinstance(recommended, (int, float)):
-            return {"status": "ok", "message": "floor calibration: recorded sweep is unreadable."}
-        delta = round(float(recommended) - float(configured), 4)
-        overlap = " (no clean on/off-topic separation on this corpus)" if sweep.get("overlap") else ""
-        count_note, count_warn = _count_band_note(sweep)
-        if abs(delta) <= _FLOOR_CAL_TOLERANCE:
-            return {
-                "status": "warn" if count_warn else "ok",
-                "message": f"floor calibration: configured {configured} ≈ recommended "
-                f"{recommended} (Δ{delta:+}){overlap}.{count_note}",
-            }
-        # ABS-4: on an OVERLAPPING corpus the recommendation is a trade, not a fix — name
-        # its measured cost instead of pointing at the table, or this repeats the powerless
-        # remedy ABS-2 removed one check over.
-        if sweep.get("overlap"):
-            remedy = (
-                f"adopting it would cut {sweep.get('cut_on')} real quer(ies) and still leak "
-                f"{sweep.get('leaked_off')} of {sweep.get('off_n')} probes THROUGH THE DENSE "
-                "LANE, which BM25 admits past anyway — evidence, not a fix"
-            )
-        else:
-            remedy = (
-                "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
-                "advisory only, nothing auto-writes"
-            )
-        return {
-            "status": "warn",
-            "message": f"floor calibration: configured {configured} vs sweep-recommended "
-            f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
-            f"{remedy}.{count_note}",
-        }
+        return _compare("floor calibration", sweep, _dense_floor(sweep.get("model")))
     except Exception as exc:
         return {"status": "warn", "message": f"floor-calibration check failed: {exc}."}
+
+
+def check_high_space_calibration(ctx: DoctorContext) -> Optional[Dict[str, str]]:
+    """HCR-3: the high profile's embedding space against the calibration tables, and its
+    own sweep against its own floor. No line off the high profile (None).
+
+    The floor, the corroboration gate and the row-count rule are each calibrated per
+    embedding space (``recall_rank._DENSE_FLOOR_BY_MODEL``, ``recall_abstain._COSINE_BY_MODEL``,
+    ``recall_count._COUNT_BY_MODEL``). A space with no floor or gate entry is not an error
+    recall raises: it silently takes the 0.50 default floor with the gate off. That is every
+    MRL-truncated ``model@dim`` width (a different cosine space from the full width) and any
+    model nobody measured, so this line names the resolved space and what it lacks (WARN).
+
+    A calibrated space then gets the lean line's comparison, against the high-space report
+    ``hippo eval --floor-sweep`` writes on a high machine (``floor_sweep.high.json``): stale
+    when it was measured in another space or on another corpus, else configured vs
+    recommended. Advisory only, like the lean line; nothing here writes a table or loads a
+    model. Never raises.
+    """
+    try:
+        from .retrieval_profile import resolve_retrieval_profile
+
+        if resolve_retrieval_profile() != "high":
+            return None
+        from . import embed_mlx as E
+        from .recall_abstain import _COSINE_BY_MODEL
+        from .recall_count import _COUNT_BY_MODEL
+        from .recall_rank import _DENSE_FLOOR_BY_MODEL, _DENSE_FLOOR_DEFAULT
+
+        space = E.resolve_high_space()
+        lead = f"high space calibration [{space}]"
+        gate, count = _COSINE_BY_MODEL.get(space), _COUNT_BY_MODEL.get(space)
+        lacks = [label for label, have in (
+            ("dense floor", space in _DENSE_FLOOR_BY_MODEL),
+            ("corroboration gate", gate is not None),
+            ("row-count rule", count is not None),
+        ) if not have]
+        if "dense floor" in lacks or "corroboration gate" in lacks:
+            model, dim = E.parse_space(space)
+            what = (f"a {dim}-wide truncation of {model} is its own cosine space"
+                    if "@" in space else f"{model} has not been measured")
+            effects = []
+            if "dense floor" in lacks:
+                effects.append(f"the default dense floor {_DENSE_FLOOR_DEFAULT}")
+            if "corroboration gate" in lacks:
+                effects.append("no corroboration gate (an off-topic prompt that shares a term "
+                               "with a memory injects)")
+            if "row-count rule" in lacks:
+                effects.append("no row-count rule (a served call carries up to k rows)")
+            calibrated = sorted(m for m in _DENSE_FLOOR_BY_MODEL
+                                if m in _COSINE_BY_MODEL and E.parse_space(m) is not None)
+            return {
+                "status": "warn",
+                "message": f"{lead}: NOT CALIBRATED — no {' or '.join(lacks)} entry for this "
+                f"space ({what}), so high recall runs with {', '.join(effects)}. Calibrated "
+                f"high space(s): {', '.join(calibrated) or 'none'}; choose one with "
+                f"{E.MODEL_ENV} / {E.DIM_ENV} (or their preset keys), or measure this one "
+                "with `hippo eval --floor-sweep` before relying on it.",
+            }
+        have = (f"floor {_DENSE_FLOOR_BY_MODEL[space]}, gate {gate['strong']}/{gate['support']}, "
+                + (f"row-count band {count['band']} / wide {count['wide']}" if count
+                   else "no row-count rule (a served call carries up to k rows)"))
+        from .eval_floor import read_floor_sweep
+
+        sweep = read_floor_sweep(ctx.memory_dir, high=True)
+        if sweep is None:
+            return {
+                "status": "ok",
+                "message": f"{lead}: {have}. No sweep recorded in this space — "
+                "`hippo eval --floor-sweep` writes one when the high model is servable here.",
+            }
+        if sweep.get("model") != space:
+            return {
+                "status": "warn",
+                "message": f"{lead}: recorded sweep is STALE (measured in {sweep.get('model')}, "
+                f"the resolved high space is {space}) — re-run `hippo eval --floor-sweep`.",
+            }
+        from .build_index import _load_manifest, default_index_dir, load_index
+        from .eval_ledger import corpus_fingerprint
+        from .recall import _dense_floor
+        from .recall_warm_high import high_index_dir
+
+        hdir = high_index_dir(default_index_dir(ctx.memory_dir))
+        if _load_manifest(hdir) is not None:
+            index = load_index(hdir)
+            if index is not None and len(index) and sweep.get("corpus_fingerprint") != corpus_fingerprint(index):
+                return {
+                    "status": "warn",
+                    "message": f"{lead}: recorded sweep is STALE (corpus changed since it ran "
+                    f"on {sweep.get('generated_at') or 'an unknown date'}) — re-run "
+                    "`hippo eval --floor-sweep`.",
+                }
+        return _compare(lead, sweep, _dense_floor(space), gap_ok=True)
+    except Exception as exc:
+        return {"status": "warn", "message": f"high-space calibration check failed: {exc}."}
