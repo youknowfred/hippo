@@ -9,6 +9,7 @@
 #
 # STATE 2026-11-25: HCR-1..4 and HCR-6 are done; HCR-5 (the PPR lane) was built,
 # measured flat and retired. Each item's status line below says what shipped.
+# 2026-11-26: HCR-7 (one shared embedder per machine) is proposed and unbuilt.
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -490,6 +491,89 @@ workstream:
           with E1 in one change); (3) D2: no flip, lean's warm path stays
           without rerank (E3; no code change); (4) per D4 the PPR flag retires,
           still flat-to-worse over high (youknowfred/hippo#243).
+
+      - id: HCR-7
+        title: One embedder per machine — a shared MLX daemon behind the dense seam
+        priority: P0
+        effort: L
+        status: proposed        # 2026-11-26: added on the owner's word ("Yes, add HCR-7"); unbuilt
+        gated_on: [HCR-2]
+        problem: >-
+          Each session's warm server loads its own copy of the high embedder
+          and never unloads it. Measured 2026-11-26 on the owner's 128 GB Mac
+          (MLX 0.32.5, two scratch processes on the pinned 4B snapshot): 4.12
+          GB phys_footprint per process, 3.96 GB of it dirty Metal memory
+          (IOAccelerator), mapped file 416 KB — mx.load copies the weights, so
+          nothing is shared between processes; ~0.5 GB more of transient MLX
+          buffer cache after queries. With both loaded the system's free memory
+          fell 9.9 GB. Ten sessions cost 41 GB, 25 cost 103 GB, and 31 exceed
+          the machine. The owner routinely runs ten or more sessions and fleets
+          of siblings.
+        design: >-
+          A per-user daemon that hippo spawns lazily and owns the one MLX
+          thread: a unix socket under CLAUDE_PLUGIN_DATA (mode 0600), named by
+          space id + pinned weights revision + plugin version so sessions on
+          different versions never share a mismatched space. It serves
+          embed(texts, kind) and rerank(pairs). embed_mlx.BACKEND (already the
+          seam: (model, dim, snapshot_dir) -> embedder) gains a remote embedder
+          with the same embed/query_embed shape, so build_index and recall are
+          unchanged and a warm server on high never imports MLX. Spawn is
+          serialized by a lock file (two sessions starting at once must not
+          load two copies). The daemon exits when no live warm heartbeat
+          remains, and drops the model after an idle window (measured: unload
+          returns the process to 166 MB; reload from a warm page cache 306-332
+          ms, first query after it 780-840 ms). Queued queries batch into one
+          forward pass; a build's document slices keep today's rule that a
+          query waits one slice, now across sessions. The fallback contract is
+          unchanged: daemon absent, starting, slow or killed mid-call means
+          that prompt serves lean, and nothing raises or blocks a prompt.
+        implementation_notes: >-
+          embed_mlx.BACKEND / high_embedder / mlx_executor, rerank_mlx's
+          loader, recall_warm_high._run (the loader thread becomes "ensure the
+          daemon, then keep high/ caught up") and status() (resident_bytes and
+          load_ms now come from the daemon), recall_warm.server_states (the
+          liveness source for the daemon's exit), build_index.run_bounded /
+          DENSE_QUERY_TIMEOUT_SECS, embed_mlx.abandon_on_timeout (an abandoned
+          call must be droppable across the socket too). A slow daemon must
+          degrade the one call to lean WITHOUT tripping the session's breaker
+          (SERVE_BUDGET_MS 1500; a trip is permanent for the session). Toy
+          measurement 2026-11-26 (unbatched, one forward per query, load
+          average 13): one client p50 101 ms / max 266 ms, same as in-process;
+          10 simultaneous queries max 1.35 s, 25 max 3.95 s, 50 max 6.66 s —
+          so batching, or a client bound below the budget, is required and is
+          NOT yet measured. Batched and single forwards may differ in the last
+          float bits; the acceptance below decides whether batching ships.
+        acceptance: >-
+          Ten warm servers on high hold ONE copy of the model
+          (footprint-stamped: each server under 0.2 GB, the daemon ~4.6 GB);
+          vectors byte-identical to the in-process embedder on the golden set,
+          so HCR-3's calibration carries over with no re-run (if batching
+          breaks byte-identity, queries run unbatched or the floor is
+          re-checked); QUA-6 counts unchanged against the in-process arm;
+          daemon absent, slow, or killed mid-call serves lean with no breaker
+          trip and no raised error; warm served recall stays inside
+          SERVE_BUDGET_MS at a measured burst of 10 simultaneous prompts; two
+          sessions starting together spawn one daemon; a dated evidence file
+          before the daemon becomes high's default path.
+        open_for_owner: >-
+          (1) The no-server posture: the severed list below rejects EXTERNAL
+          model servers as a recall dependency. This is a hippo-owned helper
+          that spawns itself and exits when idle, but it is still a long-lived
+          process; the owner's "Yes, add HCR-7" adds the item and does not yet
+          rule on that. (2) Whether the in-process embedder stays as a knob
+          (one session, no daemon) or is removed. (3) With memory paid once per
+          machine, whether the fifth ruling ("Keep the 4B", which cited 3.66 GB
+          more per warm server) is re-read: the 8B is 7.8 GB once, the warm
+          reranker 0.6 GB once.
+        not_chosen: >-
+          Weighed 2026-11-26. Idle unload per server alone: saves nothing when
+          a fleet is all prompting, and a cold-disk reload (2-5 s) must serve
+          lean. A cap on how many servers hold the model: the rest serve lean,
+          a quality loss. Smaller quantization: a different embedding space, no
+          arm in any HCR evidence file, owes a full HCR-3 calibration and an
+          HCR-6 bench, and halves the cost at best. MRL truncation: shrinks the
+          index, not the model — no memory saved. Sharing weight pages between
+          processes: not available, mx.load copies into private Metal buffers.
 
   # Severed / explicitly out of scope (dated at ratification, 2026-11-25):
   #   - TrustGraph platform adoption — standing rejection re-affirmed; ops
