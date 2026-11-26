@@ -294,9 +294,53 @@ def high_serving(t):
                "the same ranking, gate, count rule and budget, with per-space calibration.", "\n".join(b), t)
 
 
+# --------------------------------------------------------------------------- memory lifecycle
+def lifecycle(t):
+    b = []
+    b.append('<text class="k" x="20" y="24">A MEMORY&#8217;S LIFE AFTER IT IS WRITTEN</text>')
+    y, h = 136, 78
+    b.append(box(20, y, 150, h, "Fresh", ["cited paths recorded", "at a source commit"]))
+    b.append(box(270, y, 150, h, "Stale", ["recalled with a banner", "queued for a re-check"]))
+    b.append(box(510, y, 150, h, "Demoted", ["invalid_after set", "score halved pre-cut"]))
+    b.append(box(730, y, 130, h, "Hidden", ["after 30 days", "out of recall"]))
+    b.append(box(270, 292, 150, 58, "Archived", ["git mv to archive/"]))
+    # fresh <-> stale
+    b.append(arrow(170, 158, 268, 158))
+    b.append('<text class="s" x="219" y="134" text-anchor="middle" font-size="11">a cited file</text>')
+    b.append('<text class="s" x="219" y="147" text-anchor="middle" font-size="11">changes</text>')
+    b.append(arrow(270, 192, 172, 192))
+    b.append('<text class="s" x="219" y="210" text-anchor="middle" font-size="11">re-read, then</text>')
+    b.append('<text class="s" x="219" y="223" text-anchor="middle" font-size="11">graduate or fix</text>')
+    # stale -> demoted -> hidden
+    b.append(arrow(420, 175, 508, 175))
+    b.append('<text class="s" x="464" y="160" text-anchor="middle" font-size="11">demote</text>')
+    b.append(arrow(660, 175, 728, 175))
+    b.append('<text class="s" x="694" y="160" text-anchor="middle" font-size="11">30 days</text>')
+    # stale -> archived
+    b.append(arrow(345, 214, 345, 290))
+    b.append('<text class="s" x="356" y="250" font-size="11">archive: one memory,</text>')
+    b.append('<text class="s" x="356" y="264" font-size="11">cold and unlinked</text>')
+    # return path
+    b.append('<path class="dash" d="M795 136 V80 H95 V126"/>')
+    b.append('<path class="dash" d="M585 136 V80"/>')
+    b.append('<path class="head" d="M95 134 L89 122 L101 122 Z"/>')
+    b.append('<rect class="solid" x="300" y="67" width="236" height="26" rx="13"/>')
+    b.append('<text class="on" x="418" y="84" text-anchor="middle" font-size="12" font-weight="600">'
+             'a genuine reverify clears it</text>')
+    b.append('<text class="s" x="560" y="318">Drift and the 30-day step happen on their own.</text>')
+    b.append('<text class="s" x="560" y="337">Every other move is one memory, with a verdict.</text>')
+    return svg(880, 364, "A memory's life after it is written. Fresh: its cited paths are recorded at a source "
+               "commit. When a cited file changes it becomes Stale: recalled with a banner and queued for a "
+               "re-check; re-reading it and graduating or fixing it makes it Fresh again. Demote makes it "
+               "Demoted: invalid_after is set and its score is halved before the top-k cut; after 30 days it is "
+               "Hidden from recall. A genuine reverify returns a Demoted or Hidden memory to Fresh. A stale memory "
+               "that is cold and unlinked can be Archived, one memory at a time.", "\n".join(b), t)
+
+
 for suffix, t in THEMES.items():
     for name, fn in (("recall-flow", recall_flow), ("profiles", profiles), ("profile-bench", bench),
-                     ("engine-map", engine_map), ("high-serving", high_serving)):
+                     ("engine-map", engine_map), ("high-serving", high_serving),
+                     ("lifecycle", lifecycle)):
         with open(os.path.join(OUT, f"{name}{suffix}.svg"), "w", encoding="utf-8") as fh:
             fh.write(fn(t))
 print("wrote", sorted(n for n in os.listdir(OUT) if n.endswith(".svg")))
