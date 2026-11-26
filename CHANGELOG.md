@@ -7,6 +7,88 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.48.0 — 2026-11-25 — "Retrieval profiles"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. One opt-in feature: a machine can now say how much model it spends on
+recall. `lean` stays the default and recalls as it did.
+
+**Operator action: none required.** A machine that sets no profile is on `lean`, and nothing
+about `lean` changed. `hippo setup --profile` and `/hippo:doctor` mention `high` only on an
+Apple Silicon Mac with at least 64 GiB of memory, and only as an offer: no profile is changed
+for you and nothing downloads until you run the fetch with `--yes`.
+
+**New**
+- **Retrieval profiles: `floor`, `lean` (default), `high`.** One switch per machine, kept in
+  the plugin's `model.json`; `HIPPO_RETRIEVAL_PROFILE` overrides it for one process.
+  `hippo setup --profile` shows the active profile and what it serves here,
+  `--profile <name> --yes` writes it, `--profile --off --yes` removes it. `floor` is
+  keyword-only recall, the same as `HIPPO_DISABLE=dense`. `/hippo:doctor` gains a
+  `retrieval_profile` line.
+- **`high`: Qwen3-Embedding-4B through MLX, on Apple Silicon, served by warm recall only.**
+  Four steps, each yours to run: install `plugin/requirements-high.txt` into hippo's venv,
+  `hippo setup --profile high --fetch --yes` (about 5 GB), `hippo setup --profile high --yes`,
+  `hippo setup --warm --yes`. The session's warm server keeps a second index (`high/`) beside
+  the usual one and serves from it once it has caught up. The spawned recall hook is
+  untouched: on every profile it serves the `lean` index with the `lean` model. When `high`
+  cannot serve (not an Apple Silicon Mac, no MLX, weights missing, a model that failed to
+  load, the `high/` index still catching up, warm recall off) recall serves `lean`. Nothing
+  raises, nothing blocks a prompt and recall never downloads; doctor's line says which case
+  applies.
+- **`/hippo:recall` and the MCP `recall` tool on `high` rerank the top 30 candidates** with
+  Qwen3-Reranker-0.6B, then cut to k. Warm recall does not rerank unless `HIPPO_RERANK=1`,
+  on `high` as on every other path.
+- **The 8B is a knob.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model`
+  in `model.json`) selects Qwen3-Embedding-8B: a 7.8 GB download and 7.8 GB per warm server
+  against the 4B's 4.1 GB.
+- **The high space is calibrated, and doctor says so.** Dense floor, corroboration gate and
+  row-count rule for the 4B (0.42; 0.60/0.60; band 0.12, wide 0.14) and the 8B (0.40;
+  0.50/0.48; band 0.11, wide 0.12), each measured on three corpora. `/hippo:doctor` gains a
+  `high_space_calibration` line on the high profile, and `hippo eval --floor-sweep` also
+  sweeps inside the high space there (`floor_sweep.high.json`). A truncated width
+  (`HIPPO_HIGH_EMBED_DIM`) is not calibrated, on purpose: neither 1024 nor 2048 added a hit
+  over the full width, so doctor warns while one is set and says to unset it.
+- **`python -m bench.profile_ab`**: `lean` against `high` on your own corpus in one command,
+  the 8B included when its weights are on disk. The report carries counts and timings only.
+
+**Measured, on hippo's own corpus (108 memories, 38 questions, top 10).** This is one corpus
+on one machine.
+- `lean` finds 33 of 38 (MRR 0.57). `high` finds 31 (MRR 0.59): it does not yet beat `lean`
+  at finding the right memory, and what it finds it ranks higher.
+- With the 30-candidate rerank that `/hippo:recall` and the MCP tool run on `high`: 34 of 38
+  (MRR 0.60), the only setup that serves today and beats `lean`. It takes about 2 seconds,
+  which is why the per-prompt path does not do it.
+- The warm reranker raises `lean`'s ranking (MRR 0.62) and lowers `high`'s (0.57), so it is
+  off by default on both.
+- The 8B finds 34 of 38 in plain recall (MRR 0.60) and no more than the 4B where `high`
+  serves: the prompt hook reads the same on both, and the 30-candidate rerank reads 33 of 38
+  on the 8B. So the 4B is the default.
+- In the prompt hook every embedder reads 26 of 38 by the strict measure, because 7 of the
+  38 questions expect a memory that is already on the always-loaded floor, which the hook
+  never repeats. Counting those as found: `lean` 32, `high` 33.
+- On 300 replayed prompts `high` injects on 227 and `lean` on 229. With the gate `high` was
+  first calibrated at (0.48/0.46) it injected on 271; the gate was moved to 0.60/0.60, which
+  changed no test-set result on any of the three corpora. Whether the 44 prompts it stops
+  were wanted is not known: replayed prompts carry no labels.
+- Memory: 4.1 GB per warm server for the 4B, and 0.6 GB more for the reranker when it is on.
+
+Evidence, all dated 2026-11-25 under `planning/`: `HCR-3.evidence`, `HCR-3.count.evidence`,
+`HCR-3.8b.evidence`, `HCR-3.hook-gaps.evidence`, `HCR-4.evidence`, `HCR-6.evidence`,
+`HCR-6.8b.evidence`. The rulings are in `planning/ROADMAP.retrieval.yaml`.
+
+**Not shipped.** A personalized-PageRank graph lane was built, measured flat to worse against
+the 1-hop pull over both indexes, and removed (`planning/HCR-5.evidence.2026-11-25.json`).
+The 1-hop pull is unchanged.
+
+**Known and not changed.** `lean`'s row-count rule costs the starter packs' test set 5 of 32
+questions in the prompt hook (29 with `HIPPO_SIGNAL_COUNT=0`, 24 with the rule on), all of
+them multi-hop. A six-row cap restores 2 for 10% more rows per prompt. The owner ruled to
+leave it until it is read on the two field corpora the rule was calibrated on.
+
+**Contributors.** After a change, a rebase or a conflict fix, run the test files the diff
+reaches; the full suite is the exception (`CLAUDE.md`, `CONTRIBUTING.md`).
+
 ## v1.47.0 — 2026-11-14 — "The floor diet as one list"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

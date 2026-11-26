@@ -95,6 +95,11 @@ These may change at any release without a major bump — do not build on them:
   flag tells you when deps or the index change.) The folded-sections sub-index (`sections.json`
   and its `sections.<id>.npy` matrix, beside the main index, from v1.45) is in this class, as is
   the `sections` key it adds to the main manifest; a corpus with no digest section has neither.
+- **The retrieval-profile settings** (from v1.48) — `HIPPO_RETRIEVAL_PROFILE` and the
+  `retrieval_profile` key in the plugin's `model.json` (`floor`, `lean`, `high`), the high
+  profile's `HIPPO_HIGH_EMBED_MODEL` / `HIPPO_HIGH_EMBED_DIM` and their preset keys, the
+  `high/` index beside the main one, and the `hippo setup --profile` flags. Additions,
+  unfrozen until STABILITY v2 classifies them.
 - **The folded-section fields on a recall result** — a row for a `### <slug>` section of a
   fold digest carries `digest` (the digest's stem), `line` (its heading's 1-based line) and
   `section: true` on the result dict, and `file`/`line`/`section` on the recall tool's

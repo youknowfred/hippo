@@ -11,6 +11,19 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.48.0: retrieval profiles (opt-in)
+
+**Nothing rebuilds.** The index schema is unchanged, and a machine that sets no profile is on
+`lean`, as before.
+
+- To see what your machine serves: `hippo setup --profile`.
+- `high` is for an Apple Silicon Mac with memory to spare (the offer appears at 64 GiB). It
+  needs the MLX extra, about 5 GB of weights, and warm recall; the four commands are in the
+  README under "Retrieval profiles". It builds a second index beside the first and never
+  rewrites the first, so `hippo setup --profile --off --yes` goes back with nothing to undo.
+- If you set `HIPPO_HIGH_EMBED_DIM`, unset it: no truncated width is calibrated, and
+  `/hippo:doctor` warns while one is set.
+
 ### v1.47.0: the floor diet can be reviewed as one list
 
 **Nothing rebuilds.** The index schema is unchanged.

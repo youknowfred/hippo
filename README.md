@@ -507,6 +507,13 @@ warm reranker (0.6 GB) only if you turn it on with `HIPPO_RERANK=1`. A process t
 The embedder loads in about 2 seconds from a warm disk cache (about 5 seconds for the first load
 after a reboot) and the reranker in under half a second.
 
+**The 8B.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model` in the
+plugin's `model.json`) selects Qwen3-Embedding-8B instead; set it before the fetch step so the
+right weights come down (7.8 GB). It holds 7.8 GB per warm server and recalls about half as
+fast. On hippo's corpus it finds more in plain recall (34 of 38) and no more than the 4B on the
+paths `high` serves, which is why the 4B is the default
+([planning/HCR-6.8b.evidence.2026-11-25.json](planning/HCR-6.8b.evidence.2026-11-25.json)).
+
 **What `high` buys, measured.** On hippo's own corpus (108 memories, a 38-question test set of 16
 single-hop and 22 multi-hop questions, top 10), `high` does **not** yet beat `lean` at finding
 the right memory: `lean` finds 33 of 38 and `high` finds 31. What `high` finds, it ranks higher
