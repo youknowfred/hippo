@@ -87,6 +87,7 @@ def run_arm(arm: Arm, *, memory_dir: str, lean_index_dir: str, index, hard_set: 
     millis: List[float] = []
     tokens: List[int] = []
     returned: List[int] = []
+    lexical_only = [0]  # queries answered with no dense row: a dense lane that fell over shows here
     deep = arm.pool > k
 
     def ranked(query: str, k_: int) -> List[dict]:
@@ -100,6 +101,8 @@ def run_arm(arm: Arm, *, memory_dir: str, lean_index_dir: str, index, hard_set: 
         millis.append((time.perf_counter() - t0) * 1000.0)
         tokens.append(_estimate_tokens(format_results(rows)))
         returned.append(len(rows))
+        corpus_rows = [r for r in rows if r.get("corpus") != "rule"]
+        lexical_only[0] += bool(corpus_rows) and all(r.get("backend") == "bm25" for r in corpus_rows)
         return rows
 
     flags: Dict[str, Optional[str]] = {"HIPPO_RERANK": "1" if arm.rerank and not deep else "0"}
@@ -114,6 +117,9 @@ def run_arm(arm: Arm, *, memory_dir: str, lean_index_dir: str, index, hard_set: 
             from .rerank_mlx import using_reranker
 
             stack.enter_context(using_reranker(arm.reranker))
+        ranked(hard_set[0]["query"], k)  # untimed: the arm's models wake before the measured pass
+        millis.clear(), tokens.clear(), returned.clear()
+        lexical_only[0] = 0
         by_category = hard_set_metrics_by_category(index, hard_set, k=k, ranked_source=ranked)
     for cat in by_category.values():
         cat["hits"] = int(round(cat["recall"] * cat["n"]))
@@ -129,13 +135,15 @@ def run_arm(arm: Arm, *, memory_dir: str, lean_index_dir: str, index, hard_set: 
         "injected_tokens": {"mean": round(sum(tokens) / len(tokens), 1) if tokens else 0.0,
                             "max": max(tokens, default=0)},
         "rows_returned": {"mean": round(sum(returned) / len(returned), 2) if returned else 0.0},
+        "lexical_only_queries": lexical_only[0],
         "latency_ms": _summary(millis),
     }
 
 
 def _deterministic(result: dict) -> str:
     """What must repeat exactly between two runs of one arm (latency never does)."""
-    view = {key: result[key] for key in ("by_category", "overall", "injected_tokens", "rows_returned")}
+    view = {key: result[key] for key in ("by_category", "overall", "injected_tokens", "rows_returned",
+                                          "lexical_only_queries")}
     return json.dumps(view, sort_keys=True, separators=(",", ":"))
 
 

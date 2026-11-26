@@ -81,7 +81,10 @@ def main(argv=None) -> int:
         "HIPPO_LOCAL_MEMORY_DIR": os.path.join(tmp, "no-private-tier"),
         "HIPPO_TRUST_FILE": os.path.join(tmp, "trust.json"), "HIPPO_TRUST_ALL": "1",
         "HF_HUB_OFFLINE": "1",
-        "HIPPO_RERANK_TIMEOUT": "60",  # no arm silently degrades to the fused order
+        # No arm silently degrades: a rerank past its bound keeps the fused order and a query
+        # embed past its bound serves BM25 alone, and either would be scored as the arm's own
+        # quality. Both bounds are read at import, so they are set before memory loads.
+        "HIPPO_RERANK_TIMEOUT": "120", "HIPPO_DENSE_TIMEOUT": "120",
     })
     for knob in ("HIPPO_RERANK", "HIPPO_GRAPH_PPR", "HIPPO_DENSE_FLOOR", "HIPPO_GRAPH_SEEDS",
                  "HIPPO_DISABLE_DENSE", "HIPPO_DISABLE", "HIPPO_HIGH_EMBED_DIM"):

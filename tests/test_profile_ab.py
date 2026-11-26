@@ -60,6 +60,7 @@ def test_an_arm_identical_to_the_baseline_shows_no_delta(corpus):
     assert base["overall"]["hits"] == 2 and base["overall"]["n"] == 2
     assert set(base["by_category"]) == {"single-hop", "multi-hop"}
     assert base["injected_tokens"]["mean"] > 0 and base["latency_ms"]["n"] == 2
+    assert base["lexical_only_queries"] == 2  # this corpus has no dense lane at all
     assert rep["condition"]["hard_set_n"] == 2 and rep["condition"]["corpus_n"] == 4
     assert set(rep["condition"]["resolvable_by_category"]) == {"lean"}
     assert "lean" not in rep["deltas"]
@@ -98,7 +99,8 @@ def test_each_arm_holds_its_flags_and_restores_the_environment(corpus, monkeypat
     arms = [P.Arm("lean"), P.Arm("rerank", rerank=True), P.Arm("walk", env=(("HIPPO_GRAPH_PPR", "1"),)),
             P.Arm("deep", rerank=True, pool=99)]
     assert _run(corpus, arms, k=10)["ok"]
-    assert held == [("0", None)] * 2 + [("1", None)] * 2 + [("0", "1")] * 2 + [("0", None)] * 4
+    # three recalls an arm: one untimed to wake its models, then the two hard-set rows
+    assert held == [("0", None)] * 3 + [("1", None)] * 3 + [("0", "1")] * 3 + [("0", None)] * 6
     assert os.environ["HIPPO_RERANK"] == "kept" and "HIPPO_GRAPH_PPR" not in os.environ
 
 
@@ -118,7 +120,8 @@ def test_a_baseline_that_does_not_repeat_reports_nothing(corpus, monkeypatch):
 
 
 def test_latency_alone_never_fails_the_self_check():
-    a = {"by_category": {}, "overall": {}, "injected_tokens": {}, "rows_returned": {}, "latency_ms": {"p50": 1.0}}
+    a = {"by_category": {}, "overall": {}, "injected_tokens": {}, "rows_returned": {},
+         "lexical_only_queries": 0, "latency_ms": {"p50": 1.0}}
     assert P._deterministic(a) == P._deterministic({**a, "latency_ms": {"p50": 9.0}})
 
 
