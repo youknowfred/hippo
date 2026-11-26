@@ -1023,6 +1023,8 @@ where a setting can live (environment, plugin option, `hippo.json`) and which wi
   (`high_embed_model` in `model.json` is the saved form).
 - `HIPPO_HIGH_EMBED_DIM` — a truncated (MRL) width for the `high` space. Not calibrated:
   doctor warns while it is set.
+- `HIPPO_MLX_CACHE_MB` — the cap on MLX's buffer cache in a process that loads a `high`
+  model (default 512; `0` keeps no cache). Uncapped, an index build grew it by gigabytes.
 - `HIPPO_RERANK=1` — rerank on the per-prompt path (fastembed's MiniLM on `lean`, the warm
   Qwen3-Reranker-0.6B on `high`). Off by default on every profile.
 - `HIPPO_RERANK_TIMEOUT` — seconds before a rerank gives up and the fused order stands.
