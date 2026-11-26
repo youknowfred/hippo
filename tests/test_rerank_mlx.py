@@ -20,7 +20,7 @@ from memory import recall_warm_high as H
 from memory import rerank_mlx as R
 from memory import setup_cli
 
-_SMALL, _BIG = R.WARM_MODEL, R.EXPLICIT_MODEL
+_SMALL, _BIG = R.WARM_MODEL, R.LARGE_MODEL
 
 
 class _FakeQwenReranker:
@@ -100,6 +100,16 @@ def test_the_warm_model_never_loads_on_a_call(fake):
     assert out == _hits() and _FakeQwenReranker.made == []  # not loaded: the fused order
 
 
+def test_on_an_explicit_surface_the_same_model_loads_on_first_use(fake):
+    with R.using_reranker(_SMALL, explicit=True):
+        assert R.explicit_surface() is True
+        out = RR._cross_encoder_rerank("zebra canary deploy", _hits())
+    assert R.explicit_surface() is False
+    assert [h["name"] for h in out] == ["b", "a", "Deploys"]
+    (rr,) = _FakeQwenReranker.made
+    assert rr.model_id == _SMALL
+
+
 @pytest.mark.parametrize("failure", ["raise", "wrong_count", "slow"])
 def test_any_failure_keeps_the_fused_order(fake, monkeypatch, failure):
     class _Bad(_FakeQwenReranker):
@@ -148,9 +158,9 @@ def test_a_failed_load_is_remembered_and_the_explicit_surface_falls_back(fake, m
         raise RuntimeError("bad weights")
 
     monkeypatch.setattr(R, "BACKEND", boom)
-    with R.using_reranker(_BIG):
+    with R.using_reranker(R.EXPLICIT_MODEL, explicit=True):
         assert RR._cross_encoder_rerank("q", _hits()) == _hits()
-    assert R.status(_BIG)["status"] == "failed"
+    assert R.status(R.EXPLICIT_MODEL)["status"] == "failed"
     assert R.explicit_model() is None  # later calls: the MiniLM, not a retried broken load
 
 
@@ -163,6 +173,9 @@ def test_bounds(monkeypatch):
     monkeypatch.delenv("HIPPO_RERANK_TIMEOUT", raising=False)
     assert R.bound_secs(_SMALL, 5.0) == R.WARM_TIMEOUT_SECS
     assert R.bound_secs(_BIG, 5.0) == R.EXPLICIT_TIMEOUT_SECS
+    with R.using_reranker(_SMALL, explicit=True):  # the same model, on an explicit surface
+        assert R.bound_secs(_SMALL, 5.0) == R.EXPLICIT_TIMEOUT_SECS
+    assert R.bound_secs(_SMALL, 5.0) == R.WARM_TIMEOUT_SECS  # and back on the warm path
     monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "2")
     assert R.bound_secs(_SMALL, 2.0) == 2.0
 
@@ -189,9 +202,11 @@ def test_explicit_model_is_none_off_the_high_profile(fake, monkeypatch, profile)
     assert R.explicit_model() is None
 
 
-def test_explicit_model_needs_a_servable_4b(fake, monkeypatch):
+def test_explicit_model_is_the_servable_small_reranker(fake, monkeypatch):
+    """HCR-6: the explicit surfaces moved off the 4B (lower MRR, 5.5 s median) to the 0.6B."""
+    assert R.EXPLICIT_MODEL == _SMALL != _BIG
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
-    assert R.explicit_model() == _BIG
+    assert R.explicit_model() == _SMALL
     monkeypatch.setattr(R, "unavailable_reason", lambda m: "weights not downloaded")
     assert R.explicit_model() is None
 
@@ -217,7 +232,7 @@ def test_unavailable_reasons_never_import_mlx(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# The explicit surface: the 4B
+# The explicit surface: the 0.6B over a pool
 # --------------------------------------------------------------------------- #
 def _corpus(tmp_path):
     md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
@@ -232,15 +247,72 @@ def _corpus(tmp_path):
     return md, idx
 
 
-def test_describe_on_high_reranks_with_the_4b(fake, tmp_path, monkeypatch):
+def test_describe_on_high_reranks_with_the_small_model(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
     md, idx = _corpus(tmp_path)
     out = V.describe("zebra service canary deploy lane", memory_dir=md, index_dir=idx)
     (rr,) = _FakeQwenReranker.made
-    assert rr.model_id == _BIG and len(rr.calls) == 1  # loaded on first use, one pass
+    assert rr.model_id == _SMALL and len(rr.calls) == 1  # loaded on first use, one pass
     assert out.index("zebra_canary_deploy") < out.index("zebra_pager_rota")
     assert _FakeMiniLM.calls == []
+
+
+def _spy_recall(monkeypatch, reverse=True):
+    """Wrap describe's recall: record the k asked for, and hand back the real hits in
+    reverse, so the fused top hit is the one the reranker should demote."""
+    asked, real = [], V.recall
+
+    def spy(query, k, **kw):
+        asked.append(k)
+        hits = real(query, k, **kw)
+        return list(reversed(hits)) if reverse else hits
+
+    monkeypatch.setattr(V, "recall", spy)
+    return asked
+
+
+def test_describe_on_high_reranks_the_pool_then_cuts_to_k(fake, tmp_path, monkeypatch):
+    """The explicit surface recalls EXPLICIT_POOL hits, reranks them, and shows k: a hit
+    the fused order put below the cut is shown when the reranker lifts it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    md, idx = _corpus(tmp_path)
+    asked = _spy_recall(monkeypatch)
+    out = V.describe("zebra service canary deploy lane", k=1, memory_dir=md, index_dir=idx)
+    assert asked == [R.EXPLICIT_POOL]
+    (rr,) = _FakeQwenReranker.made
+    assert len(rr.calls[0][1]) == 2  # both memories reached the reranker
+    assert out.startswith('1 memory match(es)')
+    assert "zebra_canary_deploy" in out and "zebra_pager_rota" not in out
+
+
+def test_describe_with_the_flag_on_reranks_once_inside_recall_and_still_cuts(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    md, idx = _corpus(tmp_path)
+    asked = _spy_recall(monkeypatch, reverse=False)
+    out = V.describe("zebra service canary deploy lane", k=1, memory_dir=md, index_dir=idx)
+    assert asked == [R.EXPLICIT_POOL]
+    (rr,) = _FakeQwenReranker.made
+    assert len(rr.calls) == 1  # recall()'s own pass; describe does not score twice
+    assert out.startswith('1 memory match(es)') and "zebra_canary_deploy" in out
+
+
+def test_describe_off_high_asks_for_k_and_reranks_with_the_minilm(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "lean")
+    md, idx = _corpus(tmp_path)
+    asked = _spy_recall(monkeypatch, reverse=False)
+    V.describe("zebra service canary deploy lane", k=1, memory_dir=md, index_dir=idx)
+    assert asked == [1] and _FakeQwenReranker.made == []
+
+
+def test_cut_to_k_keeps_the_rule_pointers():
+    hits = [{"name": f"m{i}", "corpus": None} for i in range(4)] + [{"name": "r", "corpus": "rule"}]
+    assert [h["name"] for h in V._cut_to_k(hits, 2)] == ["m0", "m1", "r"]
+    assert V._cut_to_k(hits, 4) is hits
 
 
 def test_describe_off_high_is_the_minilm(fake, tmp_path, monkeypatch):
@@ -380,7 +452,7 @@ def test_the_warm_server_pins_one_openblas_thread_on_high(monkeypatch, profile, 
     assert env.get("OPENBLAS_NUM_THREADS") == pinned
 
 
-def test_fetch_previews_both_rerankers_and_downloads_them_with_yes(tmp_path, monkeypatch, capsys):
+def test_fetch_previews_the_reranker_and_downloads_it_with_yes(tmp_path, monkeypatch, capsys):
     from memory import embed_mlx as E
 
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path))
@@ -391,9 +463,9 @@ def test_fetch_previews_both_rerankers_and_downloads_them_with_yes(tmp_path, mon
     out = capsys.readouterr().out
     assert calls == [] and "Nothing was downloaded" in out
     assert "mlx-community/Qwen3-Reranker-0.6B-mxfp8@a82f9f1c5dcb" in out and "(~0.6 GB)" in out
-    assert "mlx-community/Qwen3-Reranker-4B-mxfp8@25f203a237b8" in out and "~9.0 GB in all" in out
+    assert "Qwen3-Reranker-4B" not in out and "~4.8 GB in all" in out  # recall no longer uses the 4B
     assert setup_cli.main(["--profile", "high", "--fetch", "--yes"]) == 0
-    assert calls == ["Qwen/Qwen3-Embedding-4B", _SMALL, _BIG]
+    assert calls == ["Qwen/Qwen3-Embedding-4B", _SMALL]
 
 
 # --------------------------------------------------------------------------- #

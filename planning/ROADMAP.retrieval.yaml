@@ -85,6 +85,22 @@ meta:
         HCR-3's 0.42 floor the 0.6B lowers high's MRR 0.592 -> 0.573 with
         recall flat at 31/38. Reverses Q3 (2026-11-25, first ruling) for the
         warm path only; the explicit surfaces keep the 4B.
+    - date: 2026-11-25
+      decisions: >-
+        Fourth ruling, closing HCR-6's open calls ("as recommended" on all
+        three), on planning/HCR-6.evidence.2026-11-25.json: (E1) the explicit
+        surfaces (/hippo:recall, MCP recall) on high drop the 4B — 31/38, MRR
+        0.570, median 5.5 s, below no rerank's 0.592 — for the 0.6B; the
+        MiniLM was not an option, HCR-4 measured it losing 0.07-0.12 MRR on
+        high. (E2) the deep pool applies on the explicit surfaces only: they
+        rerank the top 30 fused hits, then cut to k (the measured
+        high+rerank+pool arm: 34/38, MRR 0.604, ~1.9 s median under load); the
+        warm path is unchanged, so smaller pools are not measured. (E3) D2 is
+        closed with no flip: lean's warm path stays without rerank or MLX
+        (lean+rerank's +0.050 MRR is real, but it needs MLX and the Qwen
+        weights, which a lean machine does not carry; a machine that has them
+        can run high). Setup no longer fetches the 4B; it stays pinned for the
+        benches. D4's PPR retirement ships separately (youknowfred/hippo#243).
 
 workstream:
   - id: HCR
@@ -197,7 +213,7 @@ workstream:
         title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit
         priority: P1
         effort: M
-        status: done            # 2026-11-25: measured on the owner's Mac; planning/HCR-4.evidence.2026-11-25.json. Warm default turned OFF the same day on HCR-6's evidence (third owner ruling)
+        status: done            # 2026-11-25: measured on the owner's Mac; planning/HCR-4.evidence.2026-11-25.json. Warm default turned OFF the same day on HCR-6's evidence (third owner ruling); explicit surfaces moved from the 4B to the 0.6B over a 30-hit pool (fourth ruling)
         gated_on: [HCR-2]
         problem: >-
           The rerank lane is a 2022 6-layer MiniLM, and it is off by default on
@@ -335,7 +351,7 @@ workstream:
         title: Evidence spine + docs capstone — bench-before-flip made mechanical
         priority: P1
         effort: M
-        status: built           # 2026-11-25: harness + evidence + docs; three owner calls open (open_for_owner)
+        status: done            # 2026-11-25: harness + evidence + docs; every owner call ruled (open_for_owner)
         gated_on: [HCR-2, HCR-3, HCR-4, HCR-5]
         problem: >-
           The workstream's law (no flips without evidence) needs an instrument
@@ -374,14 +390,13 @@ workstream:
           SETTLED: keep native 2560 (1024: 30 / 0.598, 2048: 31 / 0.578 at the
           same floor). Injection flat (578-597 tokens).
         open_for_owner: >-
-          (1) RULED 2026-11-25 (third owner ruling): high's warm rerank default
-          is off; (2) the
-          deep pool closes high's gap but its median (~1.7-1.9 s under load)
-          misses SERVE_BUDGET_MS: measure smaller pools, or pool only on the
-          explicit surfaces; (3) D2: lean+rerank's quality case holds (+0.050
-          MRR, recall flat) — flip it for lean's warm path or not; (4) per D4
-          the PPR flag retires (still flat-to-worse over high) — a separate
-          removal change.
+          FULLY RULED 2026-11-25. (1) high's warm rerank default is off (third
+          owner ruling, built in #242); the explicit surfaces drop the 4B for
+          the 0.6B (fourth ruling, E1); (2) the deep pool applies on the
+          explicit surfaces only, 30 fused hits then the cut to k (E2; built
+          with E1 in one change); (3) D2: no flip, lean's warm path stays
+          without rerank (E3; no code change); (4) per D4 the PPR flag retires,
+          still flat-to-worse over high (youknowfred/hippo#243).
 
   # Severed / explicitly out of scope (dated at ratification, 2026-11-25):
   #   - TrustGraph platform adoption — standing rejection re-affirmed; ops

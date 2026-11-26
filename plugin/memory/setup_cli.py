@@ -549,8 +549,8 @@ def _profile(args) -> int:
 
 
 def _fetch_high(args) -> int:
-    """HCR-2/HCR-4: the high profile's one download — the embedder's and the two
-    rerankers' pinned MLX weights, previewed with their sizes first, fetched only with
+    """HCR-2/HCR-4: the high profile's one download — the embedder's and the
+    reranker's pinned MLX weights, previewed with their sizes first, fetched only with
     ``--yes``. Recall never downloads."""
     from . import embed_mlx as E
     from . import rerank_mlx as R
@@ -559,7 +559,7 @@ def _fetch_high(args) -> int:
     wanted = [  # (model, spec, cached, snapshot dir, fetch)
         (model, E.HIGH_MODELS[model], E.model_cached, E.snapshot_dir, E.fetch),
     ] + [(m, R.RERANK_MODELS[m], R.model_cached, R.snapshot_dir, R.fetch)
-         for m in (R.WARM_MODEL, R.EXPLICIT_MODEL)]
+         for m in (R.WARM_MODEL,)]  # the one reranker recall uses (explicit surfaces too)
     if not E.mlx_installed():
         print(f"{flag}: note: MLX is not installed — {E.INSTALL_HINT}.")
     missing = []
