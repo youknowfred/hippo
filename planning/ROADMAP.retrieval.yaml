@@ -104,6 +104,16 @@ meta:
         weights, which a lean machine does not carry; a machine that has them
         can run high). Setup no longer fetches the 4B; it stays pinned for the
         benches. D4's PPR retirement ships separately (youknowfred/hippo#243).
+    - date: 2026-11-25
+      decisions: >-
+        Fifth ruling, on planning/HCR-6.8b.evidence.2026-11-25.json ("Keep the
+        4B"): DEFAULT_HIGH_MODEL stays Qwen/Qwen3-Embedding-4B. The 8B finds
+        more in plain recall (34/38 against 31/38) but nothing more on the
+        surfaces that serve: the prompt hook reads 26/38 on both, and the
+        explicit surfaces' 30-hit pool reads 33/38 on the 8B against 34/38 on
+        the 4B, for 3.66 GB more resident memory per warm server. The 8B
+        stays selectable (HIPPO_HIGH_EMBED_MODEL or the preset), calibrated
+        and loadable since #240.
 
 workstream:
   - id: HCR
@@ -468,7 +478,8 @@ workstream:
           floor-collapsed memories as found, 33/38 each (0.592 vs 0.624).
           Cost: 7.80 GB resident against 4.15, load 6.2 s against 2.5 (18.7 s
           first load), index build 199 s against 92, recall median 319 ms
-          against 168. DEFAULT_HIGH_MODEL is unchanged: OPEN FOR OWNER.
+          against 168. RULED 2026-11-25 (fifth owner ruling): the 4B stays
+          high's default; the 8B stays a knob.
         open_for_owner: >-
           FULLY RULED 2026-11-25. (1) high's warm rerank default is off (third
           owner ruling, built in #242); the explicit surfaces drop the 4B for
