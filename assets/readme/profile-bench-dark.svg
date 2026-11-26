@@ -1,0 +1,48 @@
+<svg viewBox="0 0 880 316" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bar chart of memories found in the top 10 out of 38 questions on hippo's own corpus: lean 33 (MRR 0.57), high with Qwen3-Embedding-4B 31 (MRR 0.59), high with the Qwen3 reranker over the top 30 candidates 34 (MRR 0.60), Qwen3-Embedding-8B in plain recall 34 (MRR 0.60).">
+<style>
+  text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #E6F4F5; }
+  .h { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12.5px; fill: #9DBFC3; }
+  .k { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: #66C3CA; }
+  .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .ms { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #9DBFC3; }
+  .mw { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #F0B35A; }
+  .card { fill: #10292C; stroke: #2A5E63; stroke-width: 1.5; }
+  .panel { fill: #0B1E20; stroke: #2A5E63; stroke-width: 1.5; }
+  .solid { fill: #66C3CA; }
+  .on { fill: #0C3B40; }
+  .arrow { stroke: #66C3CA; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dash { stroke: #2E8F98; stroke-width: 2; fill: none; stroke-dasharray: 5 6; stroke-linecap: round; }
+  .head { fill: #66C3CA; }
+  .track { fill: #16363A; }
+  .bar { fill: #2E8F98; }
+  .best { fill: #66C3CA; }
+</style>
+<text class="k" x="24" y="30">RIGHT MEMORY IN THE TOP 10, OF 38 QUESTIONS</text>
+<text class="s" x="822" y="30" text-anchor="middle">MRR</text>
+<text class="h" x="24" y="70">lean</text>
+<text class="s" x="24" y="88">bge-small-en-v1.5</text>
+<rect class="track" x="330" y="58" width="400" height="26" rx="6"/>
+<rect class="bar" x="330" y="58" width="347" height="26" rx="6"/>
+<text class="h" x="744" y="76">33</text>
+<text class="s" x="822" y="76" text-anchor="middle" font-size="13.5">0.57</text>
+<text class="h" x="24" y="128">high</text>
+<text class="s" x="24" y="146">Qwen3-Embedding-4B</text>
+<rect class="track" x="330" y="116" width="400" height="26" rx="6"/>
+<rect class="bar" x="330" y="116" width="326" height="26" rx="6"/>
+<text class="h" x="744" y="134">31</text>
+<text class="s" x="822" y="134" text-anchor="middle" font-size="13.5">0.59</text>
+<text class="h" x="24" y="186">high, asked by hand</text>
+<text class="s" x="24" y="204">4B + Qwen3-Reranker over the top 30</text>
+<rect class="track" x="330" y="174" width="400" height="26" rx="6"/>
+<rect class="best" x="330" y="174" width="358" height="26" rx="6"/>
+<text class="h" x="744" y="192">34</text>
+<text class="s" x="822" y="192" text-anchor="middle" font-size="13.5">0.60</text>
+<text class="h" x="24" y="244">8B, plain recall</text>
+<text class="s" x="24" y="262">Qwen3-Embedding-8B</text>
+<rect class="track" x="330" y="232" width="400" height="26" rx="6"/>
+<rect class="bar" x="330" y="232" width="358" height="26" rx="6"/>
+<text class="h" x="744" y="250">34</text>
+<text class="s" x="822" y="250" text-anchor="middle" font-size="13.5">0.60</text>
+<text class="s" x="24" y="302">hippo&#8217;s own corpus: 108 memories, 16 single-hop and 22 multi-hop questions. One corpus on one machine, 2026-11-25.</text>
+</svg>

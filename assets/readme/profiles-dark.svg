@@ -1,0 +1,53 @@
+<svg viewBox="0 0 880 416" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The three retrieval profiles as rising steps: floor is keyword-only recall with no model; lean, the default, adds bge-small-en-v1.5; high, opt-in on Apple Silicon, uses Qwen3-Embedding-4B through MLX with Qwen3-Reranker-0.6B. A profile that cannot serve falls back to the one below it.">
+<style>
+  text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #E6F4F5; }
+  .h { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12.5px; fill: #9DBFC3; }
+  .k { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: #66C3CA; }
+  .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .ms { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #9DBFC3; }
+  .mw { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #F0B35A; }
+  .card { fill: #10292C; stroke: #2A5E63; stroke-width: 1.5; }
+  .panel { fill: #0B1E20; stroke: #2A5E63; stroke-width: 1.5; }
+  .solid { fill: #66C3CA; }
+  .on { fill: #0C3B40; }
+  .arrow { stroke: #66C3CA; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dash { stroke: #2E8F98; stroke-width: 2; fill: none; stroke-dasharray: 5 6; stroke-linecap: round; }
+  .head { fill: #66C3CA; }
+  .track { fill: #16363A; }
+  .bar { fill: #2E8F98; }
+  .best { fill: #66C3CA; }
+</style>
+<rect class="card" x="24" y="214" width="222" height="130" rx="12"/>
+<text x="44" y="248" font-size="20" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">floor</text>
+<rect class="solid" x="159.2" y="230" width="71" height="22" rx="11"/>
+<text class="on" x="195" y="245" text-anchor="middle" font-size="11" font-weight="600">no model</text>
+<text class="h" x="44" y="280" font-size="13.5">Keyword recall (BM25)</text>
+<text class="s" x="44" y="301">No download, any machine</text>
+<rect class="card" x="272" y="166" width="262" height="178" rx="12"/>
+<text x="292" y="200" font-size="20" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">lean</text>
+<rect class="solid" x="453.8" y="182" width="64" height="22" rx="11"/>
+<text class="on" x="486" y="197" text-anchor="middle" font-size="11" font-weight="600">default</text>
+<text class="h" x="292" y="232" font-size="13.5">bge-small-en-v1.5</text>
+<text class="s" x="292" y="253">384 dimensions, ONNX on CPU</text>
+<text class="s" x="292" y="274">About 130 MB, fetched once</text>
+<text class="s" x="292" y="295">Anywhere Python runs</text>
+<rect class="card" x="560" y="94" width="296" height="250" rx="12" style="stroke:#66C3CA;stroke-width:2.5"/>
+<text x="580" y="128" font-size="20" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">high</text>
+<rect class="solid" x="782.4" y="110" width="58" height="22" rx="11"/>
+<text class="on" x="811" y="125" text-anchor="middle" font-size="11" font-weight="600">opt-in</text>
+<text class="h" x="580" y="160" font-size="13.5">Qwen3-Embedding-4B</text>
+<text class="s" x="580" y="181">2,560 dimensions, 8-bit, through MLX</text>
+<text class="h" x="580" y="202" font-size="13.5">Qwen3-Reranker-0.6B</text>
+<text class="s" x="580" y="223">over the top 30 when you ask by hand</text>
+<text class="s" x="580" y="244">Apple Silicon, served by warm recall</text>
+<text class="s" x="580" y="265">About 5 GB on disk, 4.1 GB in memory</text>
+<text class="s" x="580" y="286">Qwen3-Embedding-8B is one setting away</text>
+<path class="arrow" d="M249 280 L260.0 280.0"/><path class="head" d="M269 280 L260.0 275.5 L260.0 284.5 Z"/>
+<path class="arrow" d="M537 240 L548.0 240.0"/><path class="head" d="M557 240 L548.0 235.5 L548.0 244.5 Z"/>
+<path class="dash" d="M856 378 H40"/>
+<path class="head" d="M28 378 L40 372 L40 384 Z"/>
+<text class="s" x="440" y="402" text-anchor="middle">When a profile cannot serve, recall serves the one below it. No error, no blocked prompt, no download.</text>
+<text class="k" x="24" y="30">MORE MODEL, SAME ENGINE</text>
+<text class="s" x="24" y="50">Every profile runs on your machine with no API call. Ranking, trust checks and the injection budget are the same code on all three.</text>
+</svg>
