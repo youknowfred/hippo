@@ -222,6 +222,29 @@ workstream:
           Off-topic probes abstain, hard-set recall at or above lean's on the
           golden corpus, floors landed as table entries with dated calibration
           evidence.
+        hook_mode_findings: >-
+          2026-11-25, planning/HCR-3.hook-gaps.evidence.2026-11-25.json: the
+          three things HCR-3.count.evidence recorded and did not explain,
+          traced stage by stage through the real hook. Diagnosis only; no
+          table entry is changed. (1) Hook mode reads 26/38 on the live corpus
+          against 31 to 34 in explicit mode because 7 of the 38 rows expect a
+          memory on the always-loaded floor, which the hook collapses onto one
+          line and never gives a row. Counting those as found: lean 32/38,
+          4B 33/38, 8B 33/38. Gate, lanes and render budget cost no row. (2)
+          High injects on 271 of 300 replayed prompts against lean's 229
+          because the 4B gate's `support` (0.46) sits 0.04 over the floor, so
+          nearly any memory both lanes rank corroborates a prompt. Strong 0.60
+          with support 0.56 gives 230, 0.60/0.60 gives 227, and no cell
+          changes a hard-set hit or a probe on any corpus. OPEN FOR OWNER:
+          whether the 4B's gate moves to 0.60/0.60 (the 8B's was not swept).
+          (3) Lean's own count entry costs the starter packs 5 hard-set rows
+          in hook mode (29/32 -> 24/32), all multi-hop: 2 by the five-row cap
+          alone, 1 by the band alone, 2 by both. No setting short of the rule
+          off restores all 5. A six-row cap restores 2 for +10% rows on the
+          replay (5.21 -> 5.74 per injecting prompt) and one more leaked
+          probe row; a wider band restores 1 at 0.10 and takes leaked probe
+          rows 23 -> 34. OPEN FOR OWNER: lean's entry stays, or the cap goes to six
+          after a read on the field corpora the rule was calibrated on.
         calibration_state: >-
           2026-11-25, full width only. Qwen/Qwen3-Embedding-4B: floor 0.42,
           gate 0.48/0.46 (HCR-3.evidence), count rule band 0.12 / wide 0.14
