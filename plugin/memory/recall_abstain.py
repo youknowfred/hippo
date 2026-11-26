@@ -58,9 +58,18 @@ _STRONG_DESC_COVERAGE = 0.40
 # off-topic probe clears either, and ``strong`` is under every on-topic best. Every
 # ``strong`` from 0.46 to 0.60 and every ``support`` from 0.42 to 0.48 gave identical
 # results; 0.40 leaked.
+#
+# Qwen3-Embedding-8B, full width (planning/HCR-3.8b.evidence.2026-11-25.json). Its classes do
+# NOT separate as cleanly: one adjacent technical probe reaches 0.491 on the golden corpus,
+# over the lowest on-topic best (0.475, starter packs). ``strong`` 0.50 is the lowest value
+# over every measured off-topic best; the two on-topic queries under it are still admitted,
+# by corroboration (hard sets identical for every gate tried, 18/18, 32/32, 34/38).
+# ``support`` 0.48 is the lowest that held the live corpus's adjacent probes at 10 of 12
+# (0.42 to 0.46: 9; 0.40: 8).
 _COSINE_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": {"strong": 0.76, "support": 0.72},
     "Qwen/Qwen3-Embedding-4B": {"strong": 0.48, "support": 0.46},
+    "Qwen/Qwen3-Embedding-8B": {"strong": 0.50, "support": 0.48},
 }
 
 

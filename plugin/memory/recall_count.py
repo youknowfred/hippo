@@ -59,9 +59,18 @@ from .recall_abstain import _AGREE_DEPTH, _STRONG_DESC_TERMS, _ranks
 # served on leaked off-topic probes 75 -> 38; over 300 replayed prompts of the live corpus
 # 9.41 -> 8.06 rows per injecting prompt (the median stays 10; lean's entry reads 5 there).
 # Like the floor, the key is the space id: a truncated ``model@dim`` width is not covered.
+#
+# Qwen/Qwen3-Embedding-8B (full width, same rule and method;
+# planning/HCR-3.8b.evidence.2026-11-25.json). ``band`` 0.11 is the live corpus's
+# 75th-percentile gap (0.113; 0.0 and 0.06 on the public two); no band from 0.08 to 0.12 cut a
+# row. ``wide`` 0.12 is the largest margin over the 0.40 floor that cut none (0.14 cut one
+# starter-pack row, 0.18 one live row too). Hard sets 18/18, 31/32, 26/38 on and off; rows on
+# leaked off-topic probes 67 -> 34 over the three corpora; 9.56 -> 8.97 rows per injecting
+# prompt over the 300 replayed prompts.
 _COUNT_BY_MODEL: Dict[str, Dict[str, float]] = {
     "BAAI/bge-small-en-v1.5": {"band": 0.05, "wide": 0.18},
     "Qwen/Qwen3-Embedding-4B": {"band": 0.12, "wide": 0.14},
+    "Qwen/Qwen3-Embedding-8B": {"band": 0.11, "wide": 0.12},
 }
 # The first servable rows in rank order are served whatever their evidence.
 _LEAD_ROWS = 1
