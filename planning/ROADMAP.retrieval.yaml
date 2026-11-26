@@ -263,7 +263,7 @@ workstream:
         title: PPR graph lane — personalized PageRank over links.json (all profiles)
         priority: P0
         effort: M
-        status: partial         # 2026-11-25: lane + A/B rig built behind HIPPO_GRAPH_PPR (default OFF); evidence says no flip — owner's call on parking
+        status: retired         # 2026-11-25: flat over the high index too (HCR-6); per D4 the lane, its flag and its rig are removed; GRA-1's 1-hop pull stays
         gated_on: []            # independent of HCR-1..4; lands even if the MLX tier stalls
         problem: >-
           GRA-1's 1-hop discount pull sees only direct neighbors of 3 seeds; the
@@ -319,6 +319,17 @@ workstream:
           nothing the 1-hop pull misses (held-out 0) and costs one row through
           MMR. GRA-1 stays the default; the lane stays default-OFF as the
           instrument to re-run when the corpus or dense model (HCR-2) changes.
+        retired: >-
+          2026-11-25, per owner decision D4 (second ruling: retire the flag if
+          the lane is still flat over the high index). HCR-6 re-ran it there:
+          high+walk 30/38, MRR 0.579 against high's 31/38, 0.592; with the
+          rerank 30/38, 0.567 (planning/HCR-6.evidence.2026-11-25.json). Removed:
+          recall_graph._ppr_expand and its walk helpers, HIPPO_GRAPH_PPR, the
+          rig memory.graph_ppr_eval (eval --ab HIPPO_GRAPH_PPR), their tests and
+          crash scenario, and bench/profile_ab.py's walk arms. Kept: GRA-1's
+          1-hop pull, with the candidate pass (_one_hop_candidates) and
+          injection tail (_apply_injection) HCR-5 factored out of it.
+          HCR-5.evidence.2026-11-25.json stays as the record.
 
       - id: HCR-6
         title: Evidence spine + docs capstone — bench-before-flip made mechanical

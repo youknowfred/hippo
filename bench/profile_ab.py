@@ -14,7 +14,6 @@ The arms (``memory.profile_ab`` runs them; the first is the baseline, run first 
   reranker (``high+rerank`` is the high profile's shipped warm default).
 * ``…+pool`` — the reranker reads the top ``--pool`` fused hits before the cut to k.
 * ``high+rerank-explicit`` — the explicit surfaces' larger reranker.
-* ``high+walk`` — the personalized-PageRank graph lane over the high index.
 * ``high@<dim>`` — the embedder's Matryoshka output truncated to ``--dims``, each at the
   floor the table gives that space and at the full-width space's calibrated floor.
 
@@ -86,7 +85,7 @@ def main(argv=None) -> int:
         # quality. Both bounds are read at import, so they are set before memory loads.
         "HIPPO_RERANK_TIMEOUT": "120", "HIPPO_DENSE_TIMEOUT": "120",
     })
-    for knob in ("HIPPO_RERANK", "HIPPO_GRAPH_PPR", "HIPPO_DENSE_FLOOR", "HIPPO_GRAPH_SEEDS",
+    for knob in ("HIPPO_RERANK", "HIPPO_DENSE_FLOOR", "HIPPO_GRAPH_SEEDS",
                  "HIPPO_DISABLE_DENSE", "HIPPO_DISABLE", "HIPPO_HIGH_EMBED_DIM"):
         os.environ.pop(knob, None)  # the arms decide; a developer's shell does not
     subprocess.run(["git", "init", "-q", project], check=True)
@@ -169,8 +168,6 @@ def main(argv=None) -> int:
         Arm("high", space=full),
         Arm("high+rerank", space=full, reranker=warm, rerank=True),
         Arm("high+rerank+pool", space=full, reranker=warm, rerank=True, pool=args.pool),
-        Arm("high+walk", space=full, env=(("HIPPO_GRAPH_PPR", "1"),)),
-        Arm("high+rerank+walk", space=full, reranker=warm, rerank=True, env=(("HIPPO_GRAPH_PPR", "1"),)),
     ]
     if R.EXPLICIT_MODEL in rerankers:
         arms.append(Arm("high+rerank-explicit", space=full, reranker=R.EXPLICIT_MODEL, rerank=True))
