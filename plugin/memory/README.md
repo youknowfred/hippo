@@ -250,19 +250,12 @@ A memory's life after it is written, from the modules below and the
 [reconsolidation](#reconsolidation-the-immune-system) and [decay](#graceful-decay--soft-invalidation--archive)
 sections:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Fresh: written, born with cited_paths and source_commit
-    Fresh --> Stale: a cited file changes after source_commit
-    Stale --> Fresh: re-read, then reverify (graduate or fix)
-    Stale --> Demoted: demote stamps invalid_after
-    Demoted --> Hidden: 30 days pass
-    Demoted --> Fresh: a genuine reverify clears it
-    Hidden --> Fresh: a genuine reverify clears it
-    Stale --> Archived: archive, one memory, when cold and unlinked
-    note right of Stale: recalled rows carry a verify-before-relying banner
-    note right of Demoted: score halved before the top-k cut
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../assets/readme/lifecycle-dark.svg">
+    <img src="../../assets/readme/lifecycle.svg" alt="A memory's life after it is written. Fresh: its cited paths are recorded at a source commit. When a cited file changes it becomes Stale: recalled with a banner and queued for a re-check; re-reading it and graduating or fixing it makes it Fresh again. Demote makes it Demoted: invalid_after is set and its score is halved before the top-k cut; after 30 days it is Hidden from recall. A genuine reverify returns a Demoted or Hidden memory to Fresh. A stale memory that is cold and unlinked can be Archived, one memory at a time." width="820">
+  </picture>
+</p>
 
 ### `provenance.py` — citation provenance backfill
 

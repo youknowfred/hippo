@@ -1,0 +1,61 @@
+<svg viewBox="0 0 880 364" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A memory's life after it is written. Fresh: its cited paths are recorded at a source commit. When a cited file changes it becomes Stale: recalled with a banner and queued for a re-check; re-reading it and graduating or fixing it makes it Fresh again. Demote makes it Demoted: invalid_after is set and its score is halved before the top-k cut; after 30 days it is Hidden from recall. A genuine reverify returns a Demoted or Hidden memory to Fresh. A stale memory that is cold and unlinked can be Archived, one memory at a time.">
+<style>
+  text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #E6F4F5; }
+  .h { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12.5px; fill: #9DBFC3; }
+  .k { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: #66C3CA; }
+  .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .ms { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #9DBFC3; }
+  .mw { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #F0B35A; }
+  .card { fill: #10292C; stroke: #2A5E63; stroke-width: 1.5; }
+  .panel { fill: #0B1E20; stroke: #2A5E63; stroke-width: 1.5; }
+  .solid { fill: #66C3CA; }
+  .on { fill: #0C3B40; }
+  .arrow { stroke: #66C3CA; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dash { stroke: #2E8F98; stroke-width: 2; fill: none; stroke-dasharray: 5 6; stroke-linecap: round; }
+  .head { fill: #66C3CA; }
+  .track { fill: #16363A; }
+  .bar { fill: #2E8F98; }
+  .best { fill: #66C3CA; }
+</style>
+<text class="k" x="20" y="24">A MEMORY&#8217;S LIFE AFTER IT IS WRITTEN</text>
+<rect class="card" x="20" y="136" width="150" height="78" rx="10"/>
+<text class="h" x="95.0" y="162" text-anchor="middle">Fresh</text>
+<text class="s" x="95.0" y="181" text-anchor="middle">cited paths recorded</text>
+<text class="s" x="95.0" y="198" text-anchor="middle">at a source commit</text>
+<rect class="card" x="270" y="136" width="150" height="78" rx="10"/>
+<text class="h" x="345.0" y="162" text-anchor="middle">Stale</text>
+<text class="s" x="345.0" y="181" text-anchor="middle">recalled with a banner</text>
+<text class="s" x="345.0" y="198" text-anchor="middle">queued for a re-check</text>
+<rect class="card" x="510" y="136" width="150" height="78" rx="10"/>
+<text class="h" x="585.0" y="162" text-anchor="middle">Demoted</text>
+<text class="s" x="585.0" y="181" text-anchor="middle">invalid_after set</text>
+<text class="s" x="585.0" y="198" text-anchor="middle">score halved pre-cut</text>
+<rect class="card" x="730" y="136" width="130" height="78" rx="10"/>
+<text class="h" x="795.0" y="162" text-anchor="middle">Hidden</text>
+<text class="s" x="795.0" y="181" text-anchor="middle">after 30 days</text>
+<text class="s" x="795.0" y="198" text-anchor="middle">out of recall</text>
+<rect class="card" x="270" y="292" width="150" height="58" rx="10"/>
+<text class="h" x="345.0" y="317" text-anchor="middle">Archived</text>
+<text class="s" x="345.0" y="336" text-anchor="middle">git mv to archive/</text>
+<path class="arrow" d="M170 158 L259.0 158.0"/><path class="head" d="M268 158 L259.0 153.5 L259.0 162.5 Z"/>
+<text class="s" x="219" y="134" text-anchor="middle" font-size="11">a cited file</text>
+<text class="s" x="219" y="147" text-anchor="middle" font-size="11">changes</text>
+<path class="arrow" d="M270 192 L181.0 192.0"/><path class="head" d="M172 192 L181.0 196.5 L181.0 187.5 Z"/>
+<text class="s" x="219" y="210" text-anchor="middle" font-size="11">re-read, then</text>
+<text class="s" x="219" y="223" text-anchor="middle" font-size="11">graduate or fix</text>
+<path class="arrow" d="M420 175 L499.0 175.0"/><path class="head" d="M508 175 L499.0 170.5 L499.0 179.5 Z"/>
+<text class="s" x="464" y="160" text-anchor="middle" font-size="11">demote</text>
+<path class="arrow" d="M660 175 L719.0 175.0"/><path class="head" d="M728 175 L719.0 170.5 L719.0 179.5 Z"/>
+<text class="s" x="694" y="160" text-anchor="middle" font-size="11">30 days</text>
+<path class="arrow" d="M345 214 L345.0 281.0"/><path class="head" d="M345 290 L349.5 281.0 L340.5 281.0 Z"/>
+<text class="s" x="356" y="250" font-size="11">archive: one memory,</text>
+<text class="s" x="356" y="264" font-size="11">cold and unlinked</text>
+<path class="dash" d="M795 136 V80 H95 V126"/>
+<path class="dash" d="M585 136 V80"/>
+<path class="head" d="M95 134 L89 122 L101 122 Z"/>
+<rect class="solid" x="300" y="67" width="236" height="26" rx="13"/>
+<text class="on" x="418" y="84" text-anchor="middle" font-size="12" font-weight="600">a genuine reverify clears it</text>
+<text class="s" x="560" y="318">Drift and the 30-day step happen on their own.</text>
+<text class="s" x="560" y="337">Every other move is one memory, with a verdict.</text>
+</svg>
