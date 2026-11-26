@@ -242,8 +242,8 @@ def test_a_hand_flagged_memory_not_yet_ignored_is_named(tier, tmp_path):
 def test_doctor_renders_one_line_per_check_when_a_user_tier_exists(tier, tmp_path):
     ctx = D.DoctorContext(str(tmp_path / "proj"), str(tmp_path), plugin_data="", plugin_root="")
     labels = [label for label, _ in D.run_checks(ctx)]
-    # no `ledgers` here; NAT-3: no budget, lean floor
-    assert labels == [label for label, _ in D.CHECKS if label not in ("ledger_join", "floor_budget", "hard_set_pins", "withheld_origin")]
+    # no `ledgers` here; NAT-3: no budget, lean floor; HCR-3: not on the high profile
+    assert labels == [label for label, _ in D.CHECKS if label not in ("ledger_join", "floor_budget", "hard_set_pins", "withheld_origin", "high_space_calibration")]
     assert "user tier:" in D.render(ctx)
 
 
