@@ -98,8 +98,12 @@ These may change at any release without a major bump — do not build on them:
 - **The retrieval-profile settings** (from v1.48) — `HIPPO_RETRIEVAL_PROFILE` and the
   `retrieval_profile` key in the plugin's `model.json` (`floor`, `lean`, `high`), the high
   profile's `HIPPO_HIGH_EMBED_MODEL` / `HIPPO_HIGH_EMBED_DIM` and their preset keys, the
-  `high/` index beside the main one, and the `hippo setup --profile` flags. Additions,
-  unfrozen until STABILITY v2 classifies them.
+  `high/` index beside the main one, and the `hippo setup --profile` flags. Also the two
+  places the high embedding space's calibration shows: the `floor_sweep.high.json` report
+  `hippo eval --floor-sweep` writes beside `floor_sweep.json` on a high-profile machine (a
+  derived report, same keys), and `/hippo:doctor`'s `high_space_calibration` line (its
+  wording, and that it prints nothing off the high profile). Additions, unfrozen until
+  STABILITY v2 classifies them.
 - **The folded-section fields on a recall result** — a row for a `### <slug>` section of a
   fold digest carries `digest` (the digest's stem), `line` (its heading's 1-based line) and
   `section: true` on the result dict, and `file`/`line`/`section` on the recall tool's
