@@ -461,6 +461,55 @@ handshake files in the plugin's data directory.
 memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
 prompts in the last 30 days were served warm, by the usual path, or failed.
 
+## Retrieval profiles (opt-in)
+
+A profile is how much model a machine spends on recall. There are three, and a machine is on
+`lean` until you say otherwise.
+
+| Profile | Dense model | Rerank | Runs on |
+|---|---|---|---|
+| `floor` | none: keyword (BM25) only | none | anything |
+| `lean` (default) | bge-small-en-v1.5 (384-dim, ONNX) | off on the hot path | anything Python runs on |
+| `high` | Qwen3-Embedding-4B through MLX | Qwen3-Reranker-0.6B on warm recall; Qwen3-Reranker-4B on `/hippo:recall` and the MCP `recall` tool | Apple Silicon Macs, through [warm recall](#warm-recall-opt-in) |
+
+```
+hippo setup --profile                      # the active profile, where it was set, and what it serves here
+hippo setup --profile high                 # preview; --yes writes it
+hippo setup --profile high --fetch         # preview the downloads; --yes fetches them (about 9 GB)
+hippo setup --profile --off --yes          # back to the default
+```
+
+**Turning `high` on** takes four steps, each one yours to run: install the MLX extra into hippo's
+venv (`pip install -r requirements-high.txt`, the command is in that file), fetch the weights,
+write the profile, and turn on warm recall. `HIPPO_RETRIEVAL_PROFILE` overrides the saved choice
+for one process.
+
+**The offer.** `hippo setup --profile` and `/hippo:doctor` mention `high` only on an arm64 Mac
+with at least 64 GiB of memory. It is an offer and nothing more: no profile is ever changed for
+you, and nothing downloads until you run the fetch with `--yes`.
+
+**What `high` changes, and what it does not.** Only the session's warm server loads the big
+models. It keeps a second index, `high/`, beside the usual one and serves from it once that index
+has caught up. The spawned recall hook is untouched: on every profile it serves the `lean` index
+with the `lean` model, inside the same budget as before. Ranking, filtering, trust checks and the
+injection budget are the same code on all three profiles.
+
+**When `high` cannot serve, recall serves `lean`.** That covers a machine that is not an Apple
+Silicon Mac, MLX not installed, weights not fetched, a model that failed to load, a `high/` index
+still catching up after the corpus changed, and warm recall being off. A rerank that runs past its
+time limit keeps the order it was given. None of these raises or blocks a prompt, recall never
+downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
+
+**Cost.** No money and no network once the weights are on disk. Memory is the cost: each session's
+warm server holds its own copy of the embedder (about 4 GB) and the warm reranker (about 0.6 GB);
+the larger reranker (about 4 GB) loads the first time an explicit recall asks for it.
+
+**Why not a retrieval platform.** hippo has looked twice at adopting TrustGraph and said no both
+times: it brings a message bus, three databases and a monitoring stack to run, and it moves the
+source of truth off markdown in git. The ideas worth having (hybrid recall, provenance, typed
+edges, graph expansion) are built in. The reasoning, and the models that were considered for
+`high`, are in [planning/EXPLORATIONS.retrieval.md](planning/EXPLORATIONS.retrieval.md).
+
 ## A git home for the user tier (opt-in)
 
 The user tier (`~/.claude/hippo-memory`) holds what you taught hippo about yourself, recalled in

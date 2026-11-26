@@ -60,6 +60,13 @@ context it spends, and `/hippo:doctor` counts them. Before you've downloaded the
 embedding model it still works, in keyword-only mode; the dense half is an upgrade, never a
 requirement.
 
+How much model that search uses is a per-machine choice called the **retrieval profile**:
+`floor` is keyword-only, `lean` (the default) adds the small embedding model, and `high` swaps
+in a much larger embedder and a reranker on a Mac with memory to spare. The profile changes how
+well recall matches, never what a memory is or how it is stored, and a machine that cannot serve
+its profile quietly serves the one below. [Retrieval profiles](README.md#retrieval-profiles-opt-in)
+has the details.
+
 Why the split? Always-loading *everything* would bloat every prompt and bury the signal. The
 floor carries the few always-relevant facts; recall handles the long tail, surfacing a
 memory the moment a prompt makes it relevant and staying silent otherwise.
