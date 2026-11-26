@@ -224,3 +224,13 @@ def test_the_8b_evidence_carries_no_private_text():
     with open(_8B_EVIDENCE, encoding="utf-8") as fh:
         raw = fh.read()
     assert '"query"' not in raw and '"expected"' not in raw and '"name"' not in raw
+
+
+@pytest.mark.parametrize("path, entry", [(_COUNT_EVIDENCE, "0.12/0.14"), (_8B_EVIDENCE, "0.11/0.12")])
+def test_the_count_entries_cost_no_row_with_the_warm_reranker_on_either(path, entry):
+    with open(path, encoding="utf-8") as fh:
+        runs = json.load(fh)["with_warm_reranker"]["hook_mode"]
+    for corpus, on in runs[entry].items():
+        off = runs["off"][corpus]
+        assert on["rows_lost_vs_off"] == 0 and on["hard_set_hits"] == off["hard_set_hits"], corpus
+        assert on["abstained"] == off["abstained"] and on["mrr"] == off["mrr"], corpus
