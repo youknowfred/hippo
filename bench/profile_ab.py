@@ -18,6 +18,9 @@ The arms (``memory.profile_ab`` runs them; the first is the baseline, run first 
   ``high+rerank+pool`` arm).
 * ``high@<dim>`` — the embedder's Matryoshka output truncated to ``--dims``, each at the
   floor the table gives that space and at the full-width space's calibrated floor.
+* ``high-<size>…`` — every other embedder in ``--models`` whose weights are on disk (by
+  default the rest of ``embed_mlx.HIGH_MODELS``: the 8B beside the default 4B), at full
+  width with its own table entries: alone, with the warm reranker, and with the pool.
 
 Beside the arms the report stamps what a profile costs on this machine: each model's load
 time and resident memory, the process's RSS before and after, each index's build time,
@@ -62,6 +65,9 @@ def main(argv=None) -> int:
                     help="default: <memory-dir>/.audit-fixtures/recall_hard_set.yaml")
     ap.add_argument("--pool", type=int, default=30, help="fused hits a deep-pool arm reranks")
     ap.add_argument("--dims", default="1024,2048", help="truncated widths to try; '' for none")
+    ap.add_argument("--models", default=None,
+                    help="other high embedders to run as arms, comma-separated ids; default: every "
+                         "other one whose weights are on disk; '' for none")
     ap.add_argument("--out", default=None, help="write the report here (default: stdout)")
     args = ap.parse_args(argv)
 
@@ -111,6 +117,15 @@ def main(argv=None) -> int:
     model = E.parse_space(full)[0]
     dims = [int(d) for d in args.dims.split(",") if d.strip()]
     spaces = [full] + [E.space_id(model, d) for d in dims]
+    if args.models is None:
+        others = [m for m in E.HIGH_MODELS if m != model and E.unavailable_reason(m) is None]
+    else:
+        others = [m.strip() for m in args.models.split(",") if m.strip() and m.strip() != model]
+        unknown = [m for m in others if m not in E.HIGH_MODELS]
+        if unknown:
+            print(f"not a high embedder: {', '.join(unknown)}", file=sys.stderr)
+            return 1
+    spaces += others  # each at its native width, the only width the table calibrates
     cost: dict = {"rss_bytes": {"start": _rss_bytes()}, "models": {}, "index_build_s": {}}
 
     idx = B.default_index_dir(md)
@@ -126,10 +141,10 @@ def main(argv=None) -> int:
 
     for space in spaces:
         emb = E.high_embedder(space)  # raises with the reason when this machine cannot serve it
-        if space == full:
-            cost["models"][model] = {"load_ms": round(emb.load_ms, 1), "resident_bytes": emb.resident_bytes}
-            cost["rss_bytes"]["embedder_loaded"] = _rss_bytes()
-        hdir = os.path.join(tmp, "high-" + (space.partition("@")[2] or "full"))
+        if space == full or space in others:
+            cost["models"][space] = {"load_ms": round(emb.load_ms, 1), "resident_bytes": emb.resident_bytes}
+            cost["rss_bytes"]["embedder_loaded" if space == full else f"{space} loaded"] = _rss_bytes()
+        hdir = os.path.join(tmp, "high-" + space.replace("/", "_").replace("@", "-"))
         t0 = time.monotonic()
         for _ in range(8):
             with E.using_space(space):
@@ -173,7 +188,12 @@ def main(argv=None) -> int:
     ]
     if R.LARGE_MODEL in rerankers:
         arms.append(Arm("high+rerank-4b", space=full, reranker=R.LARGE_MODEL, rerank=True))
-    for space in spaces[1:]:
+    for other in others:
+        tag = "high-" + other.rsplit("-", 1)[-1].lower()
+        arms.append(Arm(tag, space=other))
+        arms.append(Arm(f"{tag}+rerank", space=other, reranker=warm, rerank=True))
+        arms.append(Arm(f"{tag}+rerank+pool", space=other, reranker=warm, rerank=True, pool=args.pool))
+    for space in spaces[1:1 + len(dims)]:
         dim = space.partition("@")[2]
         arms.append(Arm(f"high@{dim}", space=space))
         arms.append(Arm(f"high@{dim}/calibrated-floor", space=space, env=(("HIPPO_DENSE_FLOOR", calibrated),)))
@@ -210,7 +230,7 @@ def main(argv=None) -> int:
             "load_average_1m": round(os.getloadavg()[0], 1),
         },
         "weights": {
-            **{m: f"{E.HIGH_MODELS[m]['repo']}@{E.HIGH_MODELS[m]['revision'][:12]}" for m in [model]},
+            **{m: f"{E.HIGH_MODELS[m]['repo']}@{E.HIGH_MODELS[m]['revision'][:12]}" for m in [model] + others},
             **{m: f"{R.RERANK_MODELS[m]['repo']}@{R.RERANK_MODELS[m]['revision'][:12]}" for m in rerankers},
         },
         "corpus": {"entries": lean["count"], "body_chunks": len(lean["body_chunks"]),
