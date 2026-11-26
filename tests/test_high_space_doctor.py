@@ -65,6 +65,17 @@ def test_no_line_off_the_high_profile(repo, memory_dir):
     assert ("high_space_calibration", D.check_high_space_calibration) in D.CHECKS
 
 
+def test_the_8b_reads_as_calibrated(repo, memory_dir, monkeypatch, tmp_path):
+    _high(monkeypatch, tmp_path, model=EIGHT_B)
+    r = D.check_high_space_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and f"[{EIGHT_B}]" in r["message"]
+    assert f"floor {RR._DENSE_FLOOR_BY_MODEL[EIGHT_B]}" in r["message"] and "row-count band" in r["message"]
+    _high(monkeypatch, tmp_path, model=EIGHT_B, dim=2048)
+    r = D.check_high_space_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "warn" and f"[{EIGHT_B}@2048]" in r["message"] and "NOT CALIBRATED" in r["message"]
+    assert EIGHT_B in r["message"].split("Calibrated high space(s):")[1]
+
+
 def test_a_calibrated_space_without_a_sweep_names_its_numbers(repo, memory_dir, monkeypatch, tmp_path):
     _high(monkeypatch, tmp_path)
     r = D.check_high_space_calibration(_ctx(memory_dir, repo))
@@ -105,7 +116,7 @@ def test_a_floor_without_a_gate_still_warns(repo, memory_dir, monkeypatch, tmp_p
     monkeypatch.delitem(recall_abstain._COSINE_BY_MODEL, EIGHT_B, raising=False)
     _high(monkeypatch, tmp_path, model=EIGHT_B)
     r = D.check_high_space_calibration(_ctx(memory_dir, repo))
-    assert r["status"] == "warn" and "no corroboration gate or row-count rule entry" in r["message"]
+    assert r["status"] == "warn" and "NOT CALIBRATED — no corroboration gate" in r["message"]
     assert "default dense floor" not in r["message"]
 
 

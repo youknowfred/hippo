@@ -58,10 +58,18 @@ _RRF_K = 60
 # live corpus's hard set plateaus at its best from 0.38 to 0.42 and loses rows from 0.43 up.
 # The key is the space id: an MRL-truncated space (``model@dim``) is a different cosine
 # space and is NOT covered by this entry. Evidence: planning/HCR-3.evidence.2026-11-25.json.
+#
+# Qwen3-Embedding-8B at full width (4096), same day, same method, same three corpora
+# (planning/HCR-3.8b.evidence.2026-11-25.json). On-topic best [0.609, 0.818] golden,
+# [0.475, 0.790] starter packs, [0.529, 0.795] live; the generic off-topic probes top out at
+# 0.357 and the fixtures' at 0.327 / 0.321 / 0.439. 0.40 is the 4B's placement: 0.075 under
+# the lowest on-topic best, 0.043 over the generic ceiling. The live hard set reads its best
+# (34/38) at 0.39 and 0.40 and 33 either side; the starter packs lose a row from 0.46.
 _DENSE_FLOOR_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": 0.60,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
     "Qwen/Qwen3-Embedding-4B": 0.42,
+    "Qwen/Qwen3-Embedding-8B": 0.40,
 }
 # Fallback for any OTHER model id (a future default bump, a user-supplied HIPPO_EMBED_MODEL
 # not in the table above) -- conservative (low) rather than guessing a tight number for an

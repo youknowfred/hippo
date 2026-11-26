@@ -345,7 +345,11 @@ class _MLXEmbedder:
         self._mx = mx
         active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
         base = int(active())  # a reranker may already share this process's MLX memory
-        self._net, _cfg = load_model(Path(snap))
+        # An embedder reads hidden states and never the LM head. The 8B conversion's config
+        # says the head is untied yet ships no ``lm_head.weight`` (the 4B's is tied), so a
+        # plain load refuses it: "Missing 1 parameters: lm_head.weight". Tied, mlx_lm builds
+        # no head at all, which is also 2.5 GB the 8B never has to hold.
+        self._net, _cfg = load_model(Path(snap), model_config={"tie_word_embeddings": True})
         self._net.eval()
         mx.eval(self._net.parameters())  # resident now, not on the first query
         self.resident_bytes = int(active()) - base  # the weights' unified-memory footprint

@@ -3,7 +3,7 @@
 The numbers come from planning/HCR-3.evidence.2026-11-25.json (a real-model run, not
 reproducible in CI: the test venv has no MLX on purpose). These tests pin the table entries
 to that file, key them by the space id the high index stamps, and check that a space the
-evidence did not measure (an MRL-truncated width, the 8B) stays uncalibrated.
+evidence did not measure (an MRL-truncated width of either model) stays uncalibrated.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def test_the_band_default_is_unchanged_by_the_new_space():
 
 @pytest.mark.parametrize(
     "space",
-    [embed_mlx.space_id("Qwen/Qwen3-Embedding-4B", 1024), "Qwen/Qwen3-Embedding-8B"],
+    [embed_mlx.space_id("Qwen/Qwen3-Embedding-4B", 1024), embed_mlx.space_id("Qwen/Qwen3-Embedding-8B", 2048)],
 )
 def test_spaces_the_evidence_did_not_measure_stay_uncalibrated(space):
     assert space not in rr._DENSE_FLOOR_BY_MODEL
@@ -140,3 +140,87 @@ def test_a_4b_cosine_over_strong_admits_on_dense_alone():
     # The lowest on-topic best cosine measured was 0.4949, over ``strong``.
     verdict = _verdict([0.4949, 0.30, 0.20], "something with no shared words at all", [])
     assert verdict["admit"] is True and verdict["why"] == "strong"
+
+
+def test_the_embedder_loads_without_the_language_model_head(monkeypatch, tmp_path):
+    """The 8B conversion's config declares an untied head and ships no ``lm_head.weight``;
+    a plain mlx_lm load refuses it. The embedder never reads the head, so it asks for none."""
+    import sys
+    import types
+
+    seen = {}
+
+    def load_model(path, **kw):
+        seen.update(kw, path=path)
+        net = types.SimpleNamespace(eval=lambda: None, parameters=lambda: [])
+        return net, {}
+
+    core = types.SimpleNamespace(eval=lambda *a: None, get_active_memory=lambda: 0)
+    monkeypatch.setitem(sys.modules, "mlx", types.SimpleNamespace(core=core))
+    monkeypatch.setitem(sys.modules, "mlx.core", core)
+    monkeypatch.setitem(sys.modules, "mlx_lm", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "mlx_lm.utils", types.SimpleNamespace(load_model=load_model))
+    tok = types.SimpleNamespace(token_to_id=lambda t: 7)
+    monkeypatch.setitem(sys.modules, "tokenizers",
+                        types.SimpleNamespace(Tokenizer=types.SimpleNamespace(from_file=lambda p: tok)))
+    emb = embed_mlx._MLXEmbedder("Qwen/Qwen3-Embedding-8B", 4096, str(tmp_path))
+    assert seen["model_config"] == {"tie_word_embeddings": True}
+    assert str(seen["path"]) == str(tmp_path) and emb.dim == 4096
+
+
+EIGHT_B = embed_mlx.space_id("Qwen/Qwen3-Embedding-8B")
+_8B_EVIDENCE = os.path.join(
+    os.path.dirname(__file__), "..", "planning", "HCR-3.8b.evidence.2026-11-25.json"
+)
+
+
+def _ev8():
+    with open(_8B_EVIDENCE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def test_the_8b_entries_match_their_dated_evidence():
+    assert EIGHT_B == "Qwen/Qwen3-Embedding-8B"
+    chosen = _ev8()["chosen"]
+    assert rr._DENSE_FLOOR_BY_MODEL[EIGHT_B] == chosen["_DENSE_FLOOR_BY_MODEL"][EIGHT_B] == 0.40
+    assert recall_abstain._COSINE_BY_MODEL[EIGHT_B] == chosen["_COSINE_BY_MODEL"][EIGHT_B]
+    assert recall_count._COUNT_BY_MODEL[EIGHT_B] == chosen["_COUNT_BY_MODEL"][EIGHT_B]
+    th = recall_abstain._COSINE_BY_MODEL[EIGHT_B]
+    assert rr._dense_floor(EIGHT_B) < th["support"] < th["strong"]
+
+
+def test_the_8b_floor_sits_between_the_measured_classes():
+    ev = _ev8()
+    floor = rr._DENSE_FLOOR_BY_MODEL[EIGHT_B]
+    strong = recall_abstain._COSINE_BY_MODEL[EIGHT_B]["strong"]
+    off_top = 0.0
+    for corpus, d in ev["distributions"].items():
+        assert floor < d["on_topic_best_cosine"][0], corpus  # no on-topic query is cut at the floor
+        assert floor > d["off_topic_generic_best_cosine"][-1], corpus  # every generic probe is under it
+        off_top = max(off_top, *(d[f"off_topic_{k}_best_cosine"][-1] for k in ("fixture", "generic", "adjacent")))
+    assert strong > off_top  # no measured off-topic best is admitted on dense alone
+
+
+def test_the_8b_acceptance_holds_lean_and_its_count_entry_cost_no_row():
+    ev = _ev8()
+    for corpus, arms in ev["acceptance"].items():
+        lean = arms["lean (bge-small, floor 0.60, gate on)"]
+        high = arms["8B calibrated (floor 0.40, gate 0.50/0.48)"]
+        hits = lambda cell: int(cell["hard_set_hits"].split("/")[0])
+        assert hits(high) >= hits(lean) and high["mrr@10"] > lean["mrr@10"], corpus
+        assert high["abstained"]["fixture"] == lean["abstained"]["fixture"], corpus
+    runs = ev["count_rule"]["shipped_vs_off_hook_mode"]
+    for corpus, on in runs["shipped"].items():
+        off = runs["off"][corpus]
+        assert on["rows_lost_vs_off"] == 0 and on["hard_set_hits"] == off["hard_set_hits"], corpus
+        assert on["abstained"] == off["abstained"], corpus
+        assert on["rows_on_leaked_off_topic_probes"] <= off["rows_on_leaked_off_topic_probes"], corpus
+    band = recall_count._COUNT_BY_MODEL[EIGHT_B]["band"]
+    for corpus, d in ev["count_rule"]["distributions"].items():
+        assert band + 0.01 >= d["expected_memory_gap_under_best"]["p75"], corpus
+
+
+def test_the_8b_evidence_carries_no_private_text():
+    with open(_8B_EVIDENCE, encoding="utf-8") as fh:
+        raw = fh.read()
+    assert '"query"' not in raw and '"expected"' not in raw and '"name"' not in raw
