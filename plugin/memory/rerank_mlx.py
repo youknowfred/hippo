@@ -224,7 +224,10 @@ class _MLXReranker:
         from mlx_lm.utils import load_model
         from tokenizers import Tokenizer
 
+        from .embed_mlx import cap_mlx_cache
+
         self._mx = mx
+        cap_mlx_cache(mx)  # the process's one cap, whichever model loads first
         active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
         base = int(active())
         self._net, _cfg = load_model(Path(snap))

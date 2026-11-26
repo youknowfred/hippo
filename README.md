@@ -283,7 +283,9 @@ warm server holds its own copy of the embedder (4.1 GB of unified memory, measur
 warm reranker (0.6 GB) only if you turn it on with `HIPPO_RERANK=1`. A process that serves
 `/hippo:recall` or the MCP `recall` tool loads the same reranker the first time one is asked.
 The embedder loads in about 2 seconds from a warm disk cache (about 5 seconds for the first load
-after a reboot) and the reranker in under half a second.
+after a reboot) and the reranker in under half a second. While a warm server builds or
+refreshes its `high/` index it holds about 1.3 GB more, and MLX's cache of freed buffers is capped
+at 512 MB (`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build.
 
 **The 8B.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model` in the
 plugin's `model.json`) selects Qwen3-Embedding-8B instead; set it before the fetch step so the

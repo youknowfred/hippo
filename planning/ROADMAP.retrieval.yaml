@@ -115,6 +115,28 @@ meta:
         the 4B, for 3.66 GB more resident memory per warm server. The 8B
         stays selectable (HIPPO_HIGH_EMBED_MODEL or the preset), calibrated
         and loadable since #240.
+    - date: 2026-11-26
+      decisions: >-
+        Sixth ruling, on HCR-7's three open calls ("as recommended on all
+        three"), after "Yes, add HCR-7" added the item the same day: (F1) a
+        hippo-owned embedding daemon FITS the no-server posture, on four
+        conditions that are part of the item: hippo spawns it and reaps it (no
+        install step, no launchd entry); it listens on a 0600 unix socket and
+        opens no port; recall never depends on it (absent or slow means lean
+        for that prompt); it exists only on high and doctor names its state.
+        The severed line on EXTERNAL model servers stands. (F2) the in-process
+        embedder stays as an unadvertised knob for the benches and the
+        byte-identity check, and is never the fallback: when the daemon cannot
+        serve, recall serves lean, so a daemon fault cannot bring back 4 GB
+        per session. (F3) the fifth ruling ("Keep the 4B") is NOT re-read on
+        memory alone: its evidence had reasons a daemon does not change (the
+        prompt hook reads 26/38 on both and the 8B ranks lower there, 0.498
+        against 0.524; the explicit pool reads 33/38 against 34/38; recall
+        median 319 ms against 168; index build 199 s against 92), and the warm
+        reranker was turned off for ranking quality, not for its 0.6 GB. One
+        arm is added to HCR-7's evidence run: the 8B with the warm reranker in
+        HOOK mode (explicit mode read 34/38, MRR 0.652, the best measured; the
+        hook has not been read). No default changes without that file.
 
 workstream:
   - id: HCR
@@ -496,7 +518,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: proposed        # 2026-11-26: added on the owner's word ("Yes, add HCR-7"); unbuilt
+        status: proposed        # 2026-11-26: added on the owner's word ("Yes, add HCR-7"); its three open calls ruled the same day (sixth ruling); unbuilt
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -554,17 +576,41 @@ workstream:
           trip and no raised error; warm served recall stays inside
           SERVE_BUDGET_MS at a measured burst of 10 simultaneous prompts; two
           sessions starting together spawn one daemon; a dated evidence file
-          before the daemon becomes high's default path.
+          before the daemon becomes high's default path, carrying the F3 arm
+          (the 8B with the warm reranker, read in hook mode); the four F1
+          conditions hold as built (no install step or launchd entry, no
+          port, lean on any daemon fault, a doctor line).
+        incident_2026_11_26: >-
+          The same day, with the owner's Mac on high, its memory ran out. The
+          system log holds no memory-kill entry, so the cause is read from what
+          was left: a high/ build over a 1,054-memory corpus (2,658 body
+          chunks) had started 12 minutes before and never finished; MLX's
+          buffer cache was uncapped (default limit 121.6 GB on this machine);
+          and a bounded scratch run of the same slices on the 4B put 6.4 GB in
+          that cache after five slices, still climbing. HCR-2's bench ran on a
+          108-memory corpus and its "about 0.5 GB of transient cache" (this
+          item's problem, above) holds for queries only. Fixed outside this
+          item: embed_mlx.cap_mlx_cache (HIPPO_MLX_CACHE_MB, 512 MB default)
+          before either loader's first buffer; at 256 MB and at 1 GB the build
+          ran at the same speed, a query took 56-62 ms, and the process held
+          4.6 and 5.5 GB. The daemon inherits the cap. Not traced: the same
+          morning one small corpus's high/ matrix was rewritten ten times in
+          five minutes, so the catch-up loop re-embeds more than it should;
+          and a build's peak (5.2 GB active on a 1,024-token slice) is paid by
+          every server that builds until the daemon owns builds. The owner's
+          machine went back to lean until the cap ships.
         open_for_owner: >-
-          (1) The no-server posture: the severed list below rejects EXTERNAL
-          model servers as a recall dependency. This is a hippo-owned helper
-          that spawns itself and exits when idle, but it is still a long-lived
-          process; the owner's "Yes, add HCR-7" adds the item and does not yet
-          rule on that. (2) Whether the in-process embedder stays as a knob
-          (one session, no daemon) or is removed. (3) With memory paid once per
-          machine, whether the fifth ruling ("Keep the 4B", which cited 3.66 GB
-          more per warm server) is re-read: the 8B is 7.8 GB once, the warm
-          reranker 0.6 GB once.
+          FULLY RULED 2026-11-26 (sixth owner ruling, "as recommended on all
+          three"). (1) The daemon fits the no-server posture on four
+          conditions, each binding on the build: hippo spawns and reaps it
+          (lazy spawn; no install step, no launchd entry); a 0600 unix socket,
+          no port; recall never depends on it; high only, and doctor names its
+          state. (2) The in-process embedder stays as an unadvertised knob
+          (benches, the byte-identity check, and the daemon's own loader) and
+          is never the fallback: the fallback is lean. (3) "Keep the 4B" is
+          not re-read on memory alone; the evidence run adds one arm, the 8B
+          with the warm reranker in hook mode, and no default changes without
+          that file.
         not_chosen: >-
           Weighed 2026-11-26. Idle unload per server alone: saves nothing when
           a fleet is all prompting, and a cold-disk reload (2-5 s) must serve
