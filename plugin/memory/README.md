@@ -7,8 +7,35 @@ contract that **markdown-in-git is the single source of authority** — everythi
 (index, telemetry, graph caches) is derived, rebuildable, and gitignored.
 
 This package ships inside the hippo Claude Code plugin (`plugin/memory/`, imported as
-`memory`). The skills (`/hippo:bootstrap|init|new|doctor|audit`) and hooks
-(`plugin/hooks/`) are thin orchestration over the CLI entry points documented here.
+`memory`). The skills (`/hippo:setup`, `/hippo:new`, `/hippo:recall`, `/hippo:tend`,
+`/hippo:doctor` and the rest) and the hooks (`plugin/hooks/`) are thin orchestration over the
+CLI entry points documented here.
+
+> [!NOTE]
+> This is the engine reference. For what hippo is, how to install it and the commands, start
+> at the [front README](../../README.md); for `hippo.json` and the gates, see
+> [SETTINGS.md](../../SETTINGS.md).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../assets/readme/engine-map-dark.svg">
+    <img src="../../assets/readme/engine-map.svg" alt="The engine's files in three columns. The source of authority is the committed markdown corpus in .claude/memory: frontmatter with name, description, cited_paths and source_commit, wikilinks and typed edges, the MEMORY.md floor and the .format marker. Derived, gitignored files are built from it: the index and its high-profile twin, links.json and stale.json, the telemetry ledgers and the pending capture queue. Readers are the UserPromptSubmit, SessionStart, PreToolUse and SessionEnd hooks, the MCP server and the hippo CLI. Writes go back to the corpus one memory at a time, with your approval." width="820">
+  </picture>
+</p>
+
+> [!IMPORTANT]
+> **Four contracts every module keeps.** Markdown in git is the only authority: every derived
+> file can be deleted and rebuilt. Hooks always exit 0 and never download. The per-prompt path
+> runs no LLM and makes no network call. Corrective writes are per item and agent-gated: no
+> module has a bulk verdict ([Appendix B](#appendix-b--why-there-is-no-bulk-re-baseline)).
+
+| | Contents |
+|---|---|
+| **Recall** | [Hybrid recall](#hybrid-recall) · [Warm recall](#recall_warmpy--warm-recall-in-the-sessions-mcp-server) · [Retrieval profiles and Qwen3](#retrieval-profiles-and-the-qwen3-high-space) · [Merge gates](#eval_recallpy--the-5-merge-gates) |
+| **Lifecycle** | [Staleness and provenance](#staleness--provenance) · [Reconsolidation](#reconsolidation-the-immune-system) · [Decay and archive](#graceful-decay--soft-invalidation--archive) · [Purge](#purging-a-memory-and-scrubbing-its-history) |
+| **Structure** | [Wikilink graph](#wikilink-graph) · [Writing memories](#writing-memories) · [Corpus format versions](#corpus-format-versioning-the-doctor-driven-migration-path) |
+| **Runtime** | [SessionStart dispatcher](#the-sessionstart-dispatcher) · [Telemetry](#telemetry-three-ledgers) · [Degraded modes](#degraded-modes-all-legible-none-fatal) · [LLM enrichment](#standalone-llm-enrichment-opt-in-default-off) |
+| **Reference** | [Environment overrides](#environment-overrides) · [Tests](#tests-dev-checkout) · [Appendix A](#appendix-a--the-durable-model-cache-gotcha) · [Appendix B](#appendix-b--why-there-is-no-bulk-re-baseline) |
 
 ## Running the commands in this doc
 
@@ -16,7 +43,7 @@ Inside a Claude Code session (skills, agents), the plugin env vars are set. Ever
 block below assumes this one-time shell setup:
 
 ```bash
-PY="${CLAUDE_PLUGIN_DATA}/venv/bin/python"   # built by /hippo:bootstrap
+PY="${CLAUDE_PLUGIN_DATA}/venv/bin/python"   # built by /hippo:setup
 export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"    # so `import memory` resolves to this package
 ```
 
@@ -36,7 +63,8 @@ instead.
 
 Builds a gitignored, rebuildable index at `.hippo/index/` over each memory's
 `name` + `description`:
-- **dense** — `bge-small-en-v1.5` via `fastembed` (ONNX, no torch), and
+- **dense** — `bge-small-en-v1.5` via `fastembed` (ONNX, no torch) on the default profile
+  (the `high` profile builds a Qwen3 twin beside it, [below](#retrieval-profiles-and-the-qwen3-high-space)), and
 - **sparse** — BM25 (`rank-bm25`, or the vendored scorer pre-bootstrap).
 
 Incremental: unchanged memories reuse their cached embedding row (keyed by content hash);
@@ -53,7 +81,7 @@ dispatcher calls `refresh_index()` on every start — incremental, **offline**, 
 **never-downgrade** — so a memory written during one session is indexed (recallable) by
 the next. A fast no-op when nothing changed; if a cold cache can't embed offline it leaves
 the last good index in place rather than degrade it to BM25. The model cache itself is
-warmed ONCE, online, by `/hippo:bootstrap` (a hook must never download — see
+warmed ONCE, online, by `/hippo:setup` (a hook must never download — see
 [Appendix A](#appendix-a--the-durable-model-cache-gotcha)).
 
 ### `recall.py` — query-time fused recall
@@ -77,6 +105,120 @@ hygiene** (`clean_query` strips harness envelopes and skips near-empty/continuat
 prompts before any model load) and **floor-dedup** (memories already always-loaded in the
 `MEMORY.md` floor are dropped from per-prompt results, topping back up to `k`).
 
+### Whether to inject, and how much
+
+Two rules sit between the ranking and the prompt. Neither changes how anything ranks.
+
+- **The corroboration gate** ([`recall_abstain.py`](recall_abstain.py), HOT-2) admits a
+  prompt only when two independent lanes agree on a memory, or one is strong on its own: a
+  best cosine of at least `strong`, a description sharing several of the prompt's terms, or a
+  memory in the top 10 of both lanes with shared terms or a cosine of at least `support`.
+  Otherwise recall abstains and the receipt names the closest miss.
+  `HIPPO_DISABLE=abstain-gate` turns it off.
+- **The count rule** ([`recall_count.py`](recall_count.py), HOT-8, prompt hook only) serves up
+  to `k` rows when the best cosine clears the dense floor by at least `wide`, and otherwise at
+  most five, each with evidence of its own (a cosine within `band` of the best, both lanes'
+  top 10, or a description naming the subject). `HIPPO_SIGNAL_COUNT=0` turns it off.
+
+Every threshold belongs to one embedding space and is calibrated per model, so an
+uncalibrated model, a BM25-only index or a dense failure leaves both rules off. The numbers
+for each space are in the [calibration table](#each-space-is-calibrated-on-its-own) below.
+
+### `recall_warm.py` — warm recall in the session's MCP server
+
+Opt-in (`hippo setup --warm --yes` adds one `mcp_tool` UserPromptSubmit hook to the user's
+settings). The session's MCP server already holds the interpreter, the imports and the
+model, so it answers the prompt with the same `hookSpecificOutput` the spawned hook prints;
+the body is the spawned hook's own (`recall_hook.run_recall`), so the two cannot drift.
+
+The command hook stays installed and decides. Both hooks fire in parallel and settle each
+prompt through one `O_EXCL` claim file in `${CLAUDE_PLUGIN_DATA}/warm/`: `warm` only for a
+live server on the hook's own plugin version that accepts and is not mid-serve, else `spawn`.
+Whoever arrives second obeys, so exactly one path injects. A version or index-schema
+mismatch, no usable index, a busy server, or a tripped breaker (one served call over
+`SERVE_BUDGET_MS` = 1.5 s, or 4 s for the call that loads the model) all fall back to the
+spawn path. A served call only reads: the index on disk, through a cache that reloads when
+the manifest changes.
+
+### Retrieval profiles and the Qwen3 `high` space
+
+A machine's **retrieval profile** ([`retrieval_profile.py`](retrieval_profile.py), HCR-1)
+says how much model recall spends: `floor` (BM25 only, the dense lane off by policy),
+`lean` (the default, everything above), or `high`. It is one key in
+`${CLAUDE_PLUGIN_DATA}/model.json` beside the embedding-model preset, resolved env
+(`HIPPO_RETRIEVAL_PROFILE`) > preset > default, and an invalid value falls through and is
+reported by doctor, never raised. The `high` offer is hardware-gated (arm64 macOS with at
+least 64 GiB); the switch itself is the user's on any machine, because a machine that cannot
+serve `high` serves `lean`.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../assets/readme/high-serving-dark.svg">
+    <img src="../../assets/readme/high-serving.svg" alt="How a prompt is served on the high profile. Both recall hooks fire and one claim file per prompt decides which answers. The spawned hook always serves the lean index with bge-small-en-v1.5. The warm MCP server serves the high index with Qwen3-Embedding-4B once the model is loaded and the high index has caught up, and serves lean until then. Both use the same ranking, gate, count rule and budget, with per-space calibration. The explicit recall surfaces on high also rerank the top 30 with Qwen3-Reranker-0.6B." width="820">
+  </picture>
+</p>
+
+**The embedder** ([`embed_mlx.py`](embed_mlx.py), HCR-2). Qwen3-Embedding-4B (the 8B behind
+`HIPPO_HIGH_EMBED_MODEL`) through MLX, as 8-bit mxfp8 conversions pinned to one revision each,
+so the weights a build embedded with are the weights recall queries with. The model is
+instruction-aware: a query is embedded as `Instruct: <QUERY_INSTRUCTION>\nQuery:<text>`, a
+document bare, and the vector is the final token's hidden state. Right-padded batches are
+exact for a causal model, so no attention mask is needed. All MLX work runs on one worker
+thread per process, fed in small slices so a waiting query waits one slice. A space is
+active only inside `using_space` (a ContextVar), and only the warm server's high half enters
+one: the spawned hook, the CLI and SessionStart never see it.
+
+**The twin index** ([`recall_warm_high.py`](recall_warm_high.py)). `<index>/high/` is a
+complete index built by the same `build_index` inside the Qwen3 space; its manifest names the
+space, the width and the pinned weights. The lean build never looks inside `high/` and the
+high build never writes outside it. On the first warm call of a high-profile session, a
+daemon thread loads the model (off the serving path) and keeps every tier's `high/` caught
+up with its lean twin, offline and incrementally. Until the model is loaded and every tier's
+high index holds exactly the lean index's entries, warm calls serve lean. A served call on
+high swaps only the loaded index and enters the space; links, rules and sidecars are still
+read from the lean dir.
+
+**The reranker** ([`rerank_mlx.py`](rerank_mlx.py), HCR-4). Qwen3-Reranker-0.6B, scored as
+the model card specifies: `P(yes)` from the final position's yes/no logits. It sits behind
+the one rerank seam (`recall_rank._cross_encoder_rerank`, whose other backend is fastembed's
+MiniLM cross-encoder) and is active in two places only:
+
+| Surface | When | Pool | Bound |
+|---|---|---|---|
+| `/hippo:recall` and the MCP `recall` tool | always, on `high`, when the weights are on disk | top 30 fused hits, then cut to `k` | 15 s |
+| Warm per-prompt recall | only with `HIPPO_RERANK=1`, once the reranker has loaded | the same pool `lean`'s hot-path rerank reads | 0.8 s, then the fused order stands |
+
+`HIPPO_RERANK_TIMEOUT` overrides either bound. The 4B reranker stays pinned for the benches
+only; recall never scores with it.
+
+#### Each space is calibrated on its own
+
+A cosine from one model means nothing in another's space, so every threshold is keyed by the
+space id (a truncated `model@dim` width is a different space and is not covered: doctor warns
+while `HIPPO_HIGH_EMBED_DIM` is set). Each Qwen3 value was measured on three corpora on
+2026-11-25.
+
+| | `lean`: bge-small-en-v1.5 | `high`: Qwen3-Embedding-4B | Qwen3-Embedding-8B |
+|---|---|---|---|
+| Width | 384 | 2,560 | 4,096 |
+| Weights | about 130 MB, ONNX | 4.2 GB, mxfp8 | 7.8 GB, mxfp8 |
+| Dense floor ([`recall_rank.py`](recall_rank.py)) | 0.60 | 0.42 | 0.40 |
+| Gate `strong` / `support` ([`recall_abstain.py`](recall_abstain.py)) | 0.76 / 0.72 | 0.60 / 0.60 | 0.50 / 0.48 |
+| Count rule `band` / `wide` ([`recall_count.py`](recall_count.py)) | 0.05 / 0.18 | 0.12 / 0.14 | 0.11 / 0.12 |
+
+The instruction-aware space separates on-topic from off-topic far more cleanly than
+bge-small: on the 4B every measured off-topic best cosine sat under 0.41 and every on-topic
+best over 0.49, where bge-small's classes overlap on a live corpus. Each constant's comment
+carries its method and the evidence file under [`planning/`](../../planning/README.md)
+(`HCR-3.evidence`, `HCR-3.8b.evidence`, `HCR-3.count.evidence`,
+`HCR-3.hook-gaps.evidence`). `hippo eval --floor-sweep` sweeps inside the high space on a
+high-profile machine, and `/hippo:doctor`'s `high_space_calibration` line says whether the
+active space is calibrated.
+
+What the profiles buy, measured, is charted in the
+[front README](../../README.md#what-high-buys-measured); run the same comparison on your own
+corpus with `python -m bench.profile_ab` ([`bench/profile_ab.py`](../../bench/profile_ab.py)).
+
 ### `eval_recall.py` — the 5 merge gates
 
 ```bash
@@ -88,7 +230,7 @@ net token reduction > 0, recall p95 < 300 ms (warm). Two kinds of input are **sk
 honestly** rather than failed (reported as `➖ skipped`, excluded from the RESULT):
 
 - **hard-set gates** when no fixture exists — resolution probes the project-local
-  `.claude/memory/.audit-fixtures/` (written by `/hippo:audit`), then the engine repo's
+  `.claude/memory/.audit-fixtures/` (written by `/hippo:doctor`'s content audit), then the engine repo's
   [`tests/fixtures/`](../../tests/fixtures/recall_hard_set.yaml), else skips;
 - **token_reduction** when the corpus has no `MEMORY.full.md` pre-trim snapshot (every
   fresh install) — there is nothing to compare the trimmed floor against.
@@ -103,6 +245,24 @@ precision@k (graded, from `recall_relevance_set.yaml`), staleness half-life, per
 token cost, and the reconsolidation graduation rate.
 
 ## Staleness + provenance
+
+A memory's life after it is written, from the modules below and the
+[reconsolidation](#reconsolidation-the-immune-system) and [decay](#graceful-decay--soft-invalidation--archive)
+sections:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Fresh: written, born with cited_paths and source_commit
+    Fresh --> Stale: a cited file changes after source_commit
+    Stale --> Fresh: re-read, then reverify (graduate or fix)
+    Stale --> Demoted: demote stamps invalid_after
+    Demoted --> Hidden: 30 days pass
+    Demoted --> Fresh: a genuine reverify clears it
+    Hidden --> Fresh: a genuine reverify clears it
+    Stale --> Archived: archive, one memory, when cold and unlinked
+    note right of Stale: recalled rows carry a verify-before-relying banner
+    note right of Demoted: score halved before the top-k cut
+```
 
 ### `provenance.py` — citation provenance backfill
 
@@ -149,6 +309,48 @@ comparison. Never raises.
 ```bash
 "$PY" -m memory.staleness
 ```
+
+### Verify-at-use banner + reinforcement (RET-6)
+
+A currently-stale memory's injected pointer line (`recall.format_results`) carries a
+one-line banner — `anchored to <sha>; N cited files changed since — verify before
+relying` — sourced entirely from `stale.json` (LIF-6's `SessionStart`-derived cache; an
+absent/corrupt cache degrades to **no banners**, never a hard error, and never a git call
+on the recall hot path). A fresh memory carries none. **Reinforcement needs no separate
+step**: `--reverify` (or `reconsolidate.semantic_reverify`'s `graduate`/`fix` outcome)
+already re-baselines `source_commit` to HEAD, so a reinforced memory simply drops out of
+the *next* `SessionStart`'s `find_stale` scan — and thus `stale.json` — and the banner is
+gone. The first time a memory is EVER reverified, `--reverify` also additively stamps a
+write-once `last_verified` timestamp (never overwritten by a later reverify) —
+supplementary audit provenance (`staleness.read_last_verified`), distinct from
+`source_commit`/`source_commit_time`, which remains the signal that actually clears the
+banner.
+
+### Clearing a flag: `--reverify` / `--refresh-one`
+
+```bash
+"$PY" -m memory.provenance --reverify <name>      # clear ONE memory after re-verifying it
+"$PY" -m memory.provenance --refresh-one <name>   # re-derive ONE memory's citations only
+```
+
+- `--reverify NAME` — the verification-gated way to CLEAR a staleness flag (which
+  `--refresh` deliberately CANNOT): after the content is re-read and confirmed to match
+  current code, it re-baselines `source_commit` to HEAD and re-opens the
+  soft-invalidation window. Frontmatter-only, body byte-identical, refuses unparseable
+  files, per-memory by design — see
+  [Appendix B](#appendix-b--why-there-is-no-bulk-re-baseline).
+- `--refresh-one NAME` — re-derives `cited_paths` for one memory (e.g. after hand-editing
+  its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
+  every already-backfilled memory.
+
+A `metadata:` block may END in a nested mapping (hippo's own `edge_origin:` stamp is one):
+every frontmatter writer inserts at the block's FIRST-level key indent and claims only
+top-level / direct-`metadata:` keys (COR-24), so that shape round-trips through all of
+them. `rederive` reports what it did rather than what it usually does (MIG-2): the
+baseline sentence distinguishes *preserved* from *assigned* (a memory that had no
+`source_commit` has nothing to preserve), a `gained:`/`lost:` line is computed at call time
+against the stored frontmatter so an index that moved since the worklist read is loud, and
+a file with no `---` block is reported as **no frontmatter**, not as a YAML error.
 
 ### Volatile paths (VOL-1) — churn-by-design files stop arming the worklist
 
@@ -254,32 +456,6 @@ record anything was lost. Two surfaces close that hole:
   `citation_rot` producer and in `python -m memory.staleness`'s default report, next to
   the unparseable block; TOTAL rot (every citation gone) is marked on its line.
 
-### Clearing a flag: `--reverify` / `--refresh-one`
-
-```bash
-"$PY" -m memory.provenance --reverify <name>      # clear ONE memory after re-verifying it
-"$PY" -m memory.provenance --refresh-one <name>   # re-derive ONE memory's citations only
-```
-
-- `--reverify NAME` — the verification-gated way to CLEAR a staleness flag (which
-  `--refresh` deliberately CANNOT): after the content is re-read and confirmed to match
-  current code, it re-baselines `source_commit` to HEAD and re-opens the
-  soft-invalidation window. Frontmatter-only, body byte-identical, refuses unparseable
-  files, per-memory by design — see
-  [Appendix B](#appendix-b--why-there-is-no-bulk-re-baseline).
-- `--refresh-one NAME` — re-derives `cited_paths` for one memory (e.g. after hand-editing
-  its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
-  every already-backfilled memory.
-
-A `metadata:` block may END in a nested mapping (hippo's own `edge_origin:` stamp is one):
-every frontmatter writer inserts at the block's FIRST-level key indent and claims only
-top-level / direct-`metadata:` keys (COR-24), so that shape round-trips through all of
-them. `rederive` reports what it did rather than what it usually does (MIG-2): the
-baseline sentence distinguishes *preserved* from *assigned* (a memory that had no
-`source_commit` has nothing to preserve), a `gained:`/`lost:` line is computed at call time
-against the stored frontmatter so an index that moved since the worklist read is loud, and
-a file with no `---` block is reported as **no frontmatter**, not as a YAML error.
-
 ### The pre-migration backup: `--snapshot` (MIG-6, MIG-7, MIG-12)
 
 ```bash
@@ -302,52 +478,177 @@ derivation is stamped and the re-derivation worklist is empty (MIG-8). The same 
 the backups in `.hippo/snapshots/` and v1.42.3's `.hippo-snapshots/`, and the copies the
 desktop app's worktrees carry in `.claude/worktrees/*/.claude/` (MIG-16).
 
-### Verify-at-use banner + reinforcement (RET-6)
+## Reconsolidation (the immune system)
 
-A currently-stale memory's injected pointer line (`recall.format_results`) carries a
-one-line banner — `anchored to <sha>; N cited files changed since — verify before
-relying` — sourced entirely from `stale.json` (LIF-6's `SessionStart`-derived cache; an
-absent/corrupt cache degrades to **no banners**, never a hard error, and never a git call
-on the recall hot path). A fresh memory carries none. **Reinforcement needs no separate
-step**: `--reverify` (or `reconsolidate.semantic_reverify`'s `graduate`/`fix` outcome)
-already re-baselines `source_commit` to HEAD, so a reinforced memory simply drops out of
-the *next* `SessionStart`'s `find_stale` scan — and thus `stale.json` — and the banner is
-gone. The first time a memory is EVER reverified, `--reverify` also additively stamps a
-write-once `last_verified` timestamp (never overwritten by a later reverify) —
-supplementary audit provenance (`staleness.read_last_verified`), distinct from
-`source_commit`/`source_commit_time`, which remains the signal that actually clears the
-banner.
+### `reconsolidate.py`
 
-## The SessionStart dispatcher
+`recalled_stale_worklist(...)` intersects recently-recalled names (the recall ledger,
+last N sessions) with the stale set — memories actively shaping behavior whose cited code
+drifted. Read-only CLI + the `reconsolidation` producer (silent unless non-empty).
 
-### `session_start.py`
+When the link graph is buildable (`links.build_graph`, cache-aware), each item also
+carries a `linked` column (GRA-9): up to 3 one-hop neighbors — inbound + outbound
+`[[wikilinks]]` unioned with typed edges, minus names already on the worklist — rendered
+as `X (+2 linked: Y, Z)`. Review-adjacent and **report-only** (zero write paths): when a
+memory drifts, its neighbors are the next most likely to be wrong. No graph → no column;
+the worklist is exactly its pre-GRA-9 self.
 
-ONE process, ONE corpus load, ONE merged `additionalContext`. Producers, in order:
-`stale_venv` (deps changed since bootstrap → re-bootstrap nudge), `integrity`
-(unparseable frontmatter — surfaced FIRST among corpus signals so a malformed memory
-can't hide), `citation_rot` (cited paths gone from the repo, LIF-3), `staleness`,
-`reconsolidation` (recall-filtered staleness worklist),
-`git_recent`, `link_health`, `floor`. Self-suppresses when no producer has anything to
-say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
-(not producers): heal empty baselines, `refresh_index()`, `mark_session()`.
+LIF-1 closes the re-nag loop — the worklist is **actionable-only**: items whose file
+already carries `invalid_after` (demote's terminal state) are excluded (the staleness
+producer still counts them), and `--snooze <name>` records an explicit per-item ack in
+the reconsolidation ledger that silences an item for the next 5 new sessions, then
+expires (a deferral, not a verdict — only demote is terminal).
 
-LIF-1: the `staleness` producer suppresses the per-item lines of entries already
-carrying `invalid_after` (demote's terminal state — recall is already ranking them
-down) but keeps them **counted** in a `(+N already demoted)` tail, so suppression is
-never silent disappearance; once an invalidation ages past recall's 30-day old horizon,
-the same block names it and suggests the `/hippo:audit` archive flow (report-only).
-VOL-1 extends the same discipline to volatile-path policy suppression: items whose only
-drift is a registry-listed churn file get no per-item line and no worklist entry, but
-the note always renders the count (`(+N … policy-suppressed; see .format
-volatile_paths)` — or one calm ℹ line when *everything* stale is policy-suppressed).
+```bash
+"$PY" -m memory.reconsolidate
+"$PY" -m memory.reconsolidate --snooze <name>    # ack: skip for 5 sessions, then re-nag
+```
 
-Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
-also owns the **first-run nudge**, emitted before Python is even involved. Venv/sentinel
-missing → "run /hippo:setup": a machine-level line, shown in the first session of each day
-(a day stamp in plugin data) and dismissed machine-wide. A corpus-less repo nested inside
-another corpus → "run /hippo:setup here, or pin HIPPO_CORPUS_ROOT to share it"; an opted-in
-repo with no corpus → "run /hippo:setup here": per-repo lines, shown every session and
-dismissed per repo.
+`semantic_reverify(name, outcome, ...)` is the per-item write primitive — `graduate` /
+`fix` route through `reverify_file` (clears the flag), **`demote` does NOT** (a
+confirmed-wrong memory must stay visible to staleness) — instead it **chains
+`set_invalid_after`** onto the memory and refreshes the index (LIF-1), so recall's
+pre-cut penalty demotes it immediately: one command, no separate `--invalidate`.
+Verdicts land in the reconsolidation ledger (demote events carry `invalidated` for
+audit); `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes
+and snoozes excluded by design). No bulk variant exists.
+
+`superseded_by=<successor>` (GRA-4, `demote` only, opt-in): when the agent knows
+WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
+**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving)
+AND stamps the loser's `invalid_after` at the **successor's commit date** (GRW-7 — the
+succession moment becomes an explicit, auditable validity boundary; an uncommitted
+successor falls back to now-UTC), so recall demotes the loser below its successor and
+annotates it. Per-item and agent-gated like everything else here; refused for `graduate`
+AND `fix` (both assert the memory is CURRENT, which contradicts naming a successor) and
+when either memory is missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name>
+--outcome demote --superseded-by <successor>`.
+
+## Graceful decay — soft-invalidation + archive
+
+Decay is DEMOTION, never deletion.
+
+- `staleness.set_invalid_after(name)` stamps an additive `invalid_after` frontmatter
+  timestamp: **< 30 days old** → still recallable, fused score halved BEFORE the top-k
+  cut (real demotion — it can fall out of top-k); **≥ 30 days** → dropped from recall
+  display only, still in corpus/index; **cleared** by a genuine `--reverify`. A `demote`
+  verdict chains this automatically (LIF-1) — the manual `--invalidate` remains for
+  judging a memory questionable *without* rendering a reconsolidation verdict.
+- `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
+  stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
+  errors). LIF-4: the report enforces its own trust threshold — until the ≥5-session
+  soak bar is met it returns `[]` with a machine-readable reason
+  (`diagnostics["reason"] = "soak_gate_unmet"`) instead of a maximally-permissive
+  fresh-install list, and would-be candidates younger than the soak window (per git
+  first-seen, not yet exposed to 5 distinct sessions) are excluded and named in the
+  report; `--archive <name>` is a per-item, git-reversible `git mv` into
+  `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
+  automatically; no `--all` exists. GRA-5: the move REFUSES — machine-readable
+  `refused: True` + the `referrers` list in the result, zero filesystem change — while
+  OTHER memories still reference the target (untyped `[[wikilinks]]` unioned with GRA-4
+  typed inbound edges, via the one canonical `LinkGraph.inbound()`/`typed_inbound()`
+  API), unless `--force`; every successful move also reports the referrers so the caller
+  rewrites those links in the same commit (a `supersedes:` edge on the successor memory
+  is the machine-readable forwarding pointer).
+
+```bash
+"$PY" -m memory.staleness --invalidate <name>
+"$PY" -m memory.archive                             # report only
+"$PY" -m memory.archive --archive <name>            # per-item move; refuses while inbound links exist
+"$PY" -m memory.archive --archive <name> --force    # move anyway; referrers printed for same-commit rewrite
+```
+
+## Purging a memory (and scrubbing its history)
+
+> [!CAUTION]
+> Purge rewrites git history and cannot be undone. Every collaborator re-clones afterwards,
+> and a leaked credential is rotated whether or not the purge succeeds.
+
+Archive is the *reversible* end of the decay spectrum — a tracked `git mv` you can undo. **Purge
+is the irreversible end**: excise ONE memory and every trace of it while keeping the rest of the
+corpus. Reach for it when a memory was created in error, contains a leaked secret (the SEC-2
+write-time/doctor warning points here), or must be forgotten for privacy. It is distinct from:
+
+- **`/hippo:archive`** — demotes a memory to `.claude/memory/archive/`; the content stays in git
+  history. Not a purge.
+- **`/hippo:remove`** — whole-project offboarding; it deletes the symlink and the derived caches
+  but **refuses to touch `.claude/memory/` files**. Not a purge.
+
+There is no bulk/automated purge command by design (the per-item agent-gate is permanent). Follow
+these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir is
+`<index_dir>` — the gitignored `.hippo/index`, or a tier's own index):
+
+1. **Remove the memory file** and drop its floor pointer.
+   ```bash
+   git rm "<memory_dir>/<name>.md"
+   # then delete the "- [...](<name>.md) — ..." line from <memory_dir>/MEMORY.md, if any
+   ```
+   (For a user/private-tier memory the file and its pointer live in that tier's own dir, e.g.
+   `~/.claude/hippo-memory/` or `.claude/memory.local/` — purge there instead.)
+
+2. **Scrub it from git history.** A `git rm` only removes it going forward; every prior commit
+   still carries the content, and any clone or fork keeps it. Rewrite history with
+   [`git filter-repo`](https://github.com/newren/git-filter-repo) (safer than `filter-branch`):
+   ```bash
+   git filter-repo --path ".claude/memory/<name>.md" --invert-paths --force
+   ```
+   This **rewrites every commit** and changes SHAs — coordinate with collaborators and force-push
+   (`git push --force-with-lease`), then have everyone re-clone. **If the memory held a real
+   secret, rotate the credential regardless** — assume any pushed history was already cloned.
+
+3. **Clear the index rows.** The dense/BM25 index embeds the memory's description *and body
+   chunks*, so its text survives in `manifest.json` and its vectors in the `dense.<id>.npy`
+   matrices until a rebuild. Rebuild it:
+   ```bash
+   "$PY" -m memory.build_index --memory-dir "<memory_dir>" --index-dir "<index_dir>"
+   ```
+   (SessionStart rebuilds automatically too, but run it now to verify immediately. `--force`
+   re-embeds every memory from scratch.) A build keeps the matrices it supersedes for five
+   minutes, for readers still holding the previous manifest, and the first build after that
+   deletes them. To drop them now, delete every `dense.*.npy` in the index dir except the one
+   `manifest.json` names as `dense_file`.
+
+4. **Clear the ledgers.** The telemetry ledgers store recalled memory **names** and truncated
+   query previews (never bodies) in `.hippo/telemetry/`. To erase a purged name, delete
+   or rotate that dir (all derived, rebuildable): `rm -rf .hippo/telemetry`. If the name
+   was published in a committed per-user usage summary (TEA-5), also edit or `git rm`
+   `.claude/memory/.usage/<user>.json` and scrub it from history via step 2.
+
+5. **Clear the pre-migration backups.** Before a citation re-derivation rewrites frontmatter,
+   the snapshot copies the whole corpus (before v1.42.3 every time; since then only when git
+   cannot restore it, as *The pre-migration backup* above describes). Each copy carries its own
+   `<name>.md`, a leaked secret included, and its own `MEMORY.md` with the memory's floor
+   pointer, if it had one. The copies are gitignored, so step 2 never reaches them, and hippo
+   never deletes one by itself. They live in three places:
+   - `<project>/.hippo/snapshots/memory.pre-cite2-*/`: v1.42.5 and later.
+   - `<project>/.hippo-snapshots/`: v1.42.3 and v1.42.4.
+   - `.claude/memory.pre-cite*/`: older. The Claude desktop app copies `.claude/` into every
+     worktree it creates, so each worktree made after one was taken holds its own copy in
+     `.claude/worktrees/*/.claude/`.
+
+   `/hippo:doctor`'s `snapshots` line counts them in all three places, worktree copies
+   included, with their size. To list the ones that hold `<name>.md`, run this `find` from the
+   project root:
+   ```bash
+   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name "<name>.md" 2>/dev/null
+   ```
+   For each backup it names, delete `<name>.md` and any pointer line in that backup's
+   `MEMORY.md`, or, once the backup is spent, delete the backup outright:
+   `rm -r "<backup dir>"`. A backup is spent once the citation derivation is stamped and the
+   re-derivation worklist is empty, which doctor reports for the ones in `.claude/`. Until then
+   it is the migration's undo, so edit it instead. Since v1.42.3 a committed, clean corpus gets
+   a git restore point instead of a copy (MIG-7), and step 2 already scrubs that.
+
+6. **Verify nothing surfaces.** Confirm the memory is gone from the corpus, the backups, the
+   index, and recall:
+   ```bash
+   grep -ri "<distinctive phrase from the memory>" .claude/memory        # -> no hits
+   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name '*.md' \
+     -exec grep -li "<distinctive phrase from the memory>" {} + 2>/dev/null   # -> no hits
+   "$PY" -m memory.recall "<the memory's own topic>"                      # -> does not list <name>
+   ```
+   Following these steps leaves no trace in the corpus, backups, index, ledgers, or recall output.
+   `/hippo:doctor`'s secret check references this procedure in its remediation line.
 
 ## Wikilink graph
 
@@ -466,6 +767,86 @@ write-time warning only, and the commit path reads no memory body) over HEAD -> 
 `floor_lines`, `journals`). Exit 0 / 1 (a budget got worse) / 2 (usage). `--install [--yes]`
 writes a marker-carrying pre-commit hook that runs `--staged`.
 
+## Corpus format versioning (the doctor-driven migration path)
+
+Two version numbers, two very different contracts (COR-7):
+
+- **Index** — `manifest.json` carries `schema_version` (`build_index.SCHEMA_VERSION`).
+  The index is a derived cache, so a mismatch (any plugin update that changes the manifest
+  shape) is **self-healing and needs zero operator action**: every load path treats a
+  mismatched manifest as absent, and the next SessionStart refresh performs one full
+  rebuild stamped with the current version.
+- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
+  (`provenance.CORPUS_FORMAT_VERSION`, currently **5**). It is committed **with** the
+  corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:setup` stamps it
+  when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
+  pre-marker corpus is already on the baseline, nothing to backfill. The marker also
+  carries the corpus's other committed axes — `cite_derivation` (DRV-2) and the
+  `volatile_paths` arming policy (VOL-1, see the staleness section) — all additive keys;
+  every reader pulls only its own, so older plugins ignore the ones they don't know.
+
+  Format history (every bump so far is purely ADDITIVE):
+
+  | Format | Item | Frontmatter may carry |
+  |---|---|---|
+  | v1 | | the pre-versioning baseline |
+  | v2 | GRA-4 | typed relations: `supersedes:`, `contradicts:`, `refines:` lists |
+  | v3 | GOV-2 | `steer: pin`, the author's bounded, always-on recall lift (an unknown `steer` value reads as unsteered, fail-open; MUTE stays gated on the salience keystone) |
+  | v4 | GOV-7 | `confidence: draft\|verified\|authoritative`, rendered at inject and in `/hippo:recall`; load-bearing in ranking since DRM-6 (draft ×0.5 and the draft-only abstention guard; absence reads as the neutral default) |
+  | v5 | DRM-6 | `derives-from:`, the derivation-provenance typed relation (a generated schema names the children it was abstracted from; hand-authored derivations welcome) |
+
+  Each migration is therefore the trivial case of the flow below: no per-memory edits are
+  required. Review that no existing frontmatter uses the new key(s) for something else, then
+  stamp the marker (`write_corpus_format`). Until stamped, an older corpus is read
+  identically; the conventions any teammate authors still work (formats are additive where
+  possible), and the marker just records which conventions the corpus has adopted.
+
+**How a corpus format bump is detected, and what the operator does.** The corpus is the
+git-tracked source of authority, so hippo **never migrates it autonomously** — detection
+is loud, the fix is operator-driven:
+
+1. *Corpus newer than the plugin* (a teammate on newer hippo bumped the format): the
+   `corpus_format` SessionStart producer warns every session, and `/hippo:doctor`'s
+   format check names both versions → **update the hippo plugin**. Nothing else to do.
+2. *Corpus older than the plugin* (a plugin update shipped a format bump): `/hippo:doctor`
+   names both versions and points here. The release notes of the version that bumped
+   `CORPUS_FORMAT_VERSION` carry the migration steps; the operator runs them from doctor —
+   per-item, agent-gated frontmatter/body edits (the audit pattern: review each change,
+   no bulk sweep) — then stamps the marker as the final, explicit step
+   (`memory.provenance.write_corpus_format`). Until migrated, the plugin keeps reading
+   the old format (formats are additive where possible); newer-format features stay off.
+
+## The SessionStart dispatcher
+
+### `session_start.py`
+
+ONE process, ONE corpus load, ONE merged `additionalContext`. Producers, in order:
+`stale_venv` (deps changed since bootstrap → re-bootstrap nudge), `integrity`
+(unparseable frontmatter — surfaced FIRST among corpus signals so a malformed memory
+can't hide), `citation_rot` (cited paths gone from the repo, LIF-3), `staleness`,
+`reconsolidation` (recall-filtered staleness worklist),
+`git_recent`, `link_health`, `floor`. Self-suppresses when no producer has anything to
+say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
+(not producers): heal empty baselines, `refresh_index()`, `mark_session()`.
+
+LIF-1: the `staleness` producer suppresses the per-item lines of entries already
+carrying `invalid_after` (demote's terminal state — recall is already ranking them
+down) but keeps them **counted** in a `(+N already demoted)` tail, so suppression is
+never silent disappearance; once an invalidation ages past recall's 30-day old horizon,
+the same block names it and suggests the archive flow of `/hippo:doctor`'s content audit (report-only).
+VOL-1 extends the same discipline to volatile-path policy suppression: items whose only
+drift is a registry-listed churn file get no per-item line and no worklist entry, but
+the note always renders the count (`(+N … policy-suppressed; see .format
+volatile_paths)` — or one calm ℹ line when *everything* stale is policy-suppressed).
+
+Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
+also owns the **first-run nudge**, emitted before Python is even involved. Venv/sentinel
+missing → "run /hippo:setup": a machine-level line, shown in the first session of each day
+(a day stamp in plugin data) and dismissed machine-wide. A corpus-less repo nested inside
+another corpus → "run /hippo:setup here, or pin HIPPO_CORPUS_ROOT to share it"; an opted-in
+repo with no corpus → "run /hippo:setup here": per-repo lines, shown every session and
+dismissed per repo.
+
 ## Telemetry (three ledgers)
 
 `telemetry.py` writes append-only, size-bounded (rotating), gitignored JSONL ledgers under
@@ -519,235 +900,20 @@ recalled, or floor-scanned (a `.usage` subdir of `.md`-only membership). A plain
 
 still reports without writing anything.
 
-## Reconsolidation (the immune system)
-
-### `reconsolidate.py`
-
-`recalled_stale_worklist(...)` intersects recently-recalled names (the recall ledger,
-last N sessions) with the stale set — memories actively shaping behavior whose cited code
-drifted. Read-only CLI + the `reconsolidation` producer (silent unless non-empty).
-
-When the link graph is buildable (`links.build_graph`, cache-aware), each item also
-carries a `linked` column (GRA-9): up to 3 one-hop neighbors — inbound + outbound
-`[[wikilinks]]` unioned with typed edges, minus names already on the worklist — rendered
-as `X (+2 linked: Y, Z)`. Review-adjacent and **report-only** (zero write paths): when a
-memory drifts, its neighbors are the next most likely to be wrong. No graph → no column;
-the worklist is exactly its pre-GRA-9 self.
-
-LIF-1 closes the re-nag loop — the worklist is **actionable-only**: items whose file
-already carries `invalid_after` (demote's terminal state) are excluded (the staleness
-producer still counts them), and `--snooze <name>` records an explicit per-item ack in
-the reconsolidation ledger that silences an item for the next 5 new sessions, then
-expires (a deferral, not a verdict — only demote is terminal).
-
-```bash
-"$PY" -m memory.reconsolidate
-"$PY" -m memory.reconsolidate --snooze <name>    # ack: skip for 5 sessions, then re-nag
-```
-
-`semantic_reverify(name, outcome, ...)` is the per-item write primitive — `graduate` /
-`fix` route through `reverify_file` (clears the flag), **`demote` does NOT** (a
-confirmed-wrong memory must stay visible to staleness) — instead it **chains
-`set_invalid_after`** onto the memory and refreshes the index (LIF-1), so recall's
-pre-cut penalty demotes it immediately: one command, no separate `--invalidate`.
-Verdicts land in the reconsolidation ledger (demote events carry `invalidated` for
-audit); `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes
-and snoozes excluded by design). No bulk variant exists.
-
-`superseded_by=<successor>` (GRA-4, `demote` only, opt-in): when the agent knows
-WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
-**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving)
-AND stamps the loser's `invalid_after` at the **successor's commit date** (GRW-7 — the
-succession moment becomes an explicit, auditable validity boundary; an uncommitted
-successor falls back to now-UTC), so recall demotes the loser below its successor and
-annotates it. Per-item and agent-gated like everything else here; refused for `graduate`
-AND `fix` (both assert the memory is CURRENT, which contradicts naming a successor) and
-when either memory is missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name>
---outcome demote --superseded-by <successor>`.
-
-## Graceful decay — soft-invalidation + archive
-
-Decay is DEMOTION, never deletion.
-
-- `staleness.set_invalid_after(name)` stamps an additive `invalid_after` frontmatter
-  timestamp: **< 30 days old** → still recallable, fused score halved BEFORE the top-k
-  cut (real demotion — it can fall out of top-k); **≥ 30 days** → dropped from recall
-  display only, still in corpus/index; **cleared** by a genuine `--reverify`. A `demote`
-  verdict chains this automatically (LIF-1) — the manual `--invalidate` remains for
-  judging a memory questionable *without* rendering a reconsolidation verdict.
-- `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
-  stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
-  errors). LIF-4: the report enforces its own trust threshold — until the ≥5-session
-  soak bar is met it returns `[]` with a machine-readable reason
-  (`diagnostics["reason"] = "soak_gate_unmet"`) instead of a maximally-permissive
-  fresh-install list, and would-be candidates younger than the soak window (per git
-  first-seen, not yet exposed to 5 distinct sessions) are excluded and named in the
-  report; `--archive <name>` is a per-item, git-reversible `git mv` into
-  `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
-  automatically; no `--all` exists. GRA-5: the move REFUSES — machine-readable
-  `refused: True` + the `referrers` list in the result, zero filesystem change — while
-  OTHER memories still reference the target (untyped `[[wikilinks]]` unioned with GRA-4
-  typed inbound edges, via the one canonical `LinkGraph.inbound()`/`typed_inbound()`
-  API), unless `--force`; every successful move also reports the referrers so the caller
-  rewrites those links in the same commit (a `supersedes:` edge on the successor memory
-  is the machine-readable forwarding pointer).
-
-```bash
-"$PY" -m memory.staleness --invalidate <name>
-"$PY" -m memory.archive                             # report only
-"$PY" -m memory.archive --archive <name>            # per-item move; refuses while inbound links exist
-"$PY" -m memory.archive --archive <name> --force    # move anyway; referrers printed for same-commit rewrite
-```
-
-## Purging a memory (and scrubbing its history)
-
-Archive is the *reversible* end of the decay spectrum — a tracked `git mv` you can undo. **Purge
-is the irreversible end**: excise ONE memory and every trace of it while keeping the rest of the
-corpus. Reach for it when a memory was created in error, contains a leaked secret (the SEC-2
-write-time/doctor warning points here), or must be forgotten for privacy. It is distinct from:
-
-- **`/hippo:archive`** — demotes a memory to `.claude/memory/archive/`; the content stays in git
-  history. Not a purge.
-- **`/hippo:remove`** — whole-project offboarding; it deletes the symlink and the derived caches
-  but **refuses to touch `.claude/memory/` files**. Not a purge.
-
-There is no bulk/automated purge command by design (the per-item agent-gate is permanent). Follow
-these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir is
-`<index_dir>` — the gitignored `.hippo/index`, or a tier's own index):
-
-1. **Remove the memory file** and drop its floor pointer.
-   ```bash
-   git rm "<memory_dir>/<name>.md"
-   # then delete the "- [...](<name>.md) — ..." line from <memory_dir>/MEMORY.md, if any
-   ```
-   (For a user/private-tier memory the file and its pointer live in that tier's own dir, e.g.
-   `~/.claude/hippo-memory/` or `.claude/memory.local/` — purge there instead.)
-
-2. **Scrub it from git history.** A `git rm` only removes it going forward; every prior commit
-   still carries the content, and any clone or fork keeps it. Rewrite history with
-   [`git filter-repo`](https://github.com/newren/git-filter-repo) (safer than `filter-branch`):
-   ```bash
-   git filter-repo --path ".claude/memory/<name>.md" --invert-paths --force
-   ```
-   This **rewrites every commit** and changes SHAs — coordinate with collaborators and force-push
-   (`git push --force-with-lease`), then have everyone re-clone. **If the memory held a real
-   secret, rotate the credential regardless** — assume any pushed history was already cloned.
-
-3. **Clear the index rows.** The dense/BM25 index embeds the memory's description *and body
-   chunks*, so its text survives in `manifest.json` and its vectors in the `dense.<id>.npy`
-   matrices until a rebuild. Rebuild it:
-   ```bash
-   "$PY" -m memory.build_index --memory-dir "<memory_dir>" --index-dir "<index_dir>"
-   ```
-   (SessionStart rebuilds automatically too, but run it now to verify immediately. `--force`
-   re-embeds every memory from scratch.) A build keeps the matrices it supersedes for five
-   minutes, for readers still holding the previous manifest, and the first build after that
-   deletes them. To drop them now, delete every `dense.*.npy` in the index dir except the one
-   `manifest.json` names as `dense_file`.
-
-4. **Clear the ledgers.** The telemetry ledgers store recalled memory **names** and truncated
-   query previews (never bodies) in `.hippo/telemetry/`. To erase a purged name, delete
-   or rotate that dir (all derived, rebuildable): `rm -rf .hippo/telemetry`. If the name
-   was published in a committed per-user usage summary (TEA-5), also edit or `git rm`
-   `.claude/memory/.usage/<user>.json` and scrub it from history via step 2.
-
-5. **Clear the pre-migration backups.** Before a citation re-derivation rewrites frontmatter,
-   the snapshot copies the whole corpus (before v1.42.3 every time; since then only when git
-   cannot restore it, as *The pre-migration backup* above describes). Each copy carries its own
-   `<name>.md`, a leaked secret included, and its own `MEMORY.md` with the memory's floor
-   pointer, if it had one. The copies are gitignored, so step 2 never reaches them, and hippo
-   never deletes one by itself. They live in three places:
-   - `<project>/.hippo/snapshots/memory.pre-cite2-*/`: v1.42.5 and later.
-   - `<project>/.hippo-snapshots/`: v1.42.3 and v1.42.4.
-   - `.claude/memory.pre-cite*/`: older. The Claude desktop app copies `.claude/` into every
-     worktree it creates, so each worktree made after one was taken holds its own copy in
-     `.claude/worktrees/*/.claude/`.
-
-   `/hippo:doctor`'s `snapshots` line counts them in all three places, worktree copies
-   included, with their size. To list the ones that hold `<name>.md`, run this `find` from the
-   project root:
-   ```bash
-   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name "<name>.md" 2>/dev/null
-   ```
-   For each backup it names, delete `<name>.md` and any pointer line in that backup's
-   `MEMORY.md`, or, once the backup is spent, delete the backup outright:
-   `rm -r "<backup dir>"`. A backup is spent once the citation derivation is stamped and the
-   re-derivation worklist is empty, which doctor reports for the ones in `.claude/`. Until then
-   it is the migration's undo, so edit it instead. Since v1.42.3 a committed, clean corpus gets
-   a git restore point instead of a copy (MIG-7), and step 2 already scrubs that.
-
-6. **Verify nothing surfaces.** Confirm the memory is gone from the corpus, the backups, the
-   index, and recall:
-   ```bash
-   grep -ri "<distinctive phrase from the memory>" .claude/memory        # -> no hits
-   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name '*.md' \
-     -exec grep -li "<distinctive phrase from the memory>" {} + 2>/dev/null   # -> no hits
-   "$PY" -m memory.recall "<the memory's own topic>"                      # -> does not list <name>
-   ```
-   Following these steps leaves no trace in the corpus, backups, index, ledgers, or recall output.
-   `/hippo:doctor`'s secret check references this procedure in its remediation line.
-
 ## Degraded modes (all legible, none fatal)
 
 | State | Behavior |
 |---|---|
-| No bootstrap (bare `python3`) | BM25-only recall via [`_vendor/`](_vendor/__init__.py) (score-identical scorer + frontmatter-subset parser); SessionStart nudges `/hippo:bootstrap` |
+| No bootstrap (bare `python3`) | BM25-only recall via [`_vendor/`](_vendor/__init__.py) (score-identical scorer + frontmatter-subset parser); SessionStart nudges `/hippo:setup` |
 | Model cache cold/wiped | Dense aborts within the wall-clock bound → BM25; the index never downgrades; `/hippo:doctor` flags the cache |
 | Deps changed after update | The `stale_venv` producer nudges a re-bootstrap once per session |
-| No `.claude/memory` corpus | Hooks stay inert: no index, no ledgers, zero files created; SessionStart nudges `/hippo:init` |
-| Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:init` trusts corpora you create; `HIPPO_TRUST_ALL=1` bypasses for CI |
+| No `.claude/memory` corpus | Hooks stay inert: no index, no ledgers, zero files created; SessionStart nudges `/hippo:setup` |
+| Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:setup` trusts corpora you create; `HIPPO_TRUST_ALL=1` bypasses for CI |
+| `high` profile cannot serve | Not Apple Silicon, MLX absent, weights not fetched, a failed load, `high/` still catching up, or warm recall off: recall serves `lean`; doctor's `retrieval_profile` line names which |
 | Unparseable frontmatter | Skipped by staleness AND refused by refresh/reverify; the `integrity` producer names the file loudly |
 
-## Corpus format versioning (the doctor-driven migration path)
-
-Two version numbers, two very different contracts (COR-7):
-
-- **Index** — `manifest.json` carries `schema_version` (`build_index.SCHEMA_VERSION`).
-  The index is a derived cache, so a mismatch (any plugin update that changes the manifest
-  shape) is **self-healing and needs zero operator action**: every load path treats a
-  mismatched manifest as absent, and the next SessionStart refresh performs one full
-  rebuild stamped with the current version.
-- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
-  (`provenance.CORPUS_FORMAT_VERSION`, currently **5**). It is committed **with** the
-  corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
-  when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
-  pre-marker corpus is already on the baseline, nothing to backfill. The marker also
-  carries the corpus's other committed axes — `cite_derivation` (DRV-2) and the
-  `volatile_paths` arming policy (VOL-1, see the staleness section) — all additive keys;
-  every reader pulls only its own, so older plugins ignore the ones they don't know.
-
-  Format history: **v1** = the pre-versioning baseline. **v2** (GRA-4) = frontmatter may
-  carry typed relations (`supersedes:`/`contradicts:`/`refines:` lists). **v3** (GOV-2) =
-  frontmatter may carry `steer: pin` — the author's bounded, always-on recall lift (an
-  unknown/junk `steer` value reads as unsteered, fail-open; MUTE is deliberately NOT part
-  of v3 — it stays gated on the salience keystone). **v4** (GOV-7) = frontmatter may carry
-  `confidence: draft|verified|authoritative` — the author's trust dial, rendered at inject
-  and in `/hippo:recall`; shipped display-only, made LOAD-BEARING in ranking by DRM-6
-  (draft ×0.5 quarantine weight + the draft-only abstention guard; absence still reads as
-  the neutral default). **v5** (DRM-6) = frontmatter may carry `derives-from:` — the
-  derivation-provenance typed relation (a generated schema/hypothesis parent names the
-  children it was abstracted from; hand-authored derivations welcome). All four bumps are
-  purely ADDITIVE, so each migration is the trivial case of the flow
-  below: no per-memory edits are required — review that no existing frontmatter uses the
-  new key(s) for something else, then stamp the marker (`write_corpus_format`). Until
-  stamped, an older corpus is read identically; the conventions any teammate authors still
-  work (formats are additive where possible) — the marker just records which conventions
-  the corpus has adopted.
-
-**How a corpus format bump is detected, and what the operator does.** The corpus is the
-git-tracked source of authority, so hippo **never migrates it autonomously** — detection
-is loud, the fix is operator-driven:
-
-1. *Corpus newer than the plugin* (a teammate on newer hippo bumped the format): the
-   `corpus_format` SessionStart producer warns every session, and `/hippo:doctor`'s
-   format check names both versions → **update the hippo plugin**. Nothing else to do.
-2. *Corpus older than the plugin* (a plugin update shipped a format bump): `/hippo:doctor`
-   names both versions and points here. The release notes of the version that bumped
-   `CORPUS_FORMAT_VERSION` carry the migration steps; the operator runs them from doctor —
-   per-item, agent-gated frontmatter/body edits (the audit pattern: review each change,
-   no bulk sweep) — then stamps the marker as the final, explicit step
-   (`memory.provenance.write_corpus_format`). Until migrated, the plugin keeps reading
-   the old format (formats are additive where possible); newer-format features stay off.
+> [!TIP]
+> `/hippo:doctor` names which of these applies on this machine, with the command that fixes it.
 
 ## Standalone LLM enrichment (opt-in, default OFF)
 
@@ -787,7 +953,7 @@ dream report, the apply digest, the sleep report's dream section, and a shell ca
 
 With the `capture_llm` option (or `HIPPO_CAPTURE_LLM=1`), the SessionEnd/SubagentStop capture
 pass makes ONE bounded small-model call (default 6s, clamped ≤20s of the hooks' 30s budget)
-that annotates the pending seed with SUGGESTIONS the `/hippo:consolidate` reviewer still
+that annotates the pending seed with SUGGESTIONS the `/hippo:tend` reviewer still
 ratifies per item: a likely `type` + kebab name, a drafted one-line description, and
 near-duplicates twice over — the model's own semantic flags PLUS a pre-run of the drain's
 exact calibrated machinery (`new_memory.check_candidate`). Fail-open everywhere: any failure
@@ -810,13 +976,18 @@ merely related?". Conflict verdicts become `kind: "contradicts"` candidates — 
 pre-existing `_ROUTED_KINDS` routing, never admitted by `apply_eligible` (there is no Tier-A
 here: nothing about a contradiction has completion's direct-text evidence) — plus rows in
 the derived `<telemetry>/dream/contradictions.jsonl`. `resolve_view` merges the proposals
-into the SAME `/hippo:resolve` inbox and verdict flow humans already use; supersede/merge/
+into the SAME contradictions inbox in `/hippo:tend` and verdict flow humans already use; supersede/merge/
 declare clear a proposal by read-time subtraction, scope-both ends in the existing
 `--dismiss`. Bounded and thrifty: pool gated at cofire ≥ θ, attempts (calls, not successes)
 capped at 6/pass (hard-max 12), declared/superseded pairs skipped, judged pairs never
 re-billed.
 
 ## Environment overrides
+
+These are the engine's own knobs. [SETTINGS.md](../../SETTINGS.md) is the reference for
+where a setting can live (environment, plugin option, `hippo.json`) and which wins.
+
+### Where things live
 
 - `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests). Used
   as-is: never walked up, never redirected.
@@ -832,6 +1003,11 @@ re-billed.
   git toplevel (SHP-8), and the hooks' corpus guard honors the pin (SHP-10).
 - `HIPPO_INDEX_DIR` — override the index location (default `.hippo/index/`; an older
   hippo's `.claude/.memory-index/` is read in place until SessionStart moves it).
+- `HIPPO_TELEMETRY_DIR` — override the ledger location (default `.hippo/telemetry/`).
+- `FASTEMBED_CACHE_PATH` — model cache override (default `${CLAUDE_PLUGIN_DATA}/fastembed`).
+
+### Recall and the index
+
 - `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
 - `HIPPO_DISABLE=<list>` — turn features off: `dense` (force BM25-only — hermetic tests,
   CI), `jit`, `presence`, `floor-nag`, `abstain-gate`, `touch-fastpath`. The older
@@ -843,13 +1019,33 @@ re-billed.
 - `HIPPO_EMBED_CHUNK_SIZE` — docs per offline embed slice, so a large corpus persists
   partial dense progress across sessions instead of an all-or-nothing attempt (default 64).
 - `HIPPO_RECENT_DAYS` — window for the git-recent producer (default 14).
-- `HIPPO_TELEMETRY_DIR` — override the ledger location (default `.hippo/telemetry/`).
 - `HIPPO_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
+
+### Retrieval profiles and rerank
+
+- `HIPPO_RETRIEVAL_PROFILE` — `floor`, `lean` or `high` for one process, over the saved
+  profile in `${CLAUDE_PLUGIN_DATA}/model.json`.
+- `HIPPO_HIGH_EMBED_MODEL` — the `high` embedder: `Qwen/Qwen3-Embedding-4B` (default) or
+  `Qwen/Qwen3-Embedding-8B`. Set it before the fetch so the right weights come down
+  (`high_embed_model` in `model.json` is the saved form).
+- `HIPPO_HIGH_EMBED_DIM` — a truncated (MRL) width for the `high` space. Not calibrated:
+  doctor warns while it is set.
+- `HIPPO_RERANK=1` — rerank on the per-prompt path (fastembed's MiniLM on `lean`, the warm
+  Qwen3-Reranker-0.6B on `high`). Off by default on every profile.
+- `HIPPO_RERANK_TIMEOUT` — seconds before a rerank gives up and the fused order stands.
+- `HIPPO_SIGNAL_COUNT=0` — turn the count rule off; `HIPPO_COUNT_BAND` / `HIPPO_COUNT_WIDE`
+  override its two numbers.
+- `HIPPO_HOOK_COMPACT=0` — the prompt hook's longer block (full descriptions on every row).
+
+### Trust
+
 - `HIPPO_TRUST_ALL=1` — bypass the SEC-1 foreign-corpus trust gate entirely (CI/automation);
   recall injects from any corpus without requiring a trust marker.
 - `HIPPO_TRUST_FILE` — relocate the machine-local trust registry (default
   `~/.claude/hippo-trust.json`); hermetic tests point it at a tmp path.
-- `FASTEMBED_CACHE_PATH` — model cache override (default `${CLAUDE_PLUGIN_DATA}/fastembed`).
+
+### Standalone LLM enrichment and dream
+
 - `HIPPO_LLM_CONFIG` — relocate the standalone-LLM config file (default
   `~/.claude/hippo-llm.json`); hermetic tests point it at a tmp path. Every knob below ALSO
   has a config-file key (see "Standalone LLM enrichment") — env wins per key.
@@ -883,13 +1079,17 @@ default (`-m "not network"`).
 
 *(An origin-repo lesson, inlined because the wikilink that used to carry it doesn't ship.)*
 
+> [!WARNING]
+> An unpinned fastembed cache lives in a temp dir the OS purges, and a hook can never
+> re-fetch it: dense recall silently becomes BM25-only for good.
+
 With `FASTEMBED_CACHE_PATH` unset, fastembed caches the ~130MB ONNX model under
 `$TMPDIR/fastembed_cache` — on macOS that's `/var/folders/...`, which the OS purges on a
 schedule. The hooks are offline by hard contract (a hook must NEVER download), so once the
 tmp cache is wiped, nothing on the hook path can ever re-fetch the model: dense recall
 silently degrades to BM25 forever, with no error anywhere. That failure mode is why:
 
-- `/hippo:bootstrap` pins the cache to `${CLAUDE_PLUGIN_DATA}/fastembed` (survives plugin
+- `/hippo:setup` pins the cache to `${CLAUDE_PLUGIN_DATA}/fastembed` (survives plugin
   updates AND reboots) via `ensure_fastembed_cache_path()`;
 - both hook scripts export the same precedence **before** Python starts (bash/python
   parity is enforced by test);

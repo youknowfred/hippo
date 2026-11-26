@@ -1,0 +1,58 @@
+<svg viewBox="0 0 880 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="How a prompt is served on the high profile. Both recall hooks fire; one claim file per prompt decides which answers. The spawned hook always serves the lean index with bge-small-en-v1.5. The warm MCP server serves the high index with Qwen3-Embedding-4B once the model is loaded and the high index has caught up, and serves lean until then. Both paths use the same ranking, gate, count rule and budget, with per-space calibration.">
+<style>
+  text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #123F44; }
+  .h { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12.5px; fill: #4A6B6F; }
+  .k { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: #1B7A83; }
+  .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .ms { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #4A6B6F; }
+  .mw { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #A8530A; }
+  .card { fill: #F3FAFB; stroke: #BFE3E6; stroke-width: 1.5; }
+  .panel { fill: #FFFFFF; stroke: #BFE3E6; stroke-width: 1.5; }
+  .solid { fill: #1B7A83; }
+  .on { fill: #FFFFFF; }
+  .arrow { stroke: #1B7A83; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dash { stroke: #66C3CA; stroke-width: 2; fill: none; stroke-dasharray: 5 6; stroke-linecap: round; }
+  .head { fill: #1B7A83; }
+  .track { fill: #E3F1F2; }
+  .bar { fill: #66C3CA; }
+  .best { fill: #1B7A83; }
+</style>
+<rect class="card" x="330" y="16" width="220" height="52" rx="10"/>
+<text class="h" x="440.0" y="38" text-anchor="middle">A prompt arrives</text>
+<text class="s" x="440.0" y="57" text-anchor="middle">two hooks fire in parallel</text>
+<rect class="card" x="300" y="100" width="280" height="58" rx="10"/>
+<text class="h" x="440.0" y="125" text-anchor="middle">One claim file per prompt</text>
+<text class="s" x="440.0" y="144" text-anchor="middle">the first to arrive decides: warm or spawn</text>
+<path class="arrow" d="M440 68 L440.0 89.0"/><path class="head" d="M440 98 L444.5 89.0 L435.5 89.0 Z"/>
+<text class="k" x="40" y="200">SPAWNED HOOK · EVERY PROFILE</text>
+<rect class="card" x="24" y="210" width="300" height="64" rx="10"/>
+<text class="h" x="174.0" y="238" text-anchor="middle">Fresh Python process</text>
+<text class="s" x="174.0" y="257" text-anchor="middle">loads the lean index and model per prompt</text>
+<rect class="card" x="24" y="290" width="300" height="64" rx="10"/>
+<text class="h" x="174.0" y="318" text-anchor="middle">bge-small-en-v1.5</text>
+<text class="s" x="174.0" y="337" text-anchor="middle">384 dimensions · .hippo/index/</text>
+<path class="arrow" d="M300 158 L204.8 180.0"/><path class="head" d="M196 182 L205.8 184.4 L203.8 175.6 Z"/>
+<text class="s" x="232" y="164" text-anchor="middle" font-size="11">spawn</text>
+<path class="arrow" d="M174 274 L174.0 279.0"/><path class="head" d="M174 288 L178.5 279.0 L169.5 279.0 Z"/>
+<text class="k" x="572" y="200">WARM MCP SERVER · HIGH PROFILE</text>
+<rect class="card" x="556" y="210" width="300" height="64" rx="10"/>
+<text class="h" x="706.0" y="238" text-anchor="middle">Model loaded, high/ caught up?</text>
+<text class="s" x="706.0" y="257" text-anchor="middle">a background thread keeps it current</text>
+<rect class="card" x="556" y="290" width="300" height="64" rx="10"/>
+<text class="h" x="706.0" y="318" text-anchor="middle">Qwen3-Embedding-4B</text>
+<text class="s" x="706.0" y="337" text-anchor="middle">2,560 dimensions · .hippo/index/high/</text>
+<path class="arrow" d="M580 158 L675.2 180.0"/><path class="head" d="M684 182 L676.2 175.6 L674.2 184.4 Z"/>
+<text class="s" x="650" y="164" text-anchor="middle" font-size="11">warm</text>
+<path class="arrow" d="M706 274 L706.0 279.0"/><path class="head" d="M706 288 L710.5 279.0 L701.5 279.0 Z"/>
+<text class="s" x="722" y="285" font-size="11">yes</text>
+<path class="dash" d="M556 242 H340 V322 H328"/>
+<path class="head" d="M326 322 L336 316 L336 328 Z"/>
+<text class="s" x="448" y="236" text-anchor="middle" font-size="11">no: serve lean</text>
+<rect class="card" x="240" y="392" width="400" height="64" rx="10"/>
+<text class="h" x="440.0" y="420" text-anchor="middle">Same ranking, gate, count rule and budget</text>
+<text class="s" x="440.0" y="439" text-anchor="middle">each embedding space keeps its own calibration</text>
+<path class="arrow" d="M174 354 L291.3 387.5"/><path class="head" d="M300 390 L292.6 383.2 L290.1 391.9 Z"/>
+<path class="arrow" d="M706 354 L588.7 387.5"/><path class="head" d="M580 390 L589.9 391.9 L587.4 383.2 Z"/>
+<text class="s" x="440" y="486" text-anchor="middle">/hippo:recall and the MCP recall tool on high also rerank the top 30 with Qwen3-Reranker-0.6B.</text>
+</svg>
