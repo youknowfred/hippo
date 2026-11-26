@@ -315,7 +315,7 @@ workstream:
         title: Evidence spine + docs capstone — bench-before-flip made mechanical
         priority: P1
         effort: M
-        status: pending
+        status: built           # 2026-11-25: harness + evidence + docs; four owner calls open (open_for_owner)
         gated_on: [HCR-2, HCR-3, HCR-4, HCR-5]
         problem: >-
           The workstream's law (no flips without evidence) needs an instrument
@@ -333,6 +333,35 @@ workstream:
         acceptance: >-
           One command emits the lean-vs-high evidence file; every HCR default
           flip in this file cites one; docs photograph the ladder end to end.
+        as_built: >-
+          2026-11-25. memory.profile_ab generalizes ab_runner's flag arm to a
+          profile arm (embedding space + its index, reranker, rerank pool depth,
+          held flags); the baseline runs first and last and the report is
+          refused unless the two are byte-identical (lexical-only count
+          included). bench/profile_ab.py is the one command: real models, temp
+          indexes, every arm below, plus model load/resident memory, RSS, index
+          build time and the spawned hook's cold latency. It sets the dense and
+          rerank bounds to 120 s so no arm silently degrades (run 1, at load
+          ~29, did exactly that and is kept in the evidence as contaminated).
+          Docs: README "Retrieval profiles (opt-in)" + a CONCEPTS paragraph.
+        ab_result: >-
+          planning/HCR-6.evidence.2026-11-25.json (run 3; load median 10, so
+          quality is the evidence and latency is load-stamped). 38 rows. lean
+          33/38 MRR 0.569; lean+rerank 33 / 0.619; high 31 / 0.592; high+rerank
+          (the shipped warm default) 31 / 0.573; high+rerank, pool 30: 34 /
+          0.604, the only arm above lean; lean+rerank, pool 30: 33 / 0.630;
+          high+walk 30 / 0.579; explicit 4B rerank 31 / 0.570. MRL width
+          SETTLED: keep native 2560 (1024: 30 / 0.598, 2048: 31 / 0.578 at the
+          same floor). Injection flat (578-597 tokens).
+        open_for_owner: >-
+          (1) high's warm rerank default (ON since HCR-4) LOWERS MRR at HCR-3's
+          0.42 floor (0.592 -> 0.573): keep, or turn it off for high; (2) the
+          deep pool closes high's gap but its median (~1.7-1.9 s under load)
+          misses SERVE_BUDGET_MS: measure smaller pools, or pool only on the
+          explicit surfaces; (3) D2: lean+rerank's quality case holds (+0.050
+          MRR, recall flat) — flip it for lean's warm path or not; (4) per D4
+          the PPR flag retires (still flat-to-worse over high) — a separate
+          removal change.
 
   # Severed / explicitly out of scope (dated at ratification, 2026-11-25):
   #   - TrustGraph platform adoption — standing rejection re-affirmed; ops

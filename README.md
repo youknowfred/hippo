@@ -501,8 +501,22 @@ time limit keeps the order it was given. None of these raises or blocks a prompt
 downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
 
 **Cost.** No money and no network once the weights are on disk. Memory is the cost: each session's
-warm server holds its own copy of the embedder (about 4 GB) and the warm reranker (about 0.6 GB);
-the larger reranker (about 4 GB) loads the first time an explicit recall asks for it.
+warm server holds its own copy of the embedder (4.1 GB of unified memory, measured) and the warm
+reranker (0.6 GB); the larger reranker (4.1 GB) loads the first time an explicit recall asks for
+it. Each loads in about 0.4 to 2 seconds from a warm disk cache, and the first load after a reboot
+takes about 5 seconds for each 4B model.
+
+**What `high` buys, measured.** On hippo's own corpus (108 memories, a 38-question test set of 16
+single-hop and 22 multi-hop questions, top 10), `high` does **not** yet beat `lean` at finding
+the right memory: `lean` finds 33 of 38 and `high` finds 31. What `high` finds, it ranks higher
+(mean reciprocal rank 0.59 against 0.57). The reranker raises `lean`'s ranking (0.62, still 33 of
+38), but on `high` it lowers it slightly (0.57). Reranking the top 30 candidates instead of the
+top 10 lifts `high` to 34 of 38, the best of any setup tried, but hippo does not do that yet: it
+is too slow for the per-prompt budget as measured. Every setup injects about the same amount per
+prompt (roughly 600 tokens). The numbers, the method and the setups not listed here are in
+[planning/HCR-6.evidence.2026-11-25.json](planning/HCR-6.evidence.2026-11-25.json); re-run them on
+your own corpus with `python -m bench.profile_ab` (the command is at the top of
+[bench/profile_ab.py](bench/profile_ab.py)).
 
 **Why not a retrieval platform.** hippo has looked twice at adopting TrustGraph and said no both
 times: it brings a message bus, three databases and a monitoring stack to run, and it moves the
