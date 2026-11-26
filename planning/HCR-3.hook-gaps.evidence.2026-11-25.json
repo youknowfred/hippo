@@ -4924,5 +4924,20 @@
     }
    }
   }
+ },
+ "chosen": {
+  "_COSINE_BY_MODEL": {
+   "Qwen/Qwen3-Embedding-4B": {
+    "strong": 0.6,
+    "support": 0.6
+   }
+  },
+  "was": {
+   "strong": 0.48,
+   "support": 0.46
+  },
+  "ruling": "Owner, 2026-11-25, on replay_injection_gap.gate_threshold_sweep_high (\"Yes, 0.60/0.60\").",
+  "rationale": "The cell 0.6/0.6 against the shipped 0.48/0.46: replay prompts injecting 271 -> 227 (lean 229); explicit and hook-mode hard-set hits and MRR, probe abstention and leaked-probe rows identical on golden, starter packs and the live corpus, with the count entry on. Not known: whether the 44 prompts it stops were wanted (the replay carries no labels).",
+  "not_changed": "The 8B's gate (0.50/0.48) was not swept and is unchanged."
  }
 }
