@@ -620,22 +620,18 @@ _RERANK_TIMEOUT_SECS = 5.0  # override: HIPPO_RERANK_TIMEOUT -- matches DENSE_QU
 #
 # HCR-4: a second backend behind the SAME function. When a Qwen3 reranker is active in the
 # calling context (rerank_mlx.using_reranker — entered only by the warm server's high-profile
-# served call, 0.6B, and by recall_view on the high profile, 4B), the scores come from it
+# served call when HIPPO_RERANK is on, 0.6B, and by recall_view on the high profile, 4B), the scores come from it
 # through MLX instead; same run_bounded bound shape, same degrade-to-fused-order contract,
 # same rule-pointer exclusion and COR-8 reorder-only rule. Outside those contexts nothing
 # here changes (the spawned hook, lean, floor).
 
 
 def _rerank_enabled() -> bool:
-    """True when ``HIPPO_RERANK`` is explicitly truthy — DEFAULT OFF, same falsy-set
-    convention as ``_salience_enabled()``/``_outcome_prior_enabled()``. Unset, it is ON
-    only inside the warm server's high-profile served call (``rerank_mlx.default_on``)."""
+    """True when ``HIPPO_RERANK`` is explicitly truthy — DEFAULT OFF everywhere, the warm
+    server's high profile included, same falsy-set convention as
+    ``_salience_enabled()``/``_outcome_prior_enabled()``."""
     raw = os.environ.get("HIPPO_RERANK", "").strip()
-    if raw == "":
-        from .rerank_mlx import default_on
-
-        return default_on()
-    return raw not in ("0", "false", "False")
+    return raw not in ("", "0", "false", "False")
 
 
 def _rerank_timeout_secs() -> float:

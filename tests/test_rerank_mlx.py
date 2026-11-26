@@ -170,16 +170,17 @@ def test_bounds(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Where it is on
 # --------------------------------------------------------------------------- #
-def test_rerank_defaults_on_only_inside_the_warm_reranker(fake, monkeypatch):
+def test_rerank_is_off_unless_asked_for_even_inside_the_warm_reranker(fake, monkeypatch):
+    """HCR-4 shipped the warm 0.6B ON by default; HCR-6's evidence turned that off."""
     assert RR._rerank_enabled() is False
-    with R.using_reranker(_BIG):
-        assert RR._rerank_enabled() is False  # the explicit surface reranks on its own
+    for model in (_SMALL, _BIG):
+        with R.using_reranker(model):
+            assert RR._rerank_enabled() is False
+    monkeypatch.setenv("HIPPO_RERANK", "1")
     with R.using_reranker(_SMALL):
         assert RR._rerank_enabled() is True
-        monkeypatch.setenv("HIPPO_RERANK", "0")
-        assert RR._rerank_enabled() is False
-    monkeypatch.setenv("HIPPO_RERANK", "1")
-    assert RR._rerank_enabled() is True
+    monkeypatch.setenv("HIPPO_RERANK", "0")
+    assert RR._rerank_enabled() is False
 
 
 @pytest.mark.parametrize("profile", ["lean", "floor"])
@@ -309,8 +310,19 @@ def _wait_loaded(model, timeout=5.0):
     assert R.loaded(model) is not None
 
 
-def test_warm_high_reranks_with_the_06b_once_loaded(fake, warm_project, monkeypatch):
+def test_warm_high_by_default_never_loads_or_scores_a_reranker(fake, warm_project, monkeypatch):
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    _serve("s1", "p1", "zebra service canary deploy lane")
+    _serve("s2", "p2", "zebra service canary deploy lane")
+    assert _FakeQwenReranker.made == [] and _FakeMiniLM.calls == []
+    assert R.status(_SMALL) == {}
+    hb = W.server_states()
+    assert not [r for r in hb if isinstance(r.get("high"), dict) and r["high"].get("rerank")]
+
+
+def test_warm_high_reranks_with_the_06b_once_asked_for_and_loaded(fake, warm_project, monkeypatch):
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
     prompt = "zebra service canary deploy lane"
     _serve("s1", "p1", prompt)  # kicks the background load
     _wait_loaded(_SMALL)
@@ -325,21 +337,25 @@ def test_warm_high_reranks_with_the_06b_once_loaded(fake, warm_project, monkeypa
     assert _FakeMiniLM.calls == []
 
 
-def test_warm_high_with_rerank_turned_off_never_scores(fake, warm_project, monkeypatch):
+def test_warm_high_turned_off_after_loading_stops_scoring(fake, warm_project, monkeypatch):
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
-    monkeypatch.setenv("HIPPO_RERANK", "0")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
     _serve("s1", "p1", "zebra service canary deploy lane")
     _wait_loaded(_SMALL)
+    monkeypatch.setenv("HIPPO_RERANK", "0")
+    before = len(_FakeQwenReranker.made[0].calls)
     _serve("s2", "p2", "zebra service canary deploy lane")
-    assert _FakeQwenReranker.made[0].calls == []
+    assert len(_FakeQwenReranker.made[0].calls) == before
 
 
 def test_warm_high_without_servable_weights_runs_as_before(fake, warm_project, monkeypatch):
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
     monkeypatch.setattr(R, "unavailable_reason", lambda m: "weights not downloaded")
     _serve("s1", "p1", "zebra service canary deploy lane")
     _serve("s2", "p2", "zebra service canary deploy lane")
-    assert _FakeQwenReranker.made == [] and _FakeMiniLM.calls == []
+    assert _FakeQwenReranker.made == []
+    assert _FakeMiniLM.calls  # asked-for rerank with no Qwen weights is the MiniLM, as on lean
     assert R.status(_SMALL)["status"] == "unavailable"
 
 
