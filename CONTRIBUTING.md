@@ -23,7 +23,17 @@ you'd rather skip the ~130 MB model download, you can run the whole suite BM25-o
 
 ## Running the tests
 
-`pytest.ini` sets `pythonpath = plugin`, so run pytest from the repo root:
+`pytest.ini` sets `pythonpath = plugin`, so run pytest from the repo root. **The default is the
+test files your change reaches**, named on the command line:
+
+```bash
+.venv/bin/python -m pytest -p no:cacheprovider tests/test_recall.py tests/test_capture.py
+```
+
+After a change, a rebase or a merge-conflict fix, run the test files that cover what the diff
+touched (and what the rebase brought in), then open the PR; CI runs the whole suite there. The full
+suite takes about 15 minutes locally and is the exception: run it when the maintainer asks for it
+by name, not because the base moved and not "to be safe". Say in the PR which test files you ran.
 
 ```bash
 .venv/bin/python -m pytest                       # full hermetic suite (needs fastembed cached)
@@ -88,7 +98,8 @@ item ([`planning/ROADMAP.yaml`](planning/ROADMAP.yaml) / [`planning/ROADMAP.v1.m
   e.g. `CAP-6: bound the capture pending queue`. A PR bundles related items; each stays its own
   commit. If your change isn't tied to an existing item, describe it plainly — a new id isn't
   required for an outside contribution.
-- **Keep the full suite green after each commit.** `HIPPO_DISABLE=dense pytest` from the root.
+- **Keep the tests each commit reaches green.** Run the test files that cover it (see
+  [Running the tests](#running-the-tests)); the full suite is CI's job on the PR.
 - **Preserve the guiding invariants.** They're listed in `planning/ROADMAP.yaml` (`guiding_invariants`) —
   the load-bearing ones: markdown-in-git is the only source of authority (index/telemetry/graph are
   derived, rebuildable, gitignored caches); hooks always `exit 0` and never download, and no hook blocks unless the corpus's own committed
