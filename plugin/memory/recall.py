@@ -79,11 +79,9 @@ from .recall_graph import (
     _drift_patch,
     _expand_neighbors,
     _expansion_drops,
-    _graph_ppr_enabled,
     _graph_seed_count,
     _invalidation_state,
     _load_hot_edges,
-    _ppr_expand,
     _typed_note,
     _typed_relation_maps,
 )
@@ -888,9 +886,7 @@ def recall(
 
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
         graph_notes: dict = {}  # HOT-9: expanded_before = this session's expansion entries
-        # HCR-5: the PPR lane takes the 1-hop pull's place only when HIPPO_GRAPH_PPR opts in.
-        _graph_lane = _ppr_expand if _graph_ppr_enabled() else _expand_neighbors
-        penalized, graph_injected, graph_endorsed = _graph_lane(
+        penalized, graph_injected, graph_endorsed = _expand_neighbors(
             penalized, entries, edges, superseded_by, draft_indices,
             expanded_before=expanded_before, notes=graph_notes if drop_log is not None else None,
         )

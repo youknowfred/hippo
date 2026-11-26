@@ -1055,7 +1055,6 @@ AB_FLAGS = (
     "HIPPO_DREAM",  # bench.dream_eval — repo checkout only
     "HIPPO_SALIENCE",  # MSR-5 — memory.salience_eval
     "HIPPO_OUTCOME_PRIOR",  # MEA-5 — memory.outcome_prior_eval (the EVD-4 Arm B un-sever)
-    "HIPPO_GRAPH_PPR",  # HCR-5 — memory.graph_ppr_eval (the PPR lane vs the 1-hop pull)
 )
 
 
@@ -1176,7 +1175,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="the typed-2-hop reachability audit — per multi-hop row, the min "
         "hop depth (0/1/2/unreachable) at which each expected stem is reachable from "
         "the row's top-3 seeds over links.json, and the edge kind of the first hop. "
-        "the PPR gate must beat THIS baseline. Pure offline walk; print-only; "
+        "any multi-hop graph mechanism must beat THIS baseline. Pure offline walk; print-only; "
         "skips below the grown n>=10 multi-hop fixture. Authorizes NO hot-path "
         "depth-2 mechanism.",
     )
@@ -1276,11 +1275,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .outcome_prior_eval import main as _outcome_ab_main
 
             return _outcome_ab_main(_ab_forward())
-        if args.ab == "HIPPO_GRAPH_PPR":
-            # HCR-5: the PPR graph lane's rig — measures only; GRA-1 stays the default.
-            from .graph_ppr_eval import main as _graph_ppr_ab_main
-
-            return _graph_ppr_ab_main(_ab_forward())
         # HIPPO_DREAM: the /dream harness needs the repo's committed fixture, so it ships
         # with the benchmark tools in bench/, not with the plugin (the plugin never
         # imports bench/).

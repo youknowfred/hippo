@@ -90,18 +90,18 @@ def test_each_arm_holds_its_flags_and_restores_the_environment(corpus, monkeypat
     real = RC.recall
 
     def spy(*a, **kw):
-        held.append((os.environ.get("HIPPO_RERANK"), os.environ.get("HIPPO_GRAPH_PPR")))
+        held.append((os.environ.get("HIPPO_RERANK"), os.environ.get("HIPPO_GRAPH_SEEDS")))
         return real(*a, **kw)
 
     monkeypatch.setattr(RC, "recall", spy)
     monkeypatch.setenv("HIPPO_RERANK", "kept")
-    monkeypatch.delenv("HIPPO_GRAPH_PPR", raising=False)
-    arms = [P.Arm("lean"), P.Arm("rerank", rerank=True), P.Arm("walk", env=(("HIPPO_GRAPH_PPR", "1"),)),
+    monkeypatch.delenv("HIPPO_GRAPH_SEEDS", raising=False)
+    arms = [P.Arm("lean"), P.Arm("rerank", rerank=True), P.Arm("seeds", env=(("HIPPO_GRAPH_SEEDS", "1"),)),
             P.Arm("deep", rerank=True, pool=99)]
     assert _run(corpus, arms, k=10)["ok"]
     # three recalls an arm: one untimed to wake its models, then the two hard-set rows
     assert held == [("0", None)] * 3 + [("1", None)] * 3 + [("0", "1")] * 3 + [("0", None)] * 6
-    assert os.environ["HIPPO_RERANK"] == "kept" and "HIPPO_GRAPH_PPR" not in os.environ
+    assert os.environ["HIPPO_RERANK"] == "kept" and "HIPPO_GRAPH_SEEDS" not in os.environ
 
 
 def test_a_baseline_that_does_not_repeat_reports_nothing(corpus, monkeypatch):
