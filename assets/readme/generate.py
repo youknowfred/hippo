@@ -294,9 +294,49 @@ def high_serving(t):
                "the same ranking, gate, count rule and budget, with per-space calibration.", "\n".join(b), t)
 
 
+# --------------------------------------------------------------------------- session timeline
+def session_timeline(t):
+    b = []
+    b.append('<text class="k" x="18" y="26">ONE SESSION, AND WHERE HIPPO ACTS</text>')
+    b.append('<text class="s" x="18" y="46">Seven hooks fire on their own; the MCP server answers whenever Claude asks.</text>')
+    hooks = [("SessionStart", "refresh the index,", "one report"),
+             ("UserPromptSubmit", "recall into", "the prompt"),
+             ("Pre/PostToolUse", "floor write gate,", "first-touch reminder"),
+             ("SubagentStop", "capture a seed", "of its work"),
+             ("PreCompact", "save durable", "facts first"),
+             ("SessionEnd", "capture a seed", "for /hippo:tend")]
+    events = ["Session starts", "You send a prompt", "Claude edits files",
+              "A subagent ends", "Context compacts", "Session ends"]
+    b.append('<path class="arrow" d="M18 196 H850"/>')
+    b.append('<path class="head" d="M862 196 L850 190 L850 202 Z"/>')
+    for i, (name, l1, l2) in enumerate(hooks):
+        x = 14 + 140 * i
+        cx = x + 66
+        b.append(f'<rect class="card" x="{x}" y="72" width="132" height="86" rx="10"/>')
+        b.append(f'<text class="h" x="{cx}" y="100" text-anchor="middle" font-size="12">{name}</text>')
+        b.append(f'<text class="s" x="{cx}" y="122" text-anchor="middle" font-size="12">{l1}</text>')
+        b.append(f'<text class="s" x="{cx}" y="139" text-anchor="middle" font-size="12">{l2}</text>')
+        b.append(f'<path class="arrow" d="M{cx} 158 V188"/>')
+        b.append(f'<circle class="solid" cx="{cx}" cy="196" r="6"/>')
+        b.append(f'<text class="h" x="{cx}" y="224" text-anchor="middle" font-size="12.5">{events[i]}</text>')
+    b.append('<rect class="panel" x="18" y="250" width="844" height="96" rx="12"/>')
+    b.append('<text class="k" x="38" y="276">MCP SERVER · ALL SESSION LONG</text>')
+    b.append(f'<text class="m" x="38" y="302">recall · inspect · new_memory · tend · doctor · setup · trust · share · dream · review</text>')
+    b.append('<text class="s" x="38" y="328">Mid-turn questions and subagents. Warm recall answers the prompt hook from here, '
+             'and the high profile&#8217;s Qwen3 models load only here.</text>')
+    return svg(880, 360, "One Claude Code session and where hippo acts. Session starts: SessionStart refreshes the "
+               "index and gives one report. You send a prompt: UserPromptSubmit recalls into the prompt. Claude "
+               "edits files: PreToolUse runs the floor write gate and PostToolUse shows a first-touch reminder. A "
+               "subagent ends: SubagentStop captures a seed. Context compacts: PreCompact nudges to save durable "
+               "facts first. Session ends: SessionEnd captures a seed for /hippo:tend. All session long the MCP "
+               "server answers its ten tools; warm recall and the high profile's Qwen3 models run there.",
+               "\n".join(b), t)
+
+
 for suffix, t in THEMES.items():
     for name, fn in (("recall-flow", recall_flow), ("profiles", profiles), ("profile-bench", bench),
-                     ("engine-map", engine_map), ("high-serving", high_serving)):
+                     ("engine-map", engine_map), ("high-serving", high_serving),
+                     ("session-timeline", session_timeline)):
         with open(os.path.join(OUT, f"{name}{suffix}.svg"), "w", encoding="utf-8") as fh:
             fh.write(fn(t))
 print("wrote", sorted(n for n in os.listdir(OUT) if n.endswith(".svg")))
