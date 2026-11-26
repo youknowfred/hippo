@@ -1,0 +1,3924 @@
+{
+ "item": "HCR-3 (count rule for the high space)",
+ "date": "2026-11-25",
+ "code_ref": "builds on 190ed99 (HCR-3: 4B floor 0.42, gate 0.48/0.46)",
+ "space": "Qwen/Qwen3-Embedding-4B (full width 2560; embed_mlx.space_id)",
+ "weights": "mlx-community/Qwen3-Embedding-4B-mxfp8@c738b4ebab1e09812a7fe6800cf216c7b1ab2bfd",
+ "query_instruction_sha256": "17ef90672a24fb0c75f716bc626b7d8226bd01a4dc82d7c04db6c1a1c1dc8116",
+ "machine": "Apple Silicon (arm64 darwin, 128 GB), Python 3.11, numpy 1.26.4, mlx 0.32.5, mlx-lm 0.32.2 (scratch install, removed after), fastembed bge-small-en-v1.5 for the lean arm",
+ "configured": {
+  "dense_floor": 0.42,
+  "gate": {
+   "strong": 0.48,
+   "support": 0.46
+  },
+  "dense_floor_band": 0.002
+ },
+ "method": "HOT-8's method on the real warm 4B. Each corpus copied to a temp project; lean index built with bge-small, the high twin by the same build_index inside embed_mlx.using_space. band target: eval_floor._top_and_gap (the expected memory's gap under the query's best cosine; p75 is the band the sweep recommends). Hook mode: the real hook body (recall_hook.run_recall, hook=True) per prompt, a fresh session each (no cooldown, no spent budget), inside the high space with the index loader pointed at the high twin, as recall_warm_high.serving does. A hard-set hit is the expected memory on a rendered pointer line of the injected block; served rows are the non-collapsed rows on rendered lines. 'off' is the code as 190ed99 left it (no 4B entry; identical to HIPPO_SIGNAL_COUNT=0). Each grid cell patches one {band, wide} in; 'shipped' reads the committed table entry. Explicit mode (recall() with index + index_dir, k=10) is HCR-3's own acceptance measure, re-run first to validate this rig: it reproduces HCR-3's numbers exactly. No ambient HIPPO_* variables (clean env), user tier off, OPENBLAS_NUM_THREADS=1.",
+ "corpora_note": {
+  "golden": "QUA-6 golden corpus, tests/golden_corpus/ (50 memories, 50 body chunks; hard_set.yaml 18 rows; abstention_set.yaml 6 probes). Public.",
+  "packs": "the CI starter-pack corpus seeded per tests/fixtures/recall_hard_set.yaml's header (22 memories, 65 chunks; that fixture's 32 rows; tests/fixtures/recall_abstention_set.yaml 6 probes). Public.",
+  "hippo": "this repo's own .claude/memory (108 memories, 272 chunks) with its project-local fixtures (38 rows: 16 single-hop + 22 multi-hop; 11 hand-authored off-topic probes). PRIVATE (gitignored): counts and cosines only, no queries or memory names."
+ },
+ "extra_off_topic_probes": "HCR-3's 12 generic + 12 adjacent technical probes, unchanged (listed in planning/HCR-3.evidence.2026-11-25.json)",
+ "replayed_prompts_note": "the 300 newest distinct human prompts of this repo's own episode log, replayed read-only on the live-corpus copy. PRIVATE: counts and histograms only, no prompt text.",
+ "distributions_high": {
+  "golden": {
+   "memories": 50,
+   "body_chunks": 50,
+   "hard_set_rows": 18,
+   "fixture_probes": 6,
+   "on_topic_best_cosine": {
+    "n": 18,
+    "min": 0.6177,
+    "p10": 0.6217,
+    "p25": 0.6883,
+    "p50": 0.7353,
+    "p75": 0.7897,
+    "p90": 0.8329,
+    "max": 0.8349
+   },
+   "expected_memory_gap_under_best": {
+    "n": 18,
+    "min": 0.0,
+    "p10": 0.0,
+    "p25": 0.0,
+    "p50": 0.0,
+    "p75": 0.0,
+    "p90": 0.0,
+    "max": 0.0
+   },
+   "expected_memory_gap_sorted": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "on_topic_margin_over_floor": {
+    "n": 18,
+    "min": 0.1977,
+    "p10": 0.2017,
+    "p25": 0.2683,
+    "p50": 0.3153,
+    "p75": 0.3697,
+    "p90": 0.4129,
+    "max": 0.4149
+   },
+   "on_topic_margin_over_floor_sorted": [
+    0.1977,
+    0.2017,
+    0.2196,
+    0.2442,
+    0.2683,
+    0.2734,
+    0.2939,
+    0.3115,
+    0.3118,
+    0.3153,
+    0.3243,
+    0.3281,
+    0.3375,
+    0.3697,
+    0.3803,
+    0.3921,
+    0.4129,
+    0.4149
+   ],
+   "off_topic_best_cosine_all_probes": {
+    "n": 30,
+    "min": 0.2063,
+    "p10": 0.2463,
+    "p25": 0.2729,
+    "p50": 0.3087,
+    "p75": 0.3394,
+    "p90": 0.406,
+    "max": 0.4545
+   },
+   "off_topic_margin_over_floor_max": 0.0345
+  },
+  "packs": {
+   "memories": 22,
+   "body_chunks": 65,
+   "hard_set_rows": 32,
+   "fixture_probes": 6,
+   "on_topic_best_cosine": {
+    "n": 32,
+    "min": 0.4949,
+    "p10": 0.5178,
+    "p25": 0.5918,
+    "p50": 0.6511,
+    "p75": 0.7128,
+    "p90": 0.7575,
+    "max": 0.7731
+   },
+   "expected_memory_gap_under_best": {
+    "n": 32,
+    "min": 0.0,
+    "p10": 0.0,
+    "p25": 0.0,
+    "p50": 0.0,
+    "p75": 0.0547,
+    "p90": 0.1089,
+    "max": 0.1314
+   },
+   "expected_memory_gap_sorted": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.007,
+    0.0072,
+    0.0465,
+    0.0547,
+    0.0799,
+    0.0854,
+    0.1048,
+    0.1089,
+    0.1114,
+    0.1119,
+    0.1314
+   ],
+   "on_topic_margin_over_floor": {
+    "n": 32,
+    "min": 0.0749,
+    "p10": 0.0978,
+    "p25": 0.1718,
+    "p50": 0.2311,
+    "p75": 0.2928,
+    "p90": 0.3375,
+    "max": 0.3531
+   },
+   "on_topic_margin_over_floor_sorted": [
+    0.0749,
+    0.0767,
+    0.0803,
+    0.0978,
+    0.1166,
+    0.1268,
+    0.143,
+    0.1574,
+    0.1718,
+    0.1895,
+    0.1915,
+    0.204,
+    0.2086,
+    0.2101,
+    0.2198,
+    0.2198,
+    0.2311,
+    0.2412,
+    0.2539,
+    0.2585,
+    0.2705,
+    0.2708,
+    0.2777,
+    0.2921,
+    0.2928,
+    0.308,
+    0.3085,
+    0.3364,
+    0.3375,
+    0.3394,
+    0.3399,
+    0.3531
+   ],
+   "off_topic_best_cosine_all_probes": {
+    "n": 30,
+    "min": 0.1788,
+    "p10": 0.2373,
+    "p25": 0.2615,
+    "p50": 0.289,
+    "p75": 0.3281,
+    "p90": 0.3809,
+    "max": 0.4053
+   },
+   "off_topic_margin_over_floor_max": -0.0147
+  },
+  "hippo": {
+   "memories": 108,
+   "body_chunks": 272,
+   "hard_set_rows": 38,
+   "fixture_probes": 11,
+   "on_topic_best_cosine": {
+    "n": 38,
+    "min": 0.5382,
+    "p10": 0.6004,
+    "p25": 0.6458,
+    "p50": 0.7082,
+    "p75": 0.7298,
+    "p90": 0.753,
+    "max": 0.8062
+   },
+   "expected_memory_gap_under_best": {
+    "n": 38,
+    "min": 0.0,
+    "p10": 0.0,
+    "p25": 0.0,
+    "p50": 0.034,
+    "p75": 0.124,
+    "p90": 0.2401,
+    "max": 0.3148
+   },
+   "expected_memory_gap_sorted": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0288,
+    0.034,
+    0.038,
+    0.0467,
+    0.071,
+    0.0738,
+    0.0779,
+    0.0999,
+    0.1017,
+    0.1137,
+    0.124,
+    0.1262,
+    0.1349,
+    0.1482,
+    0.1908,
+    0.2254,
+    0.2401,
+    0.2532,
+    0.2801,
+    0.3148
+   ],
+   "on_topic_margin_over_floor": {
+    "n": 38,
+    "min": 0.1182,
+    "p10": 0.1804,
+    "p25": 0.2258,
+    "p50": 0.2882,
+    "p75": 0.3098,
+    "p90": 0.3331,
+    "max": 0.3862
+   },
+   "on_topic_margin_over_floor_sorted": [
+    0.1182,
+    0.1447,
+    0.1739,
+    0.1804,
+    0.2036,
+    0.2077,
+    0.214,
+    0.2165,
+    0.221,
+    0.2258,
+    0.2265,
+    0.2316,
+    0.2427,
+    0.2553,
+    0.2556,
+    0.2707,
+    0.2746,
+    0.2784,
+    0.2849,
+    0.2882,
+    0.2932,
+    0.2934,
+    0.2996,
+    0.3033,
+    0.3035,
+    0.3041,
+    0.3069,
+    0.3083,
+    0.3098,
+    0.3102,
+    0.3173,
+    0.3259,
+    0.3261,
+    0.333,
+    0.3331,
+    0.3458,
+    0.3474,
+    0.3862
+   ],
+   "off_topic_best_cosine_all_probes": {
+    "n": 35,
+    "min": 0.194,
+    "p10": 0.2638,
+    "p25": 0.286,
+    "p50": 0.3304,
+    "p75": 0.3677,
+    "p90": 0.3986,
+    "max": 0.4515
+   },
+   "off_topic_margin_over_floor_max": 0.0315
+  }
+ },
+ "pooled_high": {
+  "expected_memory_gap_under_best": {
+   "n": 88,
+   "min": 0.0,
+   "p10": 0.0,
+   "p25": 0.0,
+   "p50": 0.0,
+   "p75": 0.0738,
+   "p90": 0.1314,
+   "max": 0.3148
+  },
+  "on_topic_margin_over_floor": {
+   "n": 88,
+   "min": 0.0749,
+   "p10": 0.1447,
+   "p25": 0.214,
+   "p50": 0.2746,
+   "p75": 0.3153,
+   "p90": 0.3458,
+   "max": 0.4149
+  }
+ },
+ "rig_validation_explicit_mode": {
+  "golden": {
+   "lean": {
+    "hard_set_hits": "18/18",
+    "mrr@10": 0.9093,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    }
+   },
+   "high": {
+    "hard_set_hits": "18/18",
+    "mrr@10": 0.9583,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    }
+   }
+  },
+  "packs": {
+   "lean": {
+    "hard_set_hits": "32/32",
+    "mrr@10": 0.7068,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "11/12",
+     "adjacent": "11/12"
+    }
+   },
+   "high": {
+    "hard_set_hits": "32/32",
+    "mrr@10": 0.8085,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    }
+   }
+  },
+  "hippo": {
+   "lean": {
+    "hard_set_hits": "33/38",
+    "mrr@10": 0.5689,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "11/12"
+    }
+   },
+   "high": {
+    "hard_set_hits": "31/38",
+    "mrr@10": 0.5921,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "8/12"
+    }
+   }
+  }
+ },
+ "grid_hook_mode_high": {
+  "note": "label is band/wide; every cell is hook mode on the high arm. First grid without the replay, second with it (live corpus only).",
+  "coarse": {
+   "off": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 0,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 0,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 0,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 75
+    }
+   },
+   "0.02/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.02/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.42,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.02/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.11,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.02/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.32,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.02/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.24,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.02/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.18,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.42,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.13,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.34,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.26,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.03/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.21,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 22
+    }
+   },
+   "0.04/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.04/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.42,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.04/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.13,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.04/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.42,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.04/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.37,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.04/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.32,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 26
+    }
+   },
+   "0.05/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.05/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.5,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.05/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.24,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.05/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.53,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.05/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.5,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.05/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.47,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.5,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.24,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.53,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.5,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.06/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.47,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 29
+    }
+   },
+   "0.074/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.074/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.5,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.074/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.26,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.074/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.58,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.074/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.55,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.074/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.53,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 35
+    }
+   },
+   "0.08/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.5,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.08/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.5,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.08/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.03,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.26,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.08/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.38,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.55,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.08/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.34,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.53,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.08/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 3.94,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 1,
+     "mrr": 0.5148,
+     "served_rows_mean": 6.5,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 36
+    }
+   },
+   "0.1/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.53,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.1/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.34,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.1/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.09,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.32,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.1/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.44,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.63,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.1/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 4.41,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.61,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.1/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "28/32",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7682,
+     "served_rows_mean": 4.0,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "23/38",
+     "rows_lost_vs_off": 3,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5095,
+     "served_rows_mean": 6.58,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.56,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.38,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 5.12,
+     "served_rows_median": 5,
+     "wide_prompts": 23,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.32,
+     "served_rows_median": 10,
+     "wide_prompts": 34,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 15,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 4.47,
+     "served_rows_median": 5,
+     "wide_prompts": 16,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 8.63,
+     "served_rows_median": 10,
+     "wide_prompts": 29,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.26": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.33,
+     "served_rows_median": 4,
+     "wide_prompts": 14,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 4.44,
+     "served_rows_median": 5,
+     "wide_prompts": 12,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "25/38",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5194,
+     "served_rows_mean": 7.61,
+     "served_rows_median": 10,
+     "wide_prompts": 22,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   },
+   "0.12/0.3": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.28,
+     "served_rows_median": 4,
+     "wide_prompts": 11,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7771,
+     "served_rows_mean": 4.03,
+     "served_rows_median": 5,
+     "wide_prompts": 6,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "24/38",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5183,
+     "served_rows_mean": 6.58,
+     "served_rows_median": 5,
+     "wide_prompts": 14,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38
+    }
+   }
+  },
+  "fine": {
+   "off": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 0,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 0,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 0,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 75,
+     "replay_rows_mean": 9.41,
+     "replay_rows_median": 10,
+     "replay_wide": 0
+    }
+   },
+   "0.1/0.06": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 32,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 9.26,
+     "replay_rows_median": 10,
+     "replay_wide": 258
+    }
+   },
+   "0.1/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.53,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.81,
+     "replay_rows_median": 10,
+     "replay_wide": 228
+    }
+   },
+   "0.1/0.12": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.38,
+     "served_rows_median": 5,
+     "wide_prompts": 27,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.66,
+     "served_rows_median": 10,
+     "wide_prompts": 37,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.4,
+     "replay_rows_median": 10,
+     "replay_wide": 206
+    }
+   },
+   "0.1/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7747,
+     "served_rows_mean": 5.34,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.03,
+     "replay_rows_median": 10,
+     "replay_wide": 183
+    }
+   },
+   "0.1/0.15": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7695,
+     "served_rows_mean": 5.28,
+     "served_rows_median": 5,
+     "wide_prompts": 25,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.87,
+     "replay_rows_median": 10,
+     "replay_wide": 174
+    }
+   },
+   "0.1/0.16": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.16,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.51,
+     "replay_rows_median": 10,
+     "replay_wide": 154
+    }
+   },
+   "0.1/0.17": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7734,
+     "served_rows_mean": 5.16,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.23,
+     "replay_rows_median": 8,
+     "replay_wide": 139
+    }
+   },
+   "0.12/0.06": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 32,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 9.26,
+     "replay_rows_median": 10,
+     "replay_wide": 258
+    }
+   },
+   "0.12/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.56,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.81,
+     "replay_rows_median": 10,
+     "replay_wide": 228
+    }
+   },
+   "0.12/0.12": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.41,
+     "served_rows_median": 5,
+     "wide_prompts": 27,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.66,
+     "served_rows_median": 10,
+     "wide_prompts": 37,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.43,
+     "replay_rows_median": 10,
+     "replay_wide": 206
+    }
+   },
+   "0.12/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.38,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.06,
+     "replay_rows_median": 10,
+     "replay_wide": 183
+    }
+   },
+   "0.12/0.15": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7799,
+     "served_rows_mean": 5.31,
+     "served_rows_median": 5,
+     "wide_prompts": 25,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.91,
+     "replay_rows_median": 10,
+     "replay_wide": 174
+    }
+   },
+   "0.12/0.16": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.57,
+     "replay_rows_median": 10,
+     "replay_wide": 154
+    }
+   },
+   "0.12/0.17": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.3,
+     "replay_rows_median": 8,
+     "replay_wide": 139
+    }
+   },
+   "0.124/0.06": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 32,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 9.26,
+     "replay_rows_median": 10,
+     "replay_wide": 258
+    }
+   },
+   "0.124/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.56,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.81,
+     "replay_rows_median": 10,
+     "replay_wide": 228
+    }
+   },
+   "0.124/0.12": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.41,
+     "served_rows_median": 5,
+     "wide_prompts": 27,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.66,
+     "served_rows_median": 10,
+     "wide_prompts": 37,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.43,
+     "replay_rows_median": 10,
+     "replay_wide": 206
+    }
+   },
+   "0.124/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.38,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.07,
+     "replay_rows_median": 10,
+     "replay_wide": 183
+    }
+   },
+   "0.124/0.15": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7799,
+     "served_rows_mean": 5.31,
+     "served_rows_median": 5,
+     "wide_prompts": 25,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.91,
+     "replay_rows_median": 10,
+     "replay_wide": 174
+    }
+   },
+   "0.124/0.16": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.57,
+     "replay_rows_median": 10,
+     "replay_wide": 154
+    }
+   },
+   "0.124/0.17": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 1
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7823,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.45,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.31,
+     "replay_rows_median": 8,
+     "replay_wide": 139
+    }
+   },
+   "0.14/0.06": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7826,
+     "served_rows_mean": 5.59,
+     "served_rows_median": 5,
+     "wide_prompts": 32,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 9.26,
+     "replay_rows_median": 10,
+     "replay_wide": 258
+    }
+   },
+   "0.14/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.56,
+     "served_rows_median": 5,
+     "wide_prompts": 28,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.79,
+     "served_rows_median": 10,
+     "wide_prompts": 38,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.84,
+     "replay_rows_median": 10,
+     "replay_wide": 228
+    }
+   },
+   "0.14/0.12": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.41,
+     "served_rows_median": 5,
+     "wide_prompts": 27,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.66,
+     "served_rows_median": 10,
+     "wide_prompts": 37,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.46,
+     "replay_rows_median": 10,
+     "replay_wide": 206
+    }
+   },
+   "0.14/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7852,
+     "served_rows_mean": 5.38,
+     "served_rows_median": 5,
+     "wide_prompts": 26,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.53,
+     "served_rows_median": 10,
+     "wide_prompts": 36,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 8.09,
+     "replay_rows_median": 10,
+     "replay_wide": 183
+    }
+   },
+   "0.14/0.15": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7799,
+     "served_rows_mean": 5.31,
+     "served_rows_median": 5,
+     "wide_prompts": 25,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.47,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.95,
+     "replay_rows_median": 10,
+     "replay_wide": 174
+    }
+   },
+   "0.14/0.16": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.776,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.47,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.61,
+     "replay_rows_median": 10,
+     "replay_wide": 154
+    }
+   },
+   "0.14/0.17": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.9583,
+     "served_rows_mean": 4.5,
+     "served_rows_median": 4,
+     "wide_prompts": 18,
+     "abstained_fixture": "5/6",
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "29/32",
+     "rows_lost_vs_off": 2,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.776,
+     "served_rows_mean": 5.19,
+     "served_rows_median": 5,
+     "wide_prompts": 24,
+     "abstained_fixture": "6/6",
+     "rows_on_leaked_off_topic_probes": 0
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.5238,
+     "served_rows_mean": 9.47,
+     "served_rows_median": 10,
+     "wide_prompts": 35,
+     "abstained_fixture": "7/11",
+     "rows_on_leaked_off_topic_probes": 38,
+     "replay_rows_mean": 7.34,
+     "replay_rows_median": 8,
+     "replay_wide": 139
+    }
+   }
+  }
+ },
+ "shipped_vs_off_hook_mode_high": {
+  "off": {
+   "golden": {
+    "hard_set_hits": "18/18",
+    "recall": 1.0,
+    "mrr": 0.9583,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 18,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 4,
+     "mean": 4.5,
+     "hist": {
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 6,
+      "6": 2,
+      "7": 2,
+      "8": 1,
+      "9": 1
+     }
+    },
+    "chars_per_injecting_prompt_mean": 838,
+    "rows_on_leaked_off_topic_probes": 2,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0
+   },
+   "packs": {
+    "hard_set_hits": "31/32",
+    "recall": 0.9688,
+    "mrr": 0.7826,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 32,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 5,
+     "mean": 5.59,
+     "hist": {
+      "1": 4,
+      "2": 1,
+      "3": 1,
+      "4": 6,
+      "5": 5,
+      "6": 2,
+      "7": 4,
+      "8": 2,
+      "9": 5,
+      "10": 2
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1129,
+    "rows_on_leaked_off_topic_probes": 0,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0
+   },
+   "hippo": {
+    "hard_set_hits": "26/38",
+    "recall": 0.6842,
+    "mrr": 0.5238,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "8/12"
+    },
+    "injecting_prompts": 38,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 10,
+     "mean": 9.79,
+     "hist": {
+      "7": 1,
+      "9": 5,
+      "10": 32
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1607,
+    "rows_on_leaked_off_topic_probes": 75,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0,
+    "replayed_prompts": {
+     "prompts": 300,
+     "injecting": 269,
+     "wide": 0,
+     "rows_total": 2530,
+     "rows_median": 10,
+     "rows_mean": 9.41,
+     "hist": {
+      "2": 2,
+      "3": 2,
+      "4": 1,
+      "5": 2,
+      "6": 5,
+      "7": 12,
+      "8": 13,
+      "9": 32,
+      "10": 200
+     },
+     "chars_mean": 1575,
+     "prompts_that_stopped_injecting": 0
+    }
+   }
+  },
+  "shipped": {
+   "golden": {
+    "hard_set_hits": "18/18",
+    "recall": 1.0,
+    "mrr": 0.9583,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 18,
+    "wide_prompts": 18,
+    "served_rows_per_injecting_prompt": {
+     "median": 4,
+     "mean": 4.5,
+     "hist": {
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 6,
+      "6": 2,
+      "7": 2,
+      "8": 1,
+      "9": 1
+     }
+    },
+    "chars_per_injecting_prompt_mean": 838,
+    "rows_on_leaked_off_topic_probes": 1,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0
+   },
+   "packs": {
+    "hard_set_hits": "31/32",
+    "recall": 0.9688,
+    "mrr": 0.7852,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 32,
+    "wide_prompts": 26,
+    "served_rows_per_injecting_prompt": {
+     "median": 5,
+     "mean": 5.38,
+     "hist": {
+      "1": 4,
+      "2": 1,
+      "3": 3,
+      "4": 4,
+      "5": 6,
+      "6": 2,
+      "7": 4,
+      "8": 2,
+      "9": 5,
+      "10": 1
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1090,
+    "rows_on_leaked_off_topic_probes": 0,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0
+   },
+   "hippo": {
+    "hard_set_hits": "26/38",
+    "recall": 0.6842,
+    "mrr": 0.5238,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "8/12"
+    },
+    "injecting_prompts": 38,
+    "wide_prompts": 36,
+    "served_rows_per_injecting_prompt": {
+     "median": 10,
+     "mean": 9.53,
+     "hist": {
+      "5": 2,
+      "7": 1,
+      "9": 5,
+      "10": 30
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1572,
+    "rows_on_leaked_off_topic_probes": 38,
+    "rows_lost_vs_off": 0,
+    "rows_gained_vs_off": 0,
+    "replayed_prompts": {
+     "prompts": 300,
+     "injecting": 269,
+     "wide": 183,
+     "rows_total": 2169,
+     "rows_median": 10,
+     "rows_mean": 8.06,
+     "hist": {
+      "1": 1,
+      "2": 3,
+      "3": 6,
+      "4": 9,
+      "5": 70,
+      "6": 1,
+      "7": 4,
+      "8": 8,
+      "9": 10,
+      "10": 157
+     },
+     "chars_mean": 1397,
+     "prompts_that_stopped_injecting": 0
+    }
+   }
+  }
+ },
+ "lean_reference_hook_mode": {
+  "note": "bge-small with its own entry (band 0.05, wide 0.18) on and off, same corpora, same hook measure",
+  "on": {
+   "golden": {
+    "hard_set_hits": "18/18",
+    "recall": 1.0,
+    "mrr": 0.912,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 18,
+    "wide_prompts": 10,
+    "served_rows_per_injecting_prompt": {
+     "median": 5,
+     "mean": 5.67,
+     "hist": {
+      "2": 1,
+      "4": 2,
+      "5": 8,
+      "6": 2,
+      "8": 5
+     }
+    },
+    "chars_per_injecting_prompt_mean": 928,
+    "rows_on_leaked_off_topic_probes": 2
+   },
+   "packs": {
+    "hard_set_hits": "24/32",
+    "recall": 0.75,
+    "mrr": 0.6458,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "11/12",
+     "adjacent": "11/12"
+    },
+    "injecting_prompts": 32,
+    "wide_prompts": 10,
+    "served_rows_per_injecting_prompt": {
+     "median": 5,
+     "mean": 4.88,
+     "hist": {
+      "1": 3,
+      "3": 4,
+      "4": 9,
+      "5": 10,
+      "8": 1,
+      "9": 3,
+      "10": 2
+     }
+    },
+    "chars_per_injecting_prompt_mean": 956,
+    "rows_on_leaked_off_topic_probes": 5
+   },
+   "hippo": {
+    "hard_set_hits": "26/38",
+    "recall": 0.6842,
+    "mrr": 0.476,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "10/12"
+    },
+    "injecting_prompts": 38,
+    "wide_prompts": 25,
+    "served_rows_per_injecting_prompt": {
+     "median": 10,
+     "mean": 8.26,
+     "hist": {
+      "4": 1,
+      "5": 12,
+      "10": 25
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1389,
+    "rows_on_leaked_off_topic_probes": 23,
+    "replayed_prompts": {
+     "prompts": 300,
+     "injecting": 227,
+     "wide": 36,
+     "rows_total": 1188,
+     "rows_median": 5,
+     "rows_mean": 5.23,
+     "hist": {
+      "1": 5,
+      "2": 15,
+      "3": 17,
+      "4": 21,
+      "5": 134,
+      "8": 1,
+      "10": 34
+     },
+     "chars_mean": 1021
+    }
+   }
+  },
+  "off": {
+   "golden": {
+    "hard_set_hits": "18/18",
+    "recall": 1.0,
+    "mrr": 0.912,
+    "abstained": {
+     "fixture": "5/6",
+     "generic": "12/12",
+     "adjacent": "12/12"
+    },
+    "injecting_prompts": 18,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 7,
+     "mean": 6.83,
+     "hist": {
+      "2": 1,
+      "4": 1,
+      "5": 1,
+      "6": 4,
+      "7": 4,
+      "8": 5,
+      "10": 2
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1121,
+    "rows_on_leaked_off_topic_probes": 2
+   },
+   "packs": {
+    "hard_set_hits": "29/32",
+    "recall": 0.9062,
+    "mrr": 0.6641,
+    "abstained": {
+     "fixture": "6/6",
+     "generic": "11/12",
+     "adjacent": "11/12"
+    },
+    "injecting_prompts": 32,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 8,
+     "mean": 6.59,
+     "hist": {
+      "1": 2,
+      "2": 1,
+      "3": 1,
+      "4": 6,
+      "5": 4,
+      "6": 1,
+      "7": 1,
+      "8": 4,
+      "9": 5,
+      "10": 7
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1219,
+    "rows_on_leaked_off_topic_probes": 11
+   },
+   "hippo": {
+    "hard_set_hits": "26/38",
+    "recall": 0.6842,
+    "mrr": 0.4673,
+    "abstained": {
+     "fixture": "7/11",
+     "generic": "10/12",
+     "adjacent": "10/12"
+    },
+    "injecting_prompts": 38,
+    "wide_prompts": 0,
+    "served_rows_per_injecting_prompt": {
+     "median": 10,
+     "mean": 9.95,
+     "hist": {
+      "8": 1,
+      "10": 37
+     }
+    },
+    "chars_per_injecting_prompt_mean": 1592,
+    "rows_on_leaked_off_topic_probes": 69,
+    "replayed_prompts": {
+     "prompts": 300,
+     "injecting": 227,
+     "wide": 0,
+     "rows_total": 2197,
+     "rows_median": 10,
+     "rows_mean": 9.68,
+     "hist": {
+      "2": 2,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 2,
+      "8": 6,
+      "9": 24,
+      "10": 190
+     },
+     "chars_mean": 1575
+    }
+   }
+  }
+ },
+ "chosen": {
+  "_COUNT_BY_MODEL": {
+   "Qwen/Qwen3-Embedding-4B": {
+    "band": 0.12,
+    "wide": 0.14
+   }
+  }
+ },
+ "rationale": {
+  "rule": "add the entry only if it costs no hard-set row on any of the three corpora",
+  "band": "p75 of the expected-memory gap is 0.0 (golden), 0.0547 (packs), 0.124 (live). 0.12 is the live corpus's, the largest; doctor's band check allows 0.01 under the sweep's number. Every band under 0.12 cut one expected starter-pack row at every wide tried, including 0.10.",
+  "wide": "0.14 is the largest margin over the 0.42 floor that cut no row (0.15 cut one starter-pack row; 0.22 one live row; 0.30 two to three on each). On-topic best cosines sit a median 0.27 over the floor (p10 0.145, min 0.075); every off-topic best is at most 0.035 over it. So the narrow rule applies to the weakest tenth of on-topic prompts and to anything that leaks.",
+  "not_chosen": "wide 0.30 brings the live hard set's median to 5 rows (lean's reading) but costs 2 rows on packs and 2 on the live corpus at band 0.12; refused by the rule above."
+ },
+ "findings": [
+  "Hard sets, hook mode, high: 18/18, 31/32, 26/38 with the entry and without it; no row lost, none gained. MRR 0.9583 = 0.9583, 0.7852 vs 0.7826, 0.5238 = 0.5238.",
+  "Abstention unchanged on all three corpora and all three probe sets (the rule never empties an admitted prompt).",
+  "Rows served on off-topic probes that leak on the live corpus: 75 -> 38 over the 10 leaking probes (7.5 -> 3.8 per leak). Golden 2 -> 1. Packs leak none.",
+  "Rows per injecting prompt on the hard sets (on-topic prompts): golden 4.50 = 4.50, packs 5.59 -> 5.38, live 9.79 -> 9.53. Medians unchanged (4, 5, 10).",
+  "300 replayed prompts on the live corpus, high: 269 inject either way; rows per injecting prompt 9.41 -> 8.06 (2,530 -> 2,169 rows, -14%), chars 1,575 -> 1,397; the median stays 10. 183 of the 269 clear the floor by 0.14 and are served as before.",
+  "Lean on the same replay: 227 inject; 9.68 -> 5.23 rows, median 10 -> 5, chars 1,575 -> 1,021. High injects on 42 more of the 300 prompts than lean and, with a no-row-lost entry, serves more rows on each.",
+  "Lean's own entry under this hook measure: golden 18/18 = 18/18, live 26/38 = 26/38, starter packs 29/32 off -> 24/32 on. Recorded, not changed here.",
+  "Hook mode reads lower than explicit mode on the live corpus for both arms (high 26/38 vs 31/38; lean 26/38 vs 33/38): the hook's lanes, render budget and floor collapse, with the count rule on or off."
+ ],
+ "not_calibrated": {
+  "Qwen/Qwen3-Embedding-8B": "weights not fetched; no floor, gate or count entry. Doctor names it.",
+  "MRL-truncated spaces (model@dim)": "different cosine spaces; a width needs its own run once HCR-6's bench picks one. Doctor names it."
+ }
+}

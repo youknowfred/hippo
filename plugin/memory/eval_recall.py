@@ -1328,12 +1328,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.floor_sweep:
         ambient = args.memory_dir is None
+        sets = (args.hard_set or (_default_hard_set_path() if ambient else None),
+                args.abstention_set or (_default_abstention_set_path() if ambient else None))
         doc = _lazy("floor_sweep")(
             memory_dir=args.memory_dir,
             index_dir=args.index_dir,
-            hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
-            abstention_set_path=args.abstention_set
-            or (_default_abstention_set_path() if ambient else None),
+            hard_set_path=sets[0],
+            abstention_set_path=sets[1],
             telemetry_dir=args.telemetry_dir,
         )
         if not doc.get("ok"):
@@ -1358,6 +1359,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "  advisory only — edit recall._DENSE_FLOOR_BY_MODEL (or set "
             "HIPPO_DENSE_FLOOR) yourself; nothing auto-writes (closed by this sweep)"
         )
+        from . import eval_floor as _ef  # HCR-3: the same sweep in the high space, on high only
+
+        high = _ef.high_floor_sweep(args.memory_dir, args.index_dir, *sets, telemetry_dir=args.telemetry_dir)
+        print("\n".join(_ef.high_sweep_lines(high)), end="\n" if high else "")
         return 0
 
     if args.draft_forgetting:

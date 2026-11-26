@@ -14,7 +14,7 @@ import os
 import numpy as np
 import pytest
 
-from memory import embed_mlx, recall_abstain
+from memory import embed_mlx, recall_abstain, recall_count
 from memory import recall_rank as rr
 from memory.build_index import LoadedIndex, bm25_terms, compute_bm25_stats
 from memory.recall_query import tokenize
@@ -22,12 +22,16 @@ from memory.recall_query import tokenize
 _EVIDENCE = os.path.join(
     os.path.dirname(__file__), "..", "planning", "HCR-3.evidence.2026-11-25.json"
 )
+_COUNT_EVIDENCE = os.path.join(
+    os.path.dirname(__file__), "..", "planning", "HCR-3.count.evidence.2026-11-25.json"
+)
 FOUR_B = embed_mlx.space_id(embed_mlx.DEFAULT_HIGH_MODEL)
 
 
 @pytest.fixture(autouse=True)
 def _no_overrides(monkeypatch):
-    for var in ("HIPPO_DENSE_FLOOR", "HIPPO_DENSE_FLOOR_BAND", "HIPPO_DISABLE_ABSTAIN_GATE", "HIPPO_DISABLE"):
+    for var in ("HIPPO_DENSE_FLOOR", "HIPPO_DENSE_FLOOR_BAND", "HIPPO_DISABLE_ABSTAIN_GATE", "HIPPO_DISABLE",
+                "HIPPO_COUNT_BAND", "HIPPO_COUNT_WIDE", "HIPPO_SIGNAL_COUNT"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -64,6 +68,39 @@ def test_spaces_the_evidence_did_not_measure_stay_uncalibrated(space):
     assert space not in rr._DENSE_FLOOR_BY_MODEL
     assert rr._dense_floor(space) == rr._DENSE_FLOOR_DEFAULT
     assert recall_abstain._thresholds(space) is None
+    assert recall_count.thresholds(space) is None
+
+
+def test_the_count_entry_matches_its_dated_evidence_and_cost_no_hard_set_row():
+    with open(_COUNT_EVIDENCE, encoding="utf-8") as fh:
+        ev = json.load(fh)
+    assert recall_count._COUNT_BY_MODEL[FOUR_B] == ev["chosen"]["_COUNT_BY_MODEL"][FOUR_B]
+    assert recall_count.thresholds(FOUR_B) == {"band": 0.12, "wide": 0.14}
+    # measured against the floor and gate this file's other tests pin
+    assert ev["configured"]["dense_floor"] == rr._DENSE_FLOOR_BY_MODEL[FOUR_B]
+    assert ev["configured"]["gate"] == recall_abstain._COSINE_BY_MODEL[FOUR_B]
+    # the rule the entry was admitted under: no hard-set row lost on any corpus, abstention equal
+    runs = ev["shipped_vs_off_hook_mode_high"]
+    assert set(runs["shipped"]) == {"golden", "packs", "hippo"}
+    for corpus, on in runs["shipped"].items():
+        off = runs["off"][corpus]
+        assert on["rows_lost_vs_off"] == 0, corpus
+        assert on["hard_set_hits"] == off["hard_set_hits"] and on["abstained"] == off["abstained"]
+        assert on["served_rows_per_injecting_prompt"]["mean"] <= off["served_rows_per_injecting_prompt"]["mean"]
+
+
+def test_the_count_band_covers_what_each_measured_corpus_asks_for():
+    with open(_COUNT_EVIDENCE, encoding="utf-8") as fh:
+        ev = json.load(fh)
+    band = recall_count._COUNT_BY_MODEL[FOUR_B]["band"]
+    for corpus, dist in ev["distributions_high"].items():
+        assert band + 0.01 >= dist["expected_memory_gap_under_best"]["p75"], corpus  # doctor's tolerance
+
+
+def test_the_private_corpus_evidence_carries_no_text():
+    with open(_COUNT_EVIDENCE, encoding="utf-8") as fh:
+        raw = fh.read()
+    assert '"query"' not in raw and '"expected"' not in raw and '"name"' not in raw
 
 
 def test_env_override_still_wins_in_the_high_space(monkeypatch):

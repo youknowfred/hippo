@@ -190,7 +190,7 @@ workstream:
         title: Floor recalibration for the Qwen3 embedding space
         priority: P0
         effort: S
-        status: partial         # 2026-11-25: 4B calibrated (floor 0.42, gate 0.48/0.46, band unchanged) — planning/HCR-3.evidence.2026-11-25.json; 8B not run (weights not fetched)
+        status: partial         # 2026-11-25: 4B calibrated (floor 0.42, gate 0.48/0.46, band unchanged; count rule band 0.12 / wide 0.14) — planning/HCR-3.evidence.2026-11-25.json, planning/HCR-3.count.evidence.2026-11-25.json; 8B not run (weights not fetched)
         gated_on: [HCR-2]
         problem: >-
           The RET-1 floor is calibrated per model; an uncalibrated model id
@@ -208,6 +208,24 @@ workstream:
           Off-topic probes abstain, hard-set recall at or above lean's on the
           golden corpus, floors landed as table entries with dated calibration
           evidence.
+        calibration_state: >-
+          2026-11-25. Calibrated: Qwen/Qwen3-Embedding-4B at full width only —
+          floor 0.42, gate 0.48/0.46 (HCR-3.evidence), count rule band 0.12 /
+          wide 0.14 (HCR-3.count.evidence: hook mode, no hard-set row lost on
+          the three corpora; rows on leaked off-topic probes 75 -> 38; 9.41 ->
+          8.06 rows per injecting prompt over 300 replayed prompts, median
+          still 10 where lean's entry reads 5 — a tighter wide costs hard-set
+          rows). Visible: `hippo eval --floor-sweep` also sweeps inside the
+          resolved high space on a high machine (floor_sweep.high.json) and
+          doctor's high-space line compares it with that space's own entries.
+          NOT calibrated, and doctor warns by name: (1) the 8B — weights
+          (~7.8 GB) not fetched; needs the same run (floor, gate, count, band
+          check) and entries keyed Qwen/Qwen3-Embedding-8B with a dated
+          evidence file; (2) every MRL-truncated width (model@dim) — a
+          different cosine space; no width is calibrated on a guess, so a
+          truncated space needs its own calibration run once HCR-6's bench
+          picks the width. Until then both fall to the 0.50 default floor with
+          the gate and the count rule off.
 
       - id: HCR-4
         title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit

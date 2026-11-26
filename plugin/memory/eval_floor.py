@@ -46,14 +46,21 @@ from .eval_metrics import (
 from .provenance import ensure_self_ignoring_dir, resolve_dirs
 
 _FLOOR_SWEEP_NAME = "floor_sweep.json"
+# HCR-3: a sweep measured in the high profile's embedding space is a second report, so the
+# lean one is never overwritten by (or compared against) numbers from another cosine space.
+_FLOOR_SWEEP_HIGH_NAME = "floor_sweep.high.json"
 _FLOOR_SWEEP_SCHEMA = 1
 
 
-def default_floor_sweep_path(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
-    """``<telemetry_dir>/floor_sweep.json`` — beside the run ledger (derived, gitignored)."""
+def default_floor_sweep_path(
+    memory_dir: str, telemetry_dir: Optional[str] = None, *, high: bool = False
+) -> str:
+    """``<telemetry_dir>/floor_sweep.json`` — beside the run ledger (derived, gitignored).
+    ``high`` names the high-space report beside it."""
     from .telemetry import default_telemetry_dir
 
-    return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _FLOOR_SWEEP_NAME)
+    name = _FLOOR_SWEEP_HIGH_NAME if high else _FLOOR_SWEEP_NAME
+    return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), name)
 
 
 def recommend_floor(on_scores: List[float], off_scores: List[float]) -> Optional[dict]:
@@ -180,8 +187,14 @@ def floor_sweep(
     *,
     telemetry_dir: Optional[str] = None,
     write: bool = True,
+    space: Optional[str] = None,
 ) -> dict:
     """Run the calibration sweep; persist the report for doctor; return it.
+
+    ``space`` (HCR-3): a high embedding space id. The sweep then reads the high twin index
+    (``<index>/high``), embeds every query in that space, and persists a separate report,
+    so each space is compared only with its own table entry. The caller has made sure the
+    model is servable and the twin is level with the lean index (``high_floor_sweep``).
 
     On-topic queries: the hard-set rows (non-abstention categories) whose expected
     stems actually exist in THIS corpus — a row whose answer the corpus lacks would
@@ -195,9 +208,22 @@ def floor_sweep(
         memory_dir, _ = resolve_dirs()
     if index_dir is None:
         index_dir = default_index_dir(memory_dir)
+    if space:
+        from .embed_mlx import using_space
+        from .recall_warm_high import high_index_dir
+
+        with using_space(space):
+            return floor_sweep(memory_dir, high_index_dir(index_dir), hard_set_path,
+                               abstention_set_path, telemetry_dir=telemetry_dir, write=write)
+    from .embed_mlx import active_space
+
+    active = active_space()
     index = load_index(index_dir)
     if index is None or not len(index):
         return {"ok": False, "error": "no index / empty corpus — build the index first"}
+    if active and index.model != active:
+        return {"ok": False, "error": f"the index at {index_dir} was built in {index.model}, "
+                f"not the resolved high space {active}"}
     if not index.dense_ready or index.dense is None:
         return {
             "ok": False,
@@ -250,7 +276,7 @@ def floor_sweep(
         "count": _count_calibration(index.model, gaps),
     }
     if write:
-        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        path = default_floor_sweep_path(memory_dir, telemetry_dir, high=bool(active))
         written = write_floor_sweep(doc, path)
         doc["path"] = written.get("path") if written.get("ok") else None
     return doc
@@ -285,10 +311,13 @@ def write_floor_sweep(doc: dict, path: str) -> dict:
         return {"ok": False, "error": f"floor-sweep write failed: {exc}"}
 
 
-def read_floor_sweep(memory_dir: str, telemetry_dir: Optional[str] = None) -> Optional[dict]:
-    """The persisted sweep report, or None (absent/corrupt/wrong-schema). Never raises."""
+def read_floor_sweep(
+    memory_dir: str, telemetry_dir: Optional[str] = None, *, high: bool = False
+) -> Optional[dict]:
+    """The persisted sweep report (``high``: the high-space one), or None
+    (absent/corrupt/wrong-schema). Never raises."""
     try:
-        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        path = default_floor_sweep_path(memory_dir, telemetry_dir, high=high)
         with open(path, "r", encoding="utf-8") as fh:
             doc = json.load(fh)
         if not isinstance(doc, dict) or doc.get("schema") != _FLOOR_SWEEP_SCHEMA:
@@ -296,3 +325,64 @@ def read_floor_sweep(memory_dir: str, telemetry_dir: Optional[str] = None) -> Op
         return doc
     except Exception:
         return None
+
+
+def high_floor_sweep(
+    memory_dir: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    hard_set_path: Optional[str] = None,
+    abstention_set_path: Optional[str] = None,
+    *,
+    telemetry_dir: Optional[str] = None,
+) -> Optional[dict]:
+    """HCR-3: the same sweep inside the machine's resolved high embedding space. None when
+    the retrieval profile is not high (every lean/floor machine: nothing loads, nothing is
+    written). ``{"ok": False, "space", "error"}`` when the high model cannot be served here
+    or its index cannot be brought level. Loads the big model in THIS process and brings
+    ``<index>/high`` level with the lean index first, as the warm server does; never downloads."""
+    from .build_index import dense_disabled
+    from .retrieval_profile import resolve_retrieval_profile
+
+    if resolve_retrieval_profile() != "high" or dense_disabled():
+        return None
+    from . import embed_mlx as E
+
+    space = E.resolve_high_space()
+    try:
+        why = E.unavailable_reason(E.parse_space(space)[0])
+        if why:
+            return {"ok": False, "space": space, "error": why}
+        if memory_dir is None:
+            memory_dir, _ = resolve_dirs()
+        if index_dir is None:
+            index_dir = default_index_dir(memory_dir)
+        from .recall_warm_high import refresh_tier
+
+        if not refresh_tier(memory_dir, index_dir, space):
+            return {"ok": False, "space": space,
+                    "error": "the high index could not be brought level with the lean index"}
+        doc = floor_sweep(memory_dir, index_dir, hard_set_path, abstention_set_path,
+                          telemetry_dir=telemetry_dir, space=space)
+    except Exception as exc:
+        return {"ok": False, "space": space, "error": f"high-space sweep failed: {exc}"}
+    doc["space"] = space
+    return doc
+
+
+def high_sweep_lines(doc: Optional[dict]) -> List[str]:
+    """The CLI's lines for ``high_floor_sweep``'s result; ``[]`` off the high profile."""
+    if doc is None:
+        return []
+    space = doc.get("space")
+    if not doc.get("ok"):
+        return [f"floor sweep [{space}]: not run — {doc.get('error')}"]
+    sep = "OVERLAPPING" if doc["overlap"] else "clean"
+    lines = [
+        f"floor sweep [{space}]: recommended {doc['recommended']} "
+        f"(configured {doc['configured_floor']}) — {sep} separation over "
+        f"{doc['on_n']} on-topic / {doc['off_n']} off-topic cosines "
+        f"(on-min {doc['on_min']}, off-max {doc['off_max']}, safety Δ {doc['safety_delta']:+})"
+    ]
+    if doc.get("path"):
+        lines.append(f"  persisted for doctor: {doc['path']}")
+    return lines

@@ -116,6 +116,7 @@ from .doctor_checks_abstention import (
     check_abstention_cold_start,
     check_abstention_floor_sanity,
     check_floor_calibration,
+    check_high_space_calibration,
 )
 from .doctor_checks_recall import (
     _LINK_DENSITY_MIN_CORPUS,
@@ -399,6 +400,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
     ("floor_calibration", check_floor_calibration),  # GRF-3: configured floor vs the sweep's number
+    ("high_space_calibration", check_high_space_calibration),  # HCR-3: the high space's tables + its own sweep; no line off high
     ("salience_evidence", check_salience_evidence),  # MSR-5: the ED-2 lived-in nudge (measures only)
     ("injection_precision", check_injection_precision),
     ("opened_after_recall", check_opened_after_recall),  # OBS-10: was the injected memory's own file opened afterwards
