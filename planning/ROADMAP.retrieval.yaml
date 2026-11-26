@@ -455,6 +455,20 @@ workstream:
           high+walk 30 / 0.579; explicit 4B rerank 31 / 0.570. MRL width
           SETTLED: keep native 2560 (1024: 30 / 0.598, 2048: 31 / 0.578 at the
           same floor). Injection flat (578-597 tokens).
+        eight_b_arm: >-
+          2026-11-25, after #240 made the 8B loadable and calibrated it.
+          bench/profile_ab.py now runs every other high embedder on disk as
+          its own arms (--models), stamping its load time and resident memory.
+          planning/HCR-6.8b.evidence.2026-11-25.json, same corpus and 38 rows,
+          baseline self-check pass: high-8b 34/38 MRR 0.596 (4B 31 / 0.592,
+          lean 33 / 0.569); with the warm reranker over the top 10, 34 / 0.652,
+          the best MRR measured; with the 30-hit pool the explicit surfaces
+          run, 33 / 0.609 against the 4B's 34 / 0.604. In the prompt hook both
+          read 26/38 and the 8B's MRR is lower (0.498 vs 0.524); counting
+          floor-collapsed memories as found, 33/38 each (0.592 vs 0.624).
+          Cost: 7.80 GB resident against 4.15, load 6.2 s against 2.5 (18.7 s
+          first load), index build 199 s against 92, recall median 319 ms
+          against 168. DEFAULT_HIGH_MODEL is unchanged: OPEN FOR OWNER.
         open_for_owner: >-
           FULLY RULED 2026-11-25. (1) high's warm rerank default is off (third
           owner ruling, built in #242); the explicit surfaces drop the 4B for
