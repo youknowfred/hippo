@@ -1,0 +1,1124 @@
+{
+  "item": "HCR-6",
+  "date": "2026-11-25",
+  "command": "OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:.:<mlx scratch dir> python -m bench.profile_ab --memory-dir <live corpus> --mlx-cache <mlx cache> --fastembed-cache <fastembed cache> --out <file>",
+  "code_ref": "73d47c8 (bench.profile_ab with the 120 s dense and rerank bounds, the lexical-only count and the untimed wake-up call); merged onto main at 7e1fd0b, which changed no file the bench reads",
+  "corpus": "this repo's own .claude/memory (108 memories, 272 body chunks) with its private fixture .claude/memory/.audit-fixtures/recall_hard_set.yaml (16 single-hop + 22 multi-hop rows, every row resolvable in every space). Private: counts only, no queries, no memory names.",
+  "load_during_run": {
+    "note": "the desktop's other sessions were running throughout; the run started only after the 1-minute load average held under 15 for three minutes, then rose. Quality numbers are deterministic (identical across runs 1 and 3 on every uncontaminated arm); latency numbers are NOT quiet-machine numbers.",
+    "load_average_1m": {
+      "samples": 35,
+      "min": 2.02,
+      "median": 10.0,
+      "max": 44.34
+    },
+    "peak_process_rss_bytes": 19686146048
+  },
+  "runs": {
+    "run_1": {
+      "status": "contaminated, superseded by run 3",
+      "why": "load average ~29: some query embeds outlived the 5 s dense bound and were served by BM25 alone, then scored as the arm's own quality; latency unusable. The bench was hardened (73d47c8) in response.",
+      "arms_that_differed_in_run_3": {
+        "high": {
+          "run_1": {
+            "hits": 30,
+            "n": 38,
+            "mrr": 0.5831
+          },
+          "run_3": {
+            "hits": 31,
+            "n": 38,
+            "mrr": 0.5921
+          }
+        },
+        "high@1024": {
+          "run_1": {
+            "hits": 28,
+            "n": 38,
+            "mrr": 0.5679
+          },
+          "run_3": {
+            "hits": 28,
+            "n": 38,
+            "mrr": 0.5723
+          }
+        },
+        "high@2048": {
+          "run_1": {
+            "hits": 30,
+            "n": 38,
+            "mrr": 0.5121
+          },
+          "run_3": {
+            "hits": 31,
+            "n": 38,
+            "mrr": 0.5198
+          }
+        }
+      }
+    },
+    "run_2": {
+      "status": "killed (SIGKILL, exit 137) during the arms; no report. No memory-pressure kill in the system log; the sender is unknown. Run 3 added a 30 s memory and load sampler."
+    },
+    "run_3": {
+      "status": "the evidence below"
+    }
+  },
+  "machine": {
+    "platform": "Darwin arm64",
+    "python": "3.11.13",
+    "memsize_bytes": 137438953472,
+    "mlx": "0.32.5",
+    "mlx_lm": "0.32.2",
+    "openblas_num_threads": "1",
+    "load_average_1m": 4.0
+  },
+  "weights": {
+    "Qwen/Qwen3-Embedding-4B": "mlx-community/Qwen3-Embedding-4B-mxfp8@c738b4ebab1e",
+    "Qwen/Qwen3-Reranker-0.6B": "mlx-community/Qwen3-Reranker-0.6B-mxfp8@a82f9f1c5dcb",
+    "Qwen/Qwen3-Reranker-4B": "mlx-community/Qwen3-Reranker-4B-mxfp8@25f203a237b8"
+  },
+  "pool": 30,
+  "k": 10,
+  "baseline": "lean",
+  "baseline_self_check": "pass \u2014 baseline runs byte-identical before and after the other arms",
+  "condition": {
+    "hard_set_n": 38,
+    "corpus_n": 108,
+    "resolvable_by_category": {
+      "lean": {
+        "multi-hop": {
+          "resolvable_n": 22,
+          "n": 22
+        },
+        "single-hop": {
+          "resolvable_n": 16,
+          "n": 16
+        }
+      },
+      "Qwen/Qwen3-Embedding-4B": {
+        "multi-hop": {
+          "resolvable_n": 22,
+          "n": 22
+        },
+        "single-hop": {
+          "resolvable_n": 16,
+          "n": 16
+        }
+      },
+      "Qwen/Qwen3-Embedding-4B@1024": {
+        "multi-hop": {
+          "resolvable_n": 22,
+          "n": 22
+        },
+        "single-hop": {
+          "resolvable_n": 16,
+          "n": 16
+        }
+      },
+      "Qwen/Qwen3-Embedding-4B@2048": {
+        "multi-hop": {
+          "resolvable_n": 22,
+          "n": 22
+        },
+        "single-hop": {
+          "resolvable_n": 16,
+          "n": 16
+        }
+      }
+    }
+  },
+  "cost": {
+    "rss_bytes": {
+      "start": 31588352,
+      "lean_index_and_model": 7144603648,
+      "embedder_loaded": 11262656512,
+      "all_models_loaded": 24557600768
+    },
+    "models": {
+      "Qwen/Qwen3-Embedding-4B": {
+        "load_ms": 1896.1,
+        "resident_bytes": 4148542464
+      },
+      "Qwen/Qwen3-Reranker-0.6B": {
+        "status": "ready",
+        "reason": "",
+        "load_ms": 370.11820799671113,
+        "resident_bytes": 614532984
+      },
+      "Qwen/Qwen3-Reranker-4B": {
+        "status": "ready",
+        "reason": "",
+        "load_ms": 935.4168329955428,
+        "resident_bytes": 4148558848
+      }
+    },
+    "index_build_s": {
+      "lean": 12.8,
+      "Qwen/Qwen3-Embedding-4B": 134.6,
+      "Qwen/Qwen3-Embedding-4B@1024": 121.9,
+      "Qwen/Qwen3-Embedding-4B@2048": 126.8
+    },
+    "spawned_hook_cold_ms": {
+      "p50": 357.48,
+      "p95": 937.59,
+      "max": 937.59,
+      "n": 8
+    },
+    "serve_budget_ms": 1500.0,
+    "reranker_scorings": {
+      "Qwen/Qwen3-Reranker-0.6B": 273,
+      "Qwen/Qwen3-Reranker-4B": 39
+    }
+  },
+  "arms": {
+    "lean": {
+      "space": "lean",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.8182,
+          "mrr": 0.4295,
+          "n": 22,
+          "hits": 18
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7604,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 33,
+        "mrr": 0.5688
+      },
+      "injected_tokens": {
+        "mean": 596.7,
+        "max": 624
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 17.0,
+        "p95": 25.6,
+        "max": 29.8
+      },
+      "dense_floor": 0.6
+    },
+    "lean+rerank": {
+      "space": "lean",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.8182,
+          "mrr": 0.4775,
+          "n": 22,
+          "hits": 18
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.8125,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 33,
+        "mrr": 0.6186
+      },
+      "injected_tokens": {
+        "mean": 597.2,
+        "max": 624
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 650.0,
+        "p95": 1233.9,
+        "max": 5765.5
+      },
+      "dense_floor": 0.6
+    },
+    "lean+rerank+pool": {
+      "space": "lean",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 30,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.8182,
+          "mrr": 0.5042,
+          "n": 22,
+          "hits": 18
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.8021,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 33,
+        "mrr": 0.6296
+      },
+      "injected_tokens": {
+        "mean": 586.4,
+        "max": 624
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 1744.0,
+        "p95": 2396.0,
+        "max": 3470.0
+      },
+      "dense_floor": 0.6
+    },
+    "high": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.4545,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7812,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.5921
+      },
+      "injected_tokens": {
+        "mean": 590.0,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 173.6,
+        "p95": 285.8,
+        "max": 631.0
+      },
+      "dense_floor": 0.42
+    },
+    "high+rerank": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.441,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7552,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.5733
+      },
+      "injected_tokens": {
+        "mean": 590.9,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 885.5,
+        "p95": 1360.2,
+        "max": 2757.9
+      },
+      "dense_floor": 0.42
+    },
+    "high+rerank+pool": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 30,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.8636,
+          "mrr": 0.466,
+          "n": 22,
+          "hits": 19
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7937,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 34,
+        "mrr": 0.604
+      },
+      "injected_tokens": {
+        "mean": 579.6,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 1948.9,
+        "p95": 2940.3,
+        "max": 6144.9
+      },
+      "dense_floor": 0.42
+    },
+    "high+walk": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {
+        "HIPPO_GRAPH_PPR": "1"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7273,
+          "mrr": 0.4318,
+          "n": 22,
+          "hits": 16
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7812,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 30,
+        "mrr": 0.5789
+      },
+      "injected_tokens": {
+        "mean": 591.5,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 166.4,
+        "p95": 203.7,
+        "max": 226.3
+      },
+      "dense_floor": 0.42
+    },
+    "high+rerank+walk": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 10,
+      "env": {
+        "HIPPO_GRAPH_PPR": "1"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7273,
+          "mrr": 0.4297,
+          "n": 22,
+          "hits": 16
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7552,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 30,
+        "mrr": 0.5668
+      },
+      "injected_tokens": {
+        "mean": 592.3,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 663.0,
+        "p95": 896.2,
+        "max": 967.2
+      },
+      "dense_floor": 0.42
+    },
+    "high+rerank-explicit": {
+      "space": "Qwen/Qwen3-Embedding-4B",
+      "reranker": "Qwen/Qwen3-Reranker-4B",
+      "rerank": true,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.4068,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7937,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.5697
+      },
+      "injected_tokens": {
+        "mean": 591.1,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 5459.8,
+        "p95": 7720.0,
+        "max": 8669.7
+      },
+      "dense_floor": 0.42
+    },
+    "high@1024": {
+      "space": "Qwen/Qwen3-Embedding-4B@1024",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.6364,
+          "mrr": 0.4051,
+          "n": 22,
+          "hits": 14
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.8021,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 28,
+        "mrr": 0.5723
+      },
+      "injected_tokens": {
+        "mean": 584.4,
+        "max": 624
+      },
+      "rows_returned": {
+        "mean": 9.97
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 265.1,
+        "p95": 387.5,
+        "max": 546.3
+      },
+      "dense_floor": 0.5
+    },
+    "high@1024/calibrated-floor": {
+      "space": "Qwen/Qwen3-Embedding-4B@1024",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {
+        "HIPPO_DENSE_FLOOR": "0.42"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.6818,
+          "mrr": 0.4447,
+          "n": 22,
+          "hits": 15
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.809,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 30,
+        "mrr": 0.5981
+      },
+      "injected_tokens": {
+        "mean": 587.7,
+        "max": 622
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 262.9,
+        "p95": 339.9,
+        "max": 361.8
+      },
+      "dense_floor": 0.42
+    },
+    "high@1024/calibrated-floor+rerank": {
+      "space": "Qwen/Qwen3-Embedding-4B@1024",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 10,
+      "env": {
+        "HIPPO_DENSE_FLOOR": "0.42"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.6818,
+          "mrr": 0.4242,
+          "n": 22,
+          "hits": 15
+        },
+        "single-hop": {
+          "recall": 0.9375,
+          "mrr": 0.7708,
+          "n": 16,
+          "hits": 15
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 30,
+        "mrr": 0.5701
+      },
+      "injected_tokens": {
+        "mean": 587.7,
+        "max": 618
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 1292.8,
+        "p95": 1961.8,
+        "max": 2065.2
+      },
+      "dense_floor": 0.42
+    },
+    "high@2048": {
+      "space": "Qwen/Qwen3-Embedding-4B@2048",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {},
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.4229,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.6531,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.5198
+      },
+      "injected_tokens": {
+        "mean": 578.3,
+        "max": 620
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 2,
+      "latency_ms": {
+        "n": 38,
+        "p50": 88.0,
+        "p95": 231.2,
+        "max": 311.0
+      },
+      "dense_floor": 0.5
+    },
+    "high@2048/calibrated-floor": {
+      "space": "Qwen/Qwen3-Embedding-4B@2048",
+      "reranker": null,
+      "rerank": false,
+      "pool": 10,
+      "env": {
+        "HIPPO_DENSE_FLOOR": "0.42"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.4528,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.75,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.5779
+      },
+      "injected_tokens": {
+        "mean": 592.7,
+        "max": 622
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 129.9,
+        "p95": 265.2,
+        "max": 292.6
+      },
+      "dense_floor": 0.42
+    },
+    "high@2048/calibrated-floor+rerank": {
+      "space": "Qwen/Qwen3-Embedding-4B@2048",
+      "reranker": "Qwen/Qwen3-Reranker-0.6B",
+      "rerank": true,
+      "pool": 10,
+      "env": {
+        "HIPPO_DENSE_FLOOR": "0.42"
+      },
+      "by_category": {
+        "multi-hop": {
+          "recall": 0.7727,
+          "mrr": 0.4876,
+          "n": 22,
+          "hits": 17
+        },
+        "single-hop": {
+          "recall": 0.875,
+          "mrr": 0.7552,
+          "n": 16,
+          "hits": 14
+        }
+      },
+      "overall": {
+        "n": 38,
+        "hits": 31,
+        "mrr": 0.6003
+      },
+      "injected_tokens": {
+        "mean": 591.9,
+        "max": 622
+      },
+      "rows_returned": {
+        "mean": 10.0
+      },
+      "lexical_only_queries": 0,
+      "latency_ms": {
+        "n": 38,
+        "p50": 677.4,
+        "p95": 2005.3,
+        "max": 2374.6
+      },
+      "dense_floor": 0.42
+    }
+  },
+  "deltas": {
+    "lean+rerank": {
+      "by_category": {
+        "multi-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.048,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0521,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": 0,
+        "mrr": 0.0498
+      },
+      "injected_tokens_mean": 0.5,
+      "latency_p50_ms": 633.0
+    },
+    "lean+rerank+pool": {
+      "by_category": {
+        "multi-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0747,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0417,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": 0,
+        "mrr": 0.0608
+      },
+      "injected_tokens_mean": -10.3,
+      "latency_p50_ms": 1727.0
+    },
+    "high": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": 0.025,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": 0.0208,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": 0.0233
+      },
+      "injected_tokens_mean": -6.7,
+      "latency_p50_ms": 156.6
+    },
+    "high+rerank": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": 0.0115,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": -0.0052,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": 0.0045
+      },
+      "injected_tokens_mean": -5.8,
+      "latency_p50_ms": 868.5
+    },
+    "high+rerank+pool": {
+      "by_category": {
+        "multi-hop": {
+          "hits": 1,
+          "recall": 0.0454,
+          "mrr": 0.0365,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0333,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": 1,
+        "mrr": 0.0352
+      },
+      "injected_tokens_mean": -17.1,
+      "latency_p50_ms": 1931.9
+    },
+    "high+walk": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -2,
+          "recall": -0.0909,
+          "mrr": 0.0023,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": 0.0208,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -3,
+        "mrr": 0.0101
+      },
+      "injected_tokens_mean": -5.2,
+      "latency_p50_ms": 149.4
+    },
+    "high+rerank+walk": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -2,
+          "recall": -0.0909,
+          "mrr": 0.0002,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": -0.0052,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -3,
+        "mrr": -0.002
+      },
+      "injected_tokens_mean": -4.4,
+      "latency_p50_ms": 646.0
+    },
+    "high+rerank-explicit": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": -0.0227,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": 0.0333,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": 0.0009
+      },
+      "injected_tokens_mean": -5.6,
+      "latency_p50_ms": 5442.8
+    },
+    "high@1024": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -4,
+          "recall": -0.1818,
+          "mrr": -0.0244,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": 0.0417,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -5,
+        "mrr": 0.0035
+      },
+      "injected_tokens_mean": -12.3,
+      "latency_p50_ms": 248.1
+    },
+    "high@1024/calibrated-floor": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -3,
+          "recall": -0.1364,
+          "mrr": 0.0152,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0486,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -3,
+        "mrr": 0.0293
+      },
+      "injected_tokens_mean": -9.0,
+      "latency_p50_ms": 245.9
+    },
+    "high@1024/calibrated-floor+rerank": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -3,
+          "recall": -0.1364,
+          "mrr": -0.0053,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": 0,
+          "recall": 0.0,
+          "mrr": 0.0104,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -3,
+        "mrr": 0.0013
+      },
+      "injected_tokens_mean": -9.0,
+      "latency_p50_ms": 1275.8
+    },
+    "high@2048": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": -0.0066,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": -0.1073,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": -0.049
+      },
+      "injected_tokens_mean": -18.4,
+      "latency_p50_ms": 71.0
+    },
+    "high@2048/calibrated-floor": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": 0.0233,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": -0.0104,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": 0.0091
+      },
+      "injected_tokens_mean": -4.0,
+      "latency_p50_ms": 112.9
+    },
+    "high@2048/calibrated-floor+rerank": {
+      "by_category": {
+        "multi-hop": {
+          "hits": -1,
+          "recall": -0.0455,
+          "mrr": 0.0581,
+          "n": 22
+        },
+        "single-hop": {
+          "hits": -1,
+          "recall": -0.0625,
+          "mrr": -0.0052,
+          "n": 16
+        }
+      },
+      "overall": {
+        "hits": -2,
+        "mrr": 0.0315
+      },
+      "injected_tokens_mean": -4.8,
+      "latency_p50_ms": 660.4
+    }
+  },
+  "readings": [
+    "HIGH STILL TRAILS LEAN ON RECALL. High (4B, full width, its calibrated 0.42 floor) finds 31/38 against lean's 33/38: -1 single-hop, -1 multi-hop. Its MRR is higher (0.592 vs 0.569), so what it finds it ranks better.",
+    "THE HIGH PROFILE'S SHIPPED WARM DEFAULT IS NOT SUPPORTED HERE. high+rerank (the 0.6B, ON by default in high's warm mode since HCR-4) keeps 31/38 and LOWERS MRR, 0.592 -> 0.573 (single-hop 0.781 -> 0.755, multi-hop 0.455 -> 0.441). HCR-4's evidence showed both rerankers raising MRR on the high index, but that index sat at the 0.50 default floor before HCR-3's 0.42 landed; at 0.42 the result reverses. The explicit 4B reranker is the same: 31/38, MRR 0.570. No default is changed here; this is the owner's call.",
+    "THE DEEP POOL CLOSES THE GAP. Reranking the top 30 fused hits before the cut takes high to 34/38 (single-hop 15/16, multi-hop 19/22) \u2014 one row above lean and the only arm above it \u2014 at MRR 0.604. On lean the pool keeps 33/38 and gives the best MRR measured, 0.630. Cost: the pool's in-process median is ~1.7-1.9 s under this load against SERVE_BUDGET_MS 1500, so as measured it does not fit the warm budget; a smaller pool, or the pool only on the explicit surfaces, is the next measurement.",
+    "LEAN + RERANK: same 33/38, MRR 0.569 -> 0.619 (+0.050; single-hop +0.052, multi-hop +0.048). The quality case for decision D2 holds; its in-process median was 650 ms under load (p95 1.23 s).",
+    "THE PPR WALK OVER HIGH IS STILL FLAT TO WORSE: high+walk 30/38 (-1 multi-hop), MRR 0.592 -> 0.579; with rerank 30/38, MRR 0.567. Per decision D4 the flag retires; that removal is its own change.",
+    "MRL WIDTH: KEEP THE NATIVE 2560. At the full-width floor (0.42), 1024 finds 30/38 (MRR 0.598) and 2048 31/38 (MRR 0.578), against full width's 31/38 (MRR 0.592). Neither truncation adds a hit; 1024 loses one. At the 0.50 default floor both truncations are worse still: 1024 finds 28/38 (MRR 0.572) and 2048 31/38 (MRR 0.520). The default is already native, so nothing changes in code; HCR-2's MRL question is settled.",
+    "INJECTION COST IS FLAT: every arm injects 578-597 estimated tokens per prompt (lean 597).",
+    "MEMORY: the 4B embedder holds 4.15 GB of unified memory and loads in 1.9 s; the 0.6B reranker 0.61 GB in 0.37 s; the 4B reranker 4.15 GB in 0.94 s (warm OS cache; run 1 measured 5.3 s and 5.0 s for the two 4B loads on a colder cache). The bench process itself peaked at 18.3 GB RSS holding four indexes and all three models; a warm server holds one high index, the embedder and the 0.6B.",
+    "THE SPAWNED HOOK is unchanged on every profile (it serves the lean index): cold p50 357 ms, p95 938 ms over 8 samples under this load."
+  ]
+}
