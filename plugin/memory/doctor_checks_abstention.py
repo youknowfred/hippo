@@ -321,8 +321,9 @@ def check_high_space_calibration(ctx: DoctorContext) -> Optional[Dict[str, str]]
     embedding space (``recall_rank._DENSE_FLOOR_BY_MODEL``, ``recall_abstain._COSINE_BY_MODEL``,
     ``recall_count._COUNT_BY_MODEL``). A space with no floor or gate entry is not an error
     recall raises: it silently takes the 0.50 default floor with the gate off. That is every
-    MRL-truncated ``model@dim`` width (a different cosine space from the full width) and any
-    model nobody measured, so this line names the resolved space and what it lacks (WARN).
+    MRL-truncated ``model@dim`` width (a different cosine space from the full width; none is
+    calibrated, because the bench kept the full width) and any model nobody measured, so
+    this line names the resolved space and what it lacks (WARN).
 
     A calibrated space then gets the lean line's comparison, against the high-space report
     ``hippo eval --floor-sweep`` writes on a high machine (``floor_sweep.high.json``): stale
@@ -362,13 +363,18 @@ def check_high_space_calibration(ctx: DoctorContext) -> Optional[Dict[str, str]]
                 effects.append("no row-count rule (a served call carries up to k rows)")
             calibrated = sorted(m for m in _DENSE_FLOOR_BY_MODEL
                                 if m in _COSINE_BY_MODEL and E.parse_space(m) is not None)
+            # No width is calibrated, on purpose: the profile bench tried the 4B at 1024 and
+            # 2048 against its full width at one floor and neither added a hit over the full
+            # width (planning/HCR-6.evidence.2026-11-25.json), so the full width stays.
+            choose = (f"the full width is the measured choice (unset {E.DIM_ENV} or its preset key)"
+                      if "@" in space else
+                      f"choose one with {E.MODEL_ENV} / {E.DIM_ENV} (or their preset keys)")
             return {
                 "status": "warn",
                 "message": f"{lead}: NOT CALIBRATED — no {' or '.join(lacks)} entry for this "
                 f"space ({what}), so high recall runs with {', '.join(effects)}. Calibrated "
-                f"high space(s): {', '.join(calibrated) or 'none'}; choose one with "
-                f"{E.MODEL_ENV} / {E.DIM_ENV} (or their preset keys), or measure this one "
-                "with `hippo eval --floor-sweep` before relying on it.",
+                f"high space(s): {', '.join(calibrated) or 'none'}; {choose}, or measure this "
+                "one with `hippo eval --floor-sweep` before relying on it.",
             }
         have = (f"floor {_DENSE_FLOOR_BY_MODEL[space]}, gate {gate['strong']}/{gate['support']}, "
                 + (f"row-count band {count['band']} / wide {count['wide']}" if count

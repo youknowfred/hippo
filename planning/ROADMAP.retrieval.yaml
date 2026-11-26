@@ -7,6 +7,9 @@
 # MLX, warm-mode-first) and a PPR graph lane for ALL profiles, while leaving
 # lean (bge-small) the default and BM25-only the floor.
 #
+# STATE 2026-11-25: HCR-1..4 and HCR-6 are done; HCR-5 (the PPR lane) was built,
+# measured flat and retired. Each item's status line below says what shipped.
+#
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
 # BND, FLT/HYG/PUB/EVD, RWY/OBS/HOT/CLM/TND/FMT/SRF/PLT/NAT/CON, or any
@@ -121,7 +124,7 @@ workstream:
         title: Profile plumbing — retrieval_profile config, setup offer, doctor surface
         priority: P0
         effort: S
-        status: pending
+        status: done            # 2026-11-25: 91aedf1 — memory/retrieval_profile.py, `hippo setup --profile`, doctor's retrieval_profile line
         problem: >-
           There is no named tier between "the one embed model" and the BM25
           floor; the high profile needs a durable, per-machine switch that
@@ -144,7 +147,7 @@ workstream:
         title: MLX embedder backend — Qwen3-Embedding-4B (8B knob) behind the dense seam
         priority: P0
         effort: L
-        status: pending
+        status: done            # 2026-11-25: youknowfred/hippo#235 — memory/embed_mlx.py + recall_warm_high.py; measured on the real 4B (implementation_notes); the 8B loads since #240
         gated_on: [HCR-1]
         problem: >-
           bge-small-en-v1.5 (2023, 384-dim, ~512-token budget) is the quality
@@ -185,12 +188,23 @@ workstream:
           (measured, not assumed); spawn path untouched (lean index, 300 ms
           gate still green); cold-cache and no-MLX environments degrade to
           lean with a doctor note, never an exception.
+        as_built: >-
+          2026-11-25. embed_mlx is the embedder (HIGH_MODELS: the 4B default,
+          the 8B by HIPPO_HIGH_EMBED_MODEL or the preset; one MLX thread for
+          the process); recall_warm_high keeps the `high/` index beside the
+          lean one and serves from it once it has caught up; the spawned hook
+          never loads it. The two questions the design left to the bench are
+          closed: MRL width stays native (HCR-6: neither 1024 nor 2048 adds a
+          hit over the full width), and the estimates are measured (4B: 4.15
+          GB resident, 1.9 s load; HCR-6's cost block). The 8B knob could not
+          load until #240 (its conversion ships no lm_head.weight; the
+          embedder now loads every model with no head).
 
       - id: HCR-3
         title: Floor recalibration for the Qwen3 embedding space
         priority: P0
         effort: S
-        status: done            # 2026-11-25: 4B and 8B calibrated at full width (floor, gate, count rule; band unchanged) — planning/HCR-3.evidence, HCR-3.count.evidence, HCR-3.8b.evidence (all 2026-11-25). Truncated widths wait on HCR-6
+        status: done            # 2026-11-25: 4B and 8B calibrated at full width (floor, gate, count rule; band unchanged) — planning/HCR-3.evidence, HCR-3.count.evidence, HCR-3.8b.evidence (all 2026-11-25). Truncated widths are uncalibrated on purpose (HCR-6 kept the native width)
         gated_on: [HCR-2]
         problem: >-
           The RET-1 floor is calibrated per model; an uncalibrated model id
@@ -223,12 +237,18 @@ workstream:
           reads 5 — a tighter wide costs hard-set rows. Visible: `hippo eval
           --floor-sweep` also sweeps inside the resolved high space on a high
           machine (floor_sweep.high.json) and doctor's high-space line
-          compares it with that space's own entries. NOT calibrated, and
-          doctor warns by name: every MRL-truncated width (model@dim) — a
-          different cosine space; no width is calibrated on a guess, so a
-          truncated space needs its own calibration run (floor, gate, count,
-          band check) once HCR-6's bench picks the width. Until then it falls
-          to the 0.50 default floor with the gate and the count rule off.
+          compares it with that space's own entries. NOT calibrated, on
+          purpose, and doctor warns by name: every MRL-truncated width
+          (model@dim). A truncation is a different cosine space, so it would
+          need its own run (floor, gate, count, band check), and HCR-6's bench
+          settled that none is worth one: at the 4B's 0.42 floor, 1024 found
+          30/38 (MRR 0.598) and 2048 found 31/38 (MRR 0.578) against the full
+          width's 31/38 (MRR 0.592); neither truncation adds a hit over the full
+          width. The default is the native width and stays it. A machine
+          that sets HIPPO_HIGH_EMBED_DIM anyway runs at the 0.50 default floor
+          with the gate and the count rule off, and doctor's line tells it to
+          unset the knob. The 8B's truncations were not benched; the same
+          line covers them.
 
       - id: HCR-4
         title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit

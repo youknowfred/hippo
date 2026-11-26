@@ -97,6 +97,9 @@ def test_a_truncated_width_is_warned_by_name(repo, memory_dir, monkeypatch, tmp_
     assert "no corroboration gate" in r["message"]
     assert FOUR_B in r["message"].split("Calibrated high space(s):")[1]  # the full width is offered
     assert E.DIM_ENV in r["message"] and "\n" not in r["message"]
+    # the bench kept the full width, so the advice is to drop the truncation, not to pick a width
+    assert f"the full width is the measured choice (unset {E.DIM_ENV}" in r["message"]
+    assert E.MODEL_ENV not in r["message"]
 
 
 def test_a_model_with_no_entries_is_warned_by_name(repo, memory_dir, monkeypatch, tmp_path):
@@ -108,6 +111,8 @@ def test_a_model_with_no_entries_is_warned_by_name(repo, memory_dir, monkeypatch
     assert r["status"] == "warn"
     assert f"[{EIGHT_B}]" in r["message"] and "NOT CALIBRATED" in r["message"]
     assert "has not been measured" in r["message"]
+    assert f"choose one with {E.MODEL_ENV} / {E.DIM_ENV}" in r["message"]
+    assert "the full width is the measured choice" not in r["message"]
     assert "up to k rows" in r["message"]
 
 
