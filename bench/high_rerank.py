@@ -103,6 +103,7 @@ def main(argv=None) -> int:
     report = {
         "item": "HCR-4", "k": RC.DEFAULT_K, "space": space,
         "warm_model": R.WARM_MODEL, "explicit_model": R.EXPLICIT_MODEL,
+        "explicit_pool": R.EXPLICIT_POOL,
         "openblas_num_threads": os.environ.get("OPENBLAS_NUM_THREADS"),
         "serve_budget_ms": W.SERVE_BUDGET_MS, "warm_rerank_bound_s": R.WARM_TIMEOUT_SECS,
     }
@@ -193,7 +194,7 @@ def main(argv=None) -> int:
     report["served_on_the_high_index"] = engaged
 
     _log("served arms done")
-    # The explicit surface: the 4B, loaded on first use.
+    # The explicit surface: its reranker over its pool, loaded on first use.
     explicit = {"available": R.explicit_model() == R.EXPLICIT_MODEL}
     if explicit["available"]:
         ms = []
@@ -214,7 +215,8 @@ def main(argv=None) -> int:
         if st.get("status") == "ready":
             bases.append(("high_index", H.high_index_dir(idx), space))
         # None: the fastembed MiniLM (today's rerank), for reference beside the Qwen3 pair.
-        models = [None, R.WARM_MODEL] + ([R.EXPLICIT_MODEL] if explicit["available"] else [])
+        large = R.unavailable_reason(R.LARGE_MODEL) is None
+        models = [None, R.WARM_MODEL] + ([R.LARGE_MODEL] if large else [])
         for base, index_dir, sp in bases:
             for model in models:
                 with ExitStack() as stack:

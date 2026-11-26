@@ -240,6 +240,15 @@ def _log_channel_event(
         pass
 
 
+def _cut_to_k(hits: List[dict], k: int) -> List[dict]:
+    """The first ``k`` corpus hits, then the rule pointers (which the rerank keeps at the
+    tail and which the pool does not multiply)."""
+    corpus = [h for h in hits if h.get("corpus") != "rule"]
+    if len(corpus) <= k:
+        return hits
+    return corpus[:k] + [h for h in hits if h.get("corpus") == "rule"]
+
+
 def describe(
     query: str,
     k: int = DEFAULT_K,
@@ -286,30 +295,33 @@ def describe(
     """
     if memory_dir is None:
         memory_dir, repo_root = resolve_dirs()
-    # HCR-4: on the high profile, where this machine can serve it, the explicit surface's
-    # rerank (below, and recall()'s own when HIPPO_RERANK is on) scores with the 4B
-    # Qwen3 reranker; everywhere else this is None and the MiniLM reranks, as before.
-    from .rerank_mlx import explicit_model, using_reranker
+    # On the high profile, where this machine can serve it, the explicit surface's rerank
+    # (below, and recall()'s own when HIPPO_RERANK is on) scores with the Qwen3 0.6B over
+    # the top EXPLICIT_POOL fused hits, then cuts to k (planning/HCR-6.evidence.2026-11-25.json:
+    # 34/38 against 31/38 for the top k). Everywhere else this is None: the MiniLM reranks
+    # the top k, as before.
+    from .rerank_mlx import EXPLICIT_POOL, explicit_model, using_reranker
 
     reranker = explicit_model()
+    fetch_k = max(k, EXPLICIT_POOL) if reranker else k
     corpora_res: Optional[dict] = None
     if all_projects:
         from .recall import recall_all_projects
 
-        with using_reranker(reranker):
+        with using_reranker(reranker, explicit=True):
             corpora_res = recall_all_projects(
-                query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+                query, fetch_k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
             )
         hits = corpora_res["hits"]
     else:
         _t0 = time.perf_counter() if channel == "mcp" else 0.0
-        with using_reranker(reranker):
+        with using_reranker(reranker, explicit=True):
             hits = recall(
-                query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+                query, fetch_k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
             )
         if channel == "mcp":
             _log_channel_event(
-                hits,
+                _cut_to_k(hits, k),
                 query=query,
                 k=k,
                 latency_ms=(time.perf_counter() - _t0) * 1000.0,
@@ -335,8 +347,10 @@ def describe(
     # same query/hit set. When the flag is off (the common case for this explicit surface,
     # which never needed a flag), this is the ONLY rerank, exactly as before.
     if not _rerank_enabled():
-        with using_reranker(reranker):
+        with using_reranker(reranker, explicit=True):
             hits = _cross_encoder_rerank(query, hits)
+    if fetch_k > k:
+        hits = _cut_to_k(hits, k)
     graph = _load_graph(memory_dir, index_dir)
     from .ledger import load as _load_ledger  # LDG-1: a cited tracker id's status, dated
 

@@ -620,7 +620,7 @@ _RERANK_TIMEOUT_SECS = 5.0  # override: HIPPO_RERANK_TIMEOUT -- matches DENSE_QU
 #
 # HCR-4: a second backend behind the SAME function. When a Qwen3 reranker is active in the
 # calling context (rerank_mlx.using_reranker — entered only by the warm server's high-profile
-# served call when HIPPO_RERANK is on, 0.6B, and by recall_view on the high profile, 4B), the scores come from it
+# served call when HIPPO_RERANK is on, and by recall_view on the high profile; both the 0.6B), the scores come from it
 # through MLX instead; same run_bounded bound shape, same degrade-to-fused-order contract,
 # same rule-pointer exclusion and COR-8 reorder-only rule. Outside those contexts nothing
 # here changes (the spawned hook, lean, floor).

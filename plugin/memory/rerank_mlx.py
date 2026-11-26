@@ -14,10 +14,15 @@ named here. A reranker is active only inside ``using_reranker`` (a ContextVar, c
   the owner turned the default off. The call is bounded by ``WARM_TIMEOUT_SECS`` so a slow
   rerank degrades to the fused order well inside the warm server's serve budget.
 * **The explicit surfaces** (``recall_view.describe``: ``/hippo:recall`` and the MCP
-  ``recall`` tool), on the high profile, when ``EXPLICIT_MODEL`` (Qwen3-Reranker-4B) is
-  servable here. Nothing turns rerank on there that was not already on (the explicit
-  surface always reranked); only the model changes. The first call in a process loads it,
-  inside ``EXPLICIT_TIMEOUT_SECS``.
+  ``recall`` tool), on the high profile, when ``EXPLICIT_MODEL`` (the same 0.6B) is
+  servable here. They enter with ``explicit=True``: the first call in a process loads the
+  model (the warm path never loads on a call), the bound is ``EXPLICIT_TIMEOUT_SECS``, and
+  ``describe`` reranks the top ``EXPLICIT_POOL`` fused hits before cutting to k. Nothing
+  turns rerank on there that was not already on (the explicit surface always reranked).
+  HCR-4 shipped the 4B here; HCR-6's evidence (planning/HCR-6.evidence.2026-11-25.json)
+  measured it lowering high's MRR, and the 0.6B over a 30-hit pool as the best setup
+  measured, so the owner moved the explicit surfaces to that. ``LARGE_MODEL`` (the 4B)
+  stays pinned for the benches only: recall never uses it and setup no longer fetches it.
 
 The spawned hook enters neither, and lean and floor never resolve a model, so on every
 path but those two ``active_reranker()`` is None and the seam runs exactly as before.
@@ -58,7 +63,11 @@ RERANK_MODELS: Dict[str, Dict] = {
     },
 }
 WARM_MODEL = "Qwen/Qwen3-Reranker-0.6B"  # the warm hot path, when HIPPO_RERANK is on
-EXPLICIT_MODEL = "Qwen/Qwen3-Reranker-4B"  # /hippo:recall and the MCP recall tool
+EXPLICIT_MODEL = WARM_MODEL  # /hippo:recall and the MCP recall tool, over EXPLICIT_POOL hits
+LARGE_MODEL = "Qwen/Qwen3-Reranker-4B"  # the benches only; recall never scores with it
+# Fused hits the explicit surfaces rerank before the cut to k. HCR-6 measured 30 on the high
+# index: 34/38 against 31/38 for the top 10, the only setup above lean.
+EXPLICIT_POOL = 30
 
 # The warm path's own bound. The warm server's breaker trips one served call over 1500 ms
 # (recall_warm.SERVE_BUDGET_MS); the rest of a served call measured ~114 ms median, so a
@@ -66,11 +75,11 @@ EXPLICIT_MODEL = "Qwen/Qwen3-Reranker-4B"  # /hippo:recall and the MCP recall to
 # lands inside the budget. HIPPO_RERANK_TIMEOUT, when set, overrides it (as it does the
 # shared 5 s bound everywhere else).
 WARM_TIMEOUT_SECS = 0.8
-# The explicit 4B's bound. Measured on the owner's 128 GB Mac: load ~3.5 s, then ~3.3 s to
-# score a /hippo:recall's hits, so the shared 5 s bound abandoned every first call. An
-# abandoned scoring keeps the process's one MLX thread busy (run_bounded cannot cancel it),
-# and the next warm prompt's query embed waited up to ~1.1 s behind it. The explicit
-# surface has no per-prompt budget to protect, so it waits for the answer instead.
+# The explicit surfaces' bound (and the 4B's, in the benches). The 0.6B over a 30-hit pool
+# measured a ~1.9 s median under load; the 4B measured a ~3.5 s load then ~3.3 s to score,
+# so the shared 5 s bound abandoned every first 4B call. An abandoned scoring keeps the
+# process's one MLX thread busy (run_bounded cannot cancel it). The explicit surface has no
+# per-prompt budget to protect, so it waits for the answer instead.
 EXPLICIT_TIMEOUT_SECS = 15.0
 
 # The task line every pair carries (the model card's <Instruct>). Kept beside, not shared
@@ -89,6 +98,7 @@ _MAX_TOKENS = 1024  # one pair, prefix and suffix included; descriptions sit far
 _SLICE_TOKENS = 2048  # padded tokens per forward pass
 
 _ACTIVE: "ContextVar[Optional[str]]" = ContextVar("hippo_rerank_model", default=None)
+_EXPLICIT: "ContextVar[bool]" = ContextVar("hippo_rerank_explicit", default=False)
 
 
 def pair_text(query: str, doc: str) -> str:
@@ -103,18 +113,27 @@ def active_reranker() -> Optional[str]:
     return _ACTIVE.get()
 
 
+def explicit_surface() -> bool:
+    """True inside an explicit surface's ``using_reranker(..., explicit=True)``."""
+    return _EXPLICIT.get()
+
+
 @contextmanager
-def using_reranker(model: Optional[str]) -> Iterator[None]:
-    """Score with ``model`` inside the block; ``None`` is a no-op (today's behavior)."""
+def using_reranker(model: Optional[str], *, explicit: bool = False) -> Iterator[None]:
+    """Score with ``model`` inside the block; ``None`` is a no-op (today's behavior).
+    ``explicit`` marks an explicit surface: the model loads on first use and the bound is
+    ``EXPLICIT_TIMEOUT_SECS``, whichever model it is."""
     if model is None:
         yield
         return
     if model not in RERANK_MODELS:
         raise ValueError(f"not a high reranker: {model!r}")
     token = _ACTIVE.set(model)
+    flag = _EXPLICIT.set(bool(explicit))
     try:
         yield
     finally:
+        _EXPLICIT.reset(flag)
         _ACTIVE.reset(token)
 
 
@@ -132,11 +151,14 @@ def explicit_model() -> Optional[str]:
 
 
 def bound_secs(model: str, shared: float) -> float:
-    """The run_bounded bound for ``model``: ``HIPPO_RERANK_TIMEOUT`` when set, else the
-    model's own bound (the warm model's tight one, the explicit model's generous one)."""
+    """The run_bounded bound for ``model``: ``HIPPO_RERANK_TIMEOUT`` when set; else the
+    explicit surfaces' generous bound on an explicit surface or for the 4B, and the warm
+    path's tight one for the warm model."""
     if (os.environ.get("HIPPO_RERANK_TIMEOUT") or "").strip():
         return shared
-    return WARM_TIMEOUT_SECS if model == WARM_MODEL else EXPLICIT_TIMEOUT_SECS
+    if _EXPLICIT.get() or model != WARM_MODEL:
+        return EXPLICIT_TIMEOUT_SECS
+    return WARM_TIMEOUT_SECS
 
 
 # --------------------------------------------------------------------------- #
@@ -336,9 +358,9 @@ _BUSY: Dict[str, threading.Lock] = {m: threading.Lock() for m in RERANK_MODELS}
 
 
 def score(model: str, query: str, docs: List[str]) -> List[float]:
-    """Scores from ``model`` — the seam's MLX call, run inside ``run_bounded``. The warm
-    model scores only once loaded (its load is the background thread's); the explicit
-    model loads here on first use.
+    """Scores from ``model`` — the seam's MLX call, run inside ``run_bounded``. On the warm
+    path the warm model scores only once loaded (its load is the background thread's); on
+    an explicit surface, and for the 4B, the model loads here on first use.
 
     One scoring per model at a time, and a call that finds one still running fails at
     once (the seam keeps the fused order). ``run_bounded`` cannot cancel a scoring that
@@ -349,7 +371,8 @@ def score(model: str, query: str, docs: List[str]) -> List[float]:
     if not busy.acquire(blocking=False):
         raise RerankUnavailable(f"{model} is still scoring an earlier call")
     try:
-        rr = loaded(model) if model == WARM_MODEL else reranker(model)
+        warm_path = model == WARM_MODEL and not _EXPLICIT.get()
+        rr = loaded(model) if warm_path else reranker(model)
         if rr is None:
             raise RerankUnavailable(f"{model} is still loading")
         scores = list(rr.score(query, docs))

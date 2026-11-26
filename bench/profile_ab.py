@@ -13,7 +13,9 @@ The arms (``memory.profile_ab`` runs them; the first is the baseline, run first 
 * ``high`` / ``high+rerank`` — the Qwen3 embedder at full width, alone and with the warm
   reranker (``high+rerank`` is the high profile's shipped warm default).
 * ``…+pool`` — the reranker reads the top ``--pool`` fused hits before the cut to k.
-* ``high+rerank-explicit`` — the explicit surfaces' larger reranker.
+* ``high+rerank-4b`` — the larger reranker, if its weights are on disk (setup no longer
+  fetches it; the explicit surfaces score with the warm model over a pool, the
+  ``high+rerank+pool`` arm).
 * ``high@<dim>`` — the embedder's Matryoshka output truncated to ``--dims``, each at the
   floor the table gives that space and at the full-width space's calibrated floor.
 
@@ -144,7 +146,7 @@ def main(argv=None) -> int:
         _log(f"{space} index built")
 
     scorings: dict = {}
-    rerankers = [R.WARM_MODEL] + ([R.EXPLICIT_MODEL] if R.unavailable_reason(R.EXPLICIT_MODEL) is None else [])
+    rerankers = [R.WARM_MODEL] + ([R.LARGE_MODEL] if R.unavailable_reason(R.LARGE_MODEL) is None else [])
     for name in rerankers:
         rr = R.reranker(name)
         cost["models"][name] = dict(R.status(name), model=None)
@@ -169,8 +171,8 @@ def main(argv=None) -> int:
         Arm("high+rerank", space=full, reranker=warm, rerank=True),
         Arm("high+rerank+pool", space=full, reranker=warm, rerank=True, pool=args.pool),
     ]
-    if R.EXPLICIT_MODEL in rerankers:
-        arms.append(Arm("high+rerank-explicit", space=full, reranker=R.EXPLICIT_MODEL, rerank=True))
+    if R.LARGE_MODEL in rerankers:
+        arms.append(Arm("high+rerank-4b", space=full, reranker=R.LARGE_MODEL, rerank=True))
     for space in spaces[1:]:
         dim = space.partition("@")[2]
         arms.append(Arm(f"high@{dim}", space=space))
