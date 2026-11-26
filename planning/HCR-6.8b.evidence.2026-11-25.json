@@ -1,0 +1,803 @@
+{
+ "item": "HCR-6 (the 8B arm)",
+ "date": "2026-11-25",
+ "command": "OPENBLAS_NUM_THREADS=1 PYTHONPATH=<mlx scratch dir>:plugin:. python -m bench.profile_ab --memory-dir <live corpus> --mlx-cache <mlx cache> --fastembed-cache <fastembed cache> --dims '' --out <file>   (clean environment; --dims '' skips the truncated widths HCR-6.evidence already settled)",
+ "code_ref": "this change's bench/profile_ab.py on main at fa476df (the 8B's floor, gate and count entries and its loader fix, #240)",
+ "corpus": "this repo's own .claude/memory (108 memories, 272 body chunks) with its private fixture (16 single-hop + 22 multi-hop rows, every row resolvable in every space). Private: counts only, no queries, no memory names.",
+ "load_during_run": {
+  "note": "one run; the desktop's other sessions were idle. 1-minute load average sampled every 20 s.",
+  "load_average_1m": {
+   "samples": 50,
+   "min": 1.85,
+   "median": 2.45,
+   "max": 4.8
+  }
+ },
+ "machine": {
+  "platform": "Darwin arm64",
+  "python": "3.11.13",
+  "memsize_bytes": 137438953472,
+  "mlx": "0.32.5",
+  "mlx_lm": "0.32.2",
+  "openblas_num_threads": "1",
+  "load_average_1m": 2.7
+ },
+ "weights": {
+  "Qwen/Qwen3-Embedding-4B": "mlx-community/Qwen3-Embedding-4B-mxfp8@c738b4ebab1e",
+  "Qwen/Qwen3-Embedding-8B": "mlx-community/Qwen3-Embedding-8B-mxfp8@51c773b7464b",
+  "Qwen/Qwen3-Reranker-0.6B": "mlx-community/Qwen3-Reranker-0.6B-mxfp8@a82f9f1c5dcb",
+  "Qwen/Qwen3-Reranker-4B": "mlx-community/Qwen3-Reranker-4B-mxfp8@25f203a237b8"
+ },
+ "pool": 30,
+ "k": 10,
+ "baseline": "lean",
+ "baseline_self_check": "pass \u2014 baseline runs byte-identical before and after the other arms",
+ "condition": {
+  "hard_set_n": 38,
+  "corpus_n": 108,
+  "resolvable_by_category": {
+   "lean": {
+    "multi-hop": {
+     "resolvable_n": 22,
+     "n": 22
+    },
+    "single-hop": {
+     "resolvable_n": 16,
+     "n": 16
+    }
+   },
+   "Qwen/Qwen3-Embedding-4B": {
+    "multi-hop": {
+     "resolvable_n": 22,
+     "n": 22
+    },
+    "single-hop": {
+     "resolvable_n": 16,
+     "n": 16
+    }
+   },
+   "Qwen/Qwen3-Embedding-8B": {
+    "multi-hop": {
+     "resolvable_n": 22,
+     "n": 22
+    },
+    "single-hop": {
+     "resolvable_n": 16,
+     "n": 16
+    }
+   }
+  }
+ },
+ "cost": {
+  "rss_bytes": {
+   "start": 27770880,
+   "lean_index_and_model": 7164444672,
+   "embedder_loaded": 11282710528,
+   "Qwen/Qwen3-Embedding-8B loaded": 7581925376,
+   "all_models_loaded": 9155870720
+  },
+  "models": {
+   "Qwen/Qwen3-Embedding-4B": {
+    "load_ms": 2536.2,
+    "resident_bytes": 4148542464
+   },
+   "Qwen/Qwen3-Embedding-8B": {
+    "load_ms": 6199.5,
+    "resident_bytes": 7804133376
+   },
+   "Qwen/Qwen3-Reranker-0.6B": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 237.67237499851035,
+    "resident_bytes": 614516600
+   },
+   "Qwen/Qwen3-Reranker-4B": {
+    "status": "ready",
+    "reason": "",
+    "load_ms": 3761.113208005554,
+    "resident_bytes": 4148558848
+   }
+  },
+  "index_build_s": {
+   "lean": 23.4,
+   "Qwen/Qwen3-Embedding-4B": 91.7,
+   "Qwen/Qwen3-Embedding-8B": 198.9
+  },
+  "spawned_hook_cold_ms": {
+   "p50": 452.91,
+   "p95": 1502.12,
+   "max": 1502.12,
+   "n": 8
+  },
+  "serve_budget_ms": 1500.0,
+  "reranker_scorings": {
+   "Qwen/Qwen3-Reranker-0.6B": 234,
+   "Qwen/Qwen3-Reranker-4B": 39
+  }
+ },
+ "cost_note": "load_ms is the load inside this process with the weights in the OS file cache; HCR-3.8b.evidence measured the 8B's first load after its fetch at 18.7 s. resident_bytes is MLX's own count after the load. The rss_bytes samples are the whole process and fall while it holds more (macOS compresses idle pages), so read the per-model numbers.",
+ "arms": {
+  "lean": {
+   "space": "lean",
+   "reranker": null,
+   "rerank": false,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8182,
+     "mrr": 0.4295,
+     "n": 22,
+     "hits": 18
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.7604,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 33,
+    "mrr": 0.5688
+   },
+   "injected_tokens": {
+    "mean": 596.7,
+    "max": 624
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 12.2,
+    "p95": 19.3,
+    "max": 25.3
+   },
+   "dense_floor": 0.6
+  },
+  "lean+rerank": {
+   "space": "lean",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8182,
+     "mrr": 0.4775,
+     "n": 22,
+     "hits": 18
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.8125,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 33,
+    "mrr": 0.6186
+   },
+   "injected_tokens": {
+    "mean": 597.2,
+    "max": 624
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 688.9,
+    "p95": 1006.2,
+    "max": 1863.3
+   },
+   "dense_floor": 0.6
+  },
+  "lean+rerank+pool": {
+   "space": "lean",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 30,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8182,
+     "mrr": 0.5042,
+     "n": 22,
+     "hits": 18
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.8021,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 33,
+    "mrr": 0.6296
+   },
+   "injected_tokens": {
+    "mean": 586.4,
+    "max": 624
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 1667.6,
+    "p95": 2335.7,
+    "max": 2701.0
+   },
+   "dense_floor": 0.6
+  },
+  "high": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "reranker": null,
+   "rerank": false,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.7727,
+     "mrr": 0.4545,
+     "n": 22,
+     "hits": 17
+    },
+    "single-hop": {
+     "recall": 0.875,
+     "mrr": 0.7812,
+     "n": 16,
+     "hits": 14
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 31,
+    "mrr": 0.5921
+   },
+   "injected_tokens": {
+    "mean": 590.0,
+    "max": 620
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 168.2,
+    "p95": 330.5,
+    "max": 406.4
+   },
+   "dense_floor": 0.42
+  },
+  "high+rerank": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.7727,
+     "mrr": 0.441,
+     "n": 22,
+     "hits": 17
+    },
+    "single-hop": {
+     "recall": 0.875,
+     "mrr": 0.7552,
+     "n": 16,
+     "hits": 14
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 31,
+    "mrr": 0.5733
+   },
+   "injected_tokens": {
+    "mean": 590.9,
+    "max": 620
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 923.4,
+    "p95": 2033.8,
+    "max": 2774.5
+   },
+   "dense_floor": 0.42
+  },
+  "high+rerank+pool": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 30,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8636,
+     "mrr": 0.466,
+     "n": 22,
+     "hits": 19
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.7937,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 34,
+    "mrr": 0.604
+   },
+   "injected_tokens": {
+    "mean": 579.6,
+    "max": 620
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 2402.7,
+    "p95": 4524.1,
+    "max": 4947.2
+   },
+   "dense_floor": 0.42
+  },
+  "high+rerank-4b": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "reranker": "Qwen/Qwen3-Reranker-4B",
+   "rerank": true,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.7727,
+     "mrr": 0.4068,
+     "n": 22,
+     "hits": 17
+    },
+    "single-hop": {
+     "recall": 0.875,
+     "mrr": 0.7937,
+     "n": 16,
+     "hits": 14
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 31,
+    "mrr": 0.5697
+   },
+   "injected_tokens": {
+    "mean": 591.1,
+    "max": 620
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 4208.0,
+    "p95": 6463.4,
+    "max": 7325.4
+   },
+   "dense_floor": 0.42
+  },
+  "high-8b": {
+   "space": "Qwen/Qwen3-Embedding-8B",
+   "reranker": null,
+   "rerank": false,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8636,
+     "mrr": 0.4399,
+     "n": 22,
+     "hits": 19
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.811,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 34,
+    "mrr": 0.5962
+   },
+   "injected_tokens": {
+    "mean": 595.8,
+    "max": 624
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 318.5,
+    "p95": 515.1,
+    "max": 1632.8
+   },
+   "dense_floor": 0.4
+  },
+  "high-8b+rerank": {
+   "space": "Qwen/Qwen3-Embedding-8B",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 10,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8636,
+     "mrr": 0.5095,
+     "n": 22,
+     "hits": 19
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.849,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 34,
+    "mrr": 0.6524
+   },
+   "injected_tokens": {
+    "mean": 596.1,
+    "max": 624
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 1472.4,
+    "p95": 2897.6,
+    "max": 3706.5
+   },
+   "dense_floor": 0.4
+  },
+  "high-8b+rerank+pool": {
+   "space": "Qwen/Qwen3-Embedding-8B",
+   "reranker": "Qwen/Qwen3-Reranker-0.6B",
+   "rerank": true,
+   "pool": 30,
+   "env": {},
+   "by_category": {
+    "multi-hop": {
+     "recall": 0.8182,
+     "mrr": 0.4762,
+     "n": 22,
+     "hits": 18
+    },
+    "single-hop": {
+     "recall": 0.9375,
+     "mrr": 0.7911,
+     "n": 16,
+     "hits": 15
+    }
+   },
+   "overall": {
+    "n": 38,
+    "hits": 33,
+    "mrr": 0.6088
+   },
+   "injected_tokens": {
+    "mean": 588.9,
+    "max": 619
+   },
+   "rows_returned": {
+    "mean": 10.0
+   },
+   "lexical_only_queries": 0,
+   "latency_ms": {
+    "n": 38,
+    "p50": 2615.3,
+    "p95": 3650.8,
+    "max": 4712.3
+   },
+   "dense_floor": 0.4
+  }
+ },
+ "deltas": {
+  "lean+rerank": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.048,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0521,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 0,
+    "mrr": 0.0498
+   },
+   "injected_tokens_mean": 0.5,
+   "latency_p50_ms": 676.7
+  },
+  "lean+rerank+pool": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0747,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0417,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 0,
+    "mrr": 0.0608
+   },
+   "injected_tokens_mean": -10.3,
+   "latency_p50_ms": 1655.4
+  },
+  "high": {
+   "by_category": {
+    "multi-hop": {
+     "hits": -1,
+     "recall": -0.0455,
+     "mrr": 0.025,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": -1,
+     "recall": -0.0625,
+     "mrr": 0.0208,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": -2,
+    "mrr": 0.0233
+   },
+   "injected_tokens_mean": -6.7,
+   "latency_p50_ms": 156.0
+  },
+  "high+rerank": {
+   "by_category": {
+    "multi-hop": {
+     "hits": -1,
+     "recall": -0.0455,
+     "mrr": 0.0115,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": -1,
+     "recall": -0.0625,
+     "mrr": -0.0052,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": -2,
+    "mrr": 0.0045
+   },
+   "injected_tokens_mean": -5.8,
+   "latency_p50_ms": 911.2
+  },
+  "high+rerank+pool": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 1,
+     "recall": 0.0454,
+     "mrr": 0.0365,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0333,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 1,
+    "mrr": 0.0352
+   },
+   "injected_tokens_mean": -17.1,
+   "latency_p50_ms": 2390.5
+  },
+  "high+rerank-4b": {
+   "by_category": {
+    "multi-hop": {
+     "hits": -1,
+     "recall": -0.0455,
+     "mrr": -0.0227,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": -1,
+     "recall": -0.0625,
+     "mrr": 0.0333,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": -2,
+    "mrr": 0.0009
+   },
+   "injected_tokens_mean": -5.6,
+   "latency_p50_ms": 4195.8
+  },
+  "high-8b": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 1,
+     "recall": 0.0454,
+     "mrr": 0.0104,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0506,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 1,
+    "mrr": 0.0274
+   },
+   "injected_tokens_mean": -0.9,
+   "latency_p50_ms": 306.3
+  },
+  "high-8b+rerank": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 1,
+     "recall": 0.0454,
+     "mrr": 0.08,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0886,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 1,
+    "mrr": 0.0836
+   },
+   "injected_tokens_mean": -0.6,
+   "latency_p50_ms": 1460.2
+  },
+  "high-8b+rerank+pool": {
+   "by_category": {
+    "multi-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0467,
+     "n": 22
+    },
+    "single-hop": {
+     "hits": 0,
+     "recall": 0.0,
+     "mrr": 0.0307,
+     "n": 16
+    }
+   },
+   "overall": {
+    "hits": 0,
+    "mrr": 0.04
+   },
+   "injected_tokens_mean": -7.8,
+   "latency_p50_ms": 2603.1
+  }
+ },
+ "hook_mode_live_corpus": {
+  "note": "What a prompt gets: the real hook body per hard-set row, fresh session, count rule on (the rig and the stage names are in HCR-3.hook-gaps.evidence.2026-11-25.json). A floor-collapsed expected memory is already in context; the second pair of numbers counts it as found.",
+  "lean": {
+   "explicit_hits": 33,
+   "hook_hits": 26,
+   "hook_mrr": 0.476,
+   "hook_hits_counting_floor_collapsed": 32,
+   "hook_mrr_counting_floor_collapsed": 0.5755,
+   "where_explicit_hits_ended_in_hook": {
+    "hit": 25,
+    "floor_collapsed": 6,
+    "low_signal": 1,
+    "not_in_pool": 1
+   }
+  },
+  "Qwen/Qwen3-Embedding-4B": {
+   "explicit_hits": 31,
+   "hook_hits": 26,
+   "hook_mrr": 0.5238,
+   "hook_hits_counting_floor_collapsed": 33,
+   "hook_mrr_counting_floor_collapsed": 0.6241,
+   "where_explicit_hits_ended_in_hook": {
+    "hit": 25,
+    "floor_collapsed": 6
+   }
+  },
+  "Qwen/Qwen3-Embedding-8B": {
+   "explicit_hits": 34,
+   "hook_hits": 26,
+   "hook_mrr": 0.4979,
+   "hook_hits_counting_floor_collapsed": 33,
+   "hook_mrr_counting_floor_collapsed": 0.5922,
+   "where_explicit_hits_ended_in_hook": {
+    "hit": 25,
+    "floor_collapsed": 7,
+    "past_k": 1,
+    "not_in_pool": 1
+   }
+  },
+  "replay_300_prompts": {
+   "lean_inject": 229,
+   "8b_inject": 262,
+   "8b_admitted_by": {
+    "strong": 241,
+    "corroborated": 20,
+    "lexical": 1
+   },
+   "8b_wide_prompts": 227,
+   "8b_rows_per_injecting_prompt": {
+    "n": 262,
+    "min": 1,
+    "p10": 5,
+    "p25": 10,
+    "p50": 10,
+    "p75": 10,
+    "p90": 10,
+    "max": 10
+   }
+  }
+ },
+ "readings": [
+  "PLAIN RECALL AT k=10: THE 8B FINDS MORE. high-8b 34/38 (single-hop 15/16, multi-hop 19/22), MRR 0.596, against the 4B's 31/38, 0.592 and lean's 33/38, 0.569. It is the only embedder that beats lean with no reranker.",
+  "WITH THE WARM RERANKER OVER THE TOP 10: THE BEST MRR MEASURED. high-8b+rerank 34/38, MRR 0.652 (single-hop 0.849, multi-hop 0.510), against the 4B's 31/38, 0.573 and lean+rerank's 33/38, 0.619. The reranker lowers the 4B's MRR and raises the 8B's.",
+  "WITH THE 30-HIT POOL, WHICH IS WHAT /hippo:recall AND THE MCP TOOL RUN ON HIGH: THE 8B LOSES A ROW. high-8b+rerank+pool 33/38, MRR 0.609, against the 4B's 34/38, 0.604. The pool that lifts the 4B from 31 to 34 takes the 8B from 34 to 33.",
+  "IN THE PROMPT HOOK, WHICH IS WHERE HIGH SERVES EVERY PROMPT: NO GAIN. Both read 26/38; the 8B's MRR is lower, 0.498 against 0.524. Counting floor-collapsed memories as found: 8B 33/38, MRR 0.592; 4B 33/38, MRR 0.624; lean 32/38, MRR 0.576.",
+  "So the 8B's three extra rows show on one surface that nothing serves today: explicit recall with no rerank, or with a top-10 rerank. To collect them the explicit surfaces would have to drop the pool for the 8B (34/38, MRR 0.652, median 1.5 s here against the pool's 2.6 s).",
+  "COST. Resident memory 7.80 GB per warm server against 4.15 GB (+3.66 GB). Load 6.2 s against 2.5 s from a warm file cache (18.7 s on first load after the fetch). Index build 199 s against 92 s on 380 rows. In-process recall median 319 ms against 168 ms, p95 515 ms, and one call of 38 at 1,633 ms, past the 1,500 ms serve budget. Download 7.8 GB against 4.2 GB.",
+  "The 8B+rerank arm's median is 1,472 ms with the bound lifted to 120 s for the bench. The warm path's rerank bound is 0.8 s, so served that way a large share of calls would fall back to the fused order (the high-8b arm).",
+  "INJECTION COST IS FLAT: 580 to 597 estimated tokens per prompt on every arm.",
+  "The 4B's and lean's arms repeat HCR-6.evidence exactly (lean 33 / 0.5688, high 31 / 0.5921, high+rerank 31 / 0.5733, high+rerank+pool 34 / 0.604, explicit 4B reranker 31 / 0.5697).",
+  "No default is changed here. Which embedder high resolves to by default is the owner's call."
+ ]
+}
