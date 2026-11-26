@@ -195,8 +195,108 @@ def bench(t):
                "\n".join(b), t)
 
 
+# --------------------------------------------------------------------------- engine map
+def engine_map(t):
+    b = []
+    cols = [
+        (24, "SOURCE OF AUTHORITY", "committed, reviewed"),
+        (318, "DERIVED", "gitignored, rebuildable"),
+        (612, "READERS", "hooks, tools, the CLI"),
+    ]
+    for x, k, sub in cols:
+        b.append(f'<text class="k" x="{x}" y="30">{k}</text>')
+        b.append(f'<text class="s" x="{x}" y="48">{sub}</text>')
+
+    def stack(x, items, w=244):
+        y = 64
+        out = []
+        for title, line in items:
+            out.append(box(x, y, w, 52, title, [line]))
+            y += 62
+        return "\n".join(out)
+
+    b.append(f'<rect class="panel" x="24" y="64" width="244" height="300" rx="12"/>')
+    corpus = [("memory/*.md", "frontmatter + body"),
+              ("name, description", "the recall hook"),
+              ("cited_paths, source_commit", "what staleness watches"),
+              ("[[links]], supersedes:", "the graph and typed edges")]
+    y = 82
+    for title, line in corpus:
+        b.append(f'<text class="h" x="44" y="{y + 16}" font-family="{MONO}" font-size="13">{title}</text>')
+        b.append(f'<text class="s" x="44" y="{y + 35}">{line}</text>')
+        y += 56
+    b.append(f'<text class="s" x="44" y="{y + 18}">MEMORY.md floor · .format marker</text>')
+    b.append(f'<text class="s" x="44" y="{y + 38}">.claude/memory/ in git</text>')
+
+    b.append(stack(318, [(".hippo/index/", "dense matrix, BM25, manifest"),
+                         (".hippo/index/high/", "the Qwen3 twin (high profile)"),
+                         ("links.json · stale.json", "graph cache, drift cache"),
+                         (".hippo/telemetry/", "recall and verdict ledgers"),
+                         (".hippo/pending/", "captured session seeds")]))
+    b.append(stack(612, [("UserPromptSubmit", "recall into the prompt"),
+                         ("SessionStart", "refresh, then one report"),
+                         ("PreToolUse", "the floor write gate"),
+                         ("SessionEnd", "capture a seed"),
+                         ("MCP server · hippo CLI", "warm recall, tools, CI")]))
+    b.append(arrow(270, 150, 316, 150))
+    b.append(f'<text class="s" x="293" y="138" text-anchor="middle" font-size="11">build</text>')
+    b.append(arrow(564, 150, 610, 150))
+    b.append(f'<text class="s" x="587" y="138" text-anchor="middle" font-size="11">read</text>')
+    # write-back path
+    y = 392
+    b.append(f'<path class="dash" d="M734 374 V{y} H146 V378"/>')
+    b.append(f'<path class="head" d="M146 368 L140 380 L152 380 Z"/>')
+    b.append(f'<rect class="solid" x="246" y="{y - 13}" width="388" height="26" rx="13"/>')
+    b.append(f'<text class="on" x="440" y="{y + 4}" text-anchor="middle" font-size="12" font-weight="600">'
+             f'Back to the corpus: one memory at a time, with your yes</text>')
+    return svg(880, 416, "The engine's files in three columns. The source of authority is the committed "
+               "markdown corpus in .claude/memory. Derived, gitignored files are built from it: the index "
+               "and its high-profile twin, the link and drift caches, the telemetry ledgers and the pending "
+               "capture queue. Readers are the four hooks, the MCP server and the hippo CLI. Writes go back "
+               "to the corpus only one memory at a time, with your approval.", "\n".join(b), t)
+
+
+# --------------------------------------------------------------------------- high serving path
+def high_serving(t):
+    b = []
+    b.append(box(330, 16, 220, 52, "A prompt arrives", ["two hooks fire in parallel"]))
+    b.append(box(300, 100, 280, 58, "One claim file per prompt", ["the first to arrive decides: warm or spawn"]))
+    b.append(arrow(440, 68, 440, 98))
+    # left: spawn
+    b.append(f'<text class="k" x="40" y="200">SPAWNED HOOK · EVERY PROFILE</text>')
+    b.append(box(24, 210, 300, 64, "Fresh Python process", ["loads the lean index and model per prompt"]))
+    b.append(box(24, 290, 300, 64, "bge-small-en-v1.5", ["384 dimensions · .hippo/index/"]))
+    b.append(arrow(300, 158, 196, 182))
+    b.append(f'<text class="s" x="232" y="164" text-anchor="middle" font-size="11">spawn</text>')
+    b.append(arrow(174, 274, 174, 288))
+    # right: warm
+    b.append(f'<text class="k" x="572" y="200">WARM MCP SERVER · HIGH PROFILE</text>')
+    b.append(box(556, 210, 300, 64, "Model loaded, high/ caught up?", ["a background thread keeps it current"]))
+    b.append(box(556, 290, 300, 64, "Qwen3-Embedding-4B", ["2,560 dimensions · .hippo/index/high/"]))
+    b.append(arrow(580, 158, 684, 182))
+    b.append(f'<text class="s" x="650" y="164" text-anchor="middle" font-size="11">warm</text>')
+    b.append(arrow(706, 274, 706, 288))
+    b.append(f'<text class="s" x="722" y="285" font-size="11">yes</text>')
+    b.append(f'<path class="dash" d="M556 242 H340 V322 H328"/>')
+    b.append(f'<path class="head" d="M326 322 L336 316 L336 328 Z"/>')
+    b.append(f'<text class="s" x="448" y="236" text-anchor="middle" font-size="11">no: serve lean</text>')
+    # join
+    b.append(box(240, 392, 400, 64, "Same ranking, gate, count rule and budget",
+                 ["each embedding space keeps its own calibration"]))
+    b.append(arrow(174, 354, 300, 390))
+    b.append(arrow(706, 354, 580, 390))
+    b.append(f'<text class="s" x="440" y="486" text-anchor="middle">/hippo:recall and the MCP recall tool on high '
+             f'also rerank the top 30 with Qwen3-Reranker-0.6B.</text>')
+    return svg(880, 500, "How a prompt is served on the high profile. Both recall hooks fire; one claim file per "
+               "prompt decides which answers. The spawned hook always serves the lean index with "
+               "bge-small-en-v1.5. The warm MCP server serves the high index with Qwen3-Embedding-4B once the "
+               "model is loaded and the high index has caught up, and serves lean until then. Both paths use "
+               "the same ranking, gate, count rule and budget, with per-space calibration.", "\n".join(b), t)
+
+
 for suffix, t in THEMES.items():
-    for name, fn in (("recall-flow", recall_flow), ("profiles", profiles), ("profile-bench", bench)):
+    for name, fn in (("recall-flow", recall_flow), ("profiles", profiles), ("profile-bench", bench),
+                     ("engine-map", engine_map), ("high-serving", high_serving)):
         with open(os.path.join(OUT, f"{name}{suffix}.svg"), "w", encoding="utf-8") as fh:
             fh.write(fn(t))
 print("wrote", sorted(n for n in os.listdir(OUT) if n.endswith(".svg")))

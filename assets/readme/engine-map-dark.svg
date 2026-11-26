@@ -1,0 +1,76 @@
+<svg viewBox="0 0 880 416" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The engine's files in three columns. The source of authority is the committed markdown corpus in .claude/memory. Derived, gitignored files are built from it: the index and its high-profile twin, the link and drift caches, the telemetry ledgers and the pending capture queue. Readers are the four hooks, the MCP server and the hippo CLI. Writes go back to the corpus only one memory at a time, with your approval.">
+<style>
+  text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #E6F4F5; }
+  .h { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12.5px; fill: #9DBFC3; }
+  .k { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: #66C3CA; }
+  .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; }
+  .ms { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #9DBFC3; }
+  .mw { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 12px; fill: #F0B35A; }
+  .card { fill: #10292C; stroke: #2A5E63; stroke-width: 1.5; }
+  .panel { fill: #0B1E20; stroke: #2A5E63; stroke-width: 1.5; }
+  .solid { fill: #66C3CA; }
+  .on { fill: #0C3B40; }
+  .arrow { stroke: #66C3CA; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dash { stroke: #2E8F98; stroke-width: 2; fill: none; stroke-dasharray: 5 6; stroke-linecap: round; }
+  .head { fill: #66C3CA; }
+  .track { fill: #16363A; }
+  .bar { fill: #2E8F98; }
+  .best { fill: #66C3CA; }
+</style>
+<text class="k" x="24" y="30">SOURCE OF AUTHORITY</text>
+<text class="s" x="24" y="48">committed, reviewed</text>
+<text class="k" x="318" y="30">DERIVED</text>
+<text class="s" x="318" y="48">gitignored, rebuildable</text>
+<text class="k" x="612" y="30">READERS</text>
+<text class="s" x="612" y="48">hooks, tools, the CLI</text>
+<rect class="panel" x="24" y="64" width="244" height="300" rx="12"/>
+<text class="h" x="44" y="98" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">memory/*.md</text>
+<text class="s" x="44" y="117">frontmatter + body</text>
+<text class="h" x="44" y="154" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">name, description</text>
+<text class="s" x="44" y="173">the recall hook</text>
+<text class="h" x="44" y="210" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">cited_paths, source_commit</text>
+<text class="s" x="44" y="229">what staleness watches</text>
+<text class="h" x="44" y="266" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">[[links]], supersedes:</text>
+<text class="s" x="44" y="285">the graph and typed edges</text>
+<text class="s" x="44" y="324">MEMORY.md floor · .format marker</text>
+<text class="s" x="44" y="344">.claude/memory/ in git</text>
+<rect class="card" x="318" y="64" width="244" height="52" rx="10"/>
+<text class="h" x="440.0" y="86" text-anchor="middle">.hippo/index/</text>
+<text class="s" x="440.0" y="105" text-anchor="middle">dense matrix, BM25, manifest</text>
+<rect class="card" x="318" y="126" width="244" height="52" rx="10"/>
+<text class="h" x="440.0" y="148" text-anchor="middle">.hippo/index/high/</text>
+<text class="s" x="440.0" y="167" text-anchor="middle">the Qwen3 twin (high profile)</text>
+<rect class="card" x="318" y="188" width="244" height="52" rx="10"/>
+<text class="h" x="440.0" y="210" text-anchor="middle">links.json · stale.json</text>
+<text class="s" x="440.0" y="229" text-anchor="middle">graph cache, drift cache</text>
+<rect class="card" x="318" y="250" width="244" height="52" rx="10"/>
+<text class="h" x="440.0" y="272" text-anchor="middle">.hippo/telemetry/</text>
+<text class="s" x="440.0" y="291" text-anchor="middle">recall and verdict ledgers</text>
+<rect class="card" x="318" y="312" width="244" height="52" rx="10"/>
+<text class="h" x="440.0" y="334" text-anchor="middle">.hippo/pending/</text>
+<text class="s" x="440.0" y="353" text-anchor="middle">captured session seeds</text>
+<rect class="card" x="612" y="64" width="244" height="52" rx="10"/>
+<text class="h" x="734.0" y="86" text-anchor="middle">UserPromptSubmit</text>
+<text class="s" x="734.0" y="105" text-anchor="middle">recall into the prompt</text>
+<rect class="card" x="612" y="126" width="244" height="52" rx="10"/>
+<text class="h" x="734.0" y="148" text-anchor="middle">SessionStart</text>
+<text class="s" x="734.0" y="167" text-anchor="middle">refresh, then one report</text>
+<rect class="card" x="612" y="188" width="244" height="52" rx="10"/>
+<text class="h" x="734.0" y="210" text-anchor="middle">PreToolUse</text>
+<text class="s" x="734.0" y="229" text-anchor="middle">the floor write gate</text>
+<rect class="card" x="612" y="250" width="244" height="52" rx="10"/>
+<text class="h" x="734.0" y="272" text-anchor="middle">SessionEnd</text>
+<text class="s" x="734.0" y="291" text-anchor="middle">capture a seed</text>
+<rect class="card" x="612" y="312" width="244" height="52" rx="10"/>
+<text class="h" x="734.0" y="334" text-anchor="middle">MCP server · hippo CLI</text>
+<text class="s" x="734.0" y="353" text-anchor="middle">warm recall, tools, CI</text>
+<path class="arrow" d="M270 150 L307.0 150.0"/><path class="head" d="M316 150 L307.0 145.5 L307.0 154.5 Z"/>
+<text class="s" x="293" y="138" text-anchor="middle" font-size="11">build</text>
+<path class="arrow" d="M564 150 L601.0 150.0"/><path class="head" d="M610 150 L601.0 145.5 L601.0 154.5 Z"/>
+<text class="s" x="587" y="138" text-anchor="middle" font-size="11">read</text>
+<path class="dash" d="M734 374 V392 H146 V378"/>
+<path class="head" d="M146 368 L140 380 L152 380 Z"/>
+<rect class="solid" x="246" y="379" width="388" height="26" rx="13"/>
+<text class="on" x="440" y="396" text-anchor="middle" font-size="12" font-weight="600">Back to the corpus: one memory at a time, with your yes</text>
+</svg>
