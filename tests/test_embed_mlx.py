@@ -514,6 +514,46 @@ def test_fetch_previews_the_size_and_downloads_only_with_yes(tmp_path, monkeypat
 
 
 # --------------------------------------------------------------------------- #
+# MLX's buffer cache is capped before any model loads
+# --------------------------------------------------------------------------- #
+class _FakeMX:
+    def __init__(self):
+        self.limits = []
+
+    def set_cache_limit(self, n):
+        self.limits.append(n)
+        return 0
+
+
+@pytest.mark.parametrize("raw, mb", [(None, 512), ("", 512), ("256", 256), ("0", 0),
+                                     ("-5", 512), ("lots", 512), (" 1024 ", 1024)])
+def test_the_cache_cap_reads_whole_megabytes_else_the_default(monkeypatch, raw, mb):
+    if raw is None:
+        monkeypatch.delenv(E.CACHE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(E.CACHE_ENV, raw)
+    assert E.cache_limit_bytes() == mb * 2**20
+
+
+def test_capping_sets_the_limit_and_never_fails_a_load(monkeypatch):
+    monkeypatch.delenv(E.CACHE_ENV, raising=False)
+    mx = _FakeMX()
+    assert E.cap_mlx_cache(mx) == 512 * 2**20
+    assert mx.limits == [512 * 2**20]
+    assert E.cap_mlx_cache(object()) is None  # an MLX without the call: no cap, no error
+
+
+def test_both_loaders_cap_the_cache_before_they_load():
+    import inspect
+
+    from memory import rerank_mlx as R
+
+    for src in (inspect.getsource(E._MLXEmbedder._load), inspect.getsource(R._MLXReranker._load)):
+        assert "cap_mlx_cache(mx)" in src
+        assert src.index("cap_mlx_cache(mx)") < src.index("load_model(Path(snap)")
+
+
+# --------------------------------------------------------------------------- #
 # The real backend — only where MLX and the pinned weights already are
 # --------------------------------------------------------------------------- #
 def test_the_real_mlx_backend_embeds_asymmetric_normalizable_vectors(monkeypatch):
@@ -532,3 +572,6 @@ def test_the_real_mlx_backend_embeds_asymmetric_normalizable_vectors(monkeypatch
     assert float(docs[0] @ q) > float(docs[1] @ q)
     solo = B._normalize_rows(list(emb.embed(["The zebra service deploys through the canary lane first."])))[0]
     assert float(solo @ docs[0]) > 0.999  # right-padded batching is exact for a causal model
+    import mlx.core as mx
+
+    assert mx.get_cache_memory() <= E.cache_limit_bytes()  # the cap held through the embeds

@@ -299,6 +299,44 @@ def fetch_spec(spec: Dict) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# MLX's buffer cache: capped
+# --------------------------------------------------------------------------- #
+# MLX keeps freed Metal buffers for reuse and, left alone, caps that cache near the whole
+# machine (121.6 GB on a 128 GB Mac). A query reuses one shape, so the cache stays small; an
+# index build runs slices of ever-changing shape and each one leaves its buffers behind.
+# Measured 2026-11-26 on the 4B over a 1,000-memory corpus: 6.4 GB of cache after five slices
+# and still climbing, in every warm server that builds. Capped at 256 MB or at 1 GB the
+# build ran at the same speed (496 and 529 padded tok/s), a query still took 56-62 ms, and
+# the process held 4.6 and 5.5 GB.
+CACHE_ENV = "HIPPO_MLX_CACHE_MB"
+DEFAULT_CACHE_MB = 512
+
+
+def cache_limit_bytes() -> int:
+    """The cap on MLX's buffer cache for this process: ``HIPPO_MLX_CACHE_MB`` when it is a
+    whole number of megabytes (0 keeps no cache), else 512 MB."""
+    raw = (os.environ.get(CACHE_ENV) or "").strip()
+    try:
+        mb = int(raw) if raw else DEFAULT_CACHE_MB
+    except ValueError:
+        mb = DEFAULT_CACHE_MB
+    return (mb if mb >= 0 else DEFAULT_CACHE_MB) * 2**20
+
+
+def cap_mlx_cache(mx) -> Optional[int]:
+    """Cap MLX's buffer cache before a model loads; every loader in this process calls it
+    (the embedder here, the rerankers in ``rerank_mlx``). Returns the cap in bytes, or None
+    when this MLX has no such call — a load is never failed over the cap."""
+    limit = cache_limit_bytes()
+    try:
+        setter = getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit
+        setter(limit)
+    except Exception:
+        return None
+    return limit
+
+
+# --------------------------------------------------------------------------- #
 # The one MLX thread
 # --------------------------------------------------------------------------- #
 _POOL: Optional[concurrent.futures.ThreadPoolExecutor] = None
@@ -343,6 +381,7 @@ class _MLXEmbedder:
         from tokenizers import Tokenizer
 
         self._mx = mx
+        cap_mlx_cache(mx)  # before the first buffer: an index build must not grow the cache
         active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
         base = int(active())  # a reranker may already share this process's MLX memory
         # An embedder reads hidden states and never the LM head. The 8B conversion's config
