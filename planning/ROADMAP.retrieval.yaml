@@ -255,8 +255,10 @@ workstream:
           off restores all 5. A six-row cap restores 2 for +10% rows on the
           replay (5.21 -> 5.74 per injecting prompt) and one more leaked
           probe row; a wider band restores 1 at 0.10 and takes leaked probe
-          rows 23 -> 34. OPEN FOR OWNER: lean's entry stays, or the cap goes to six
-          after a read on the field corpora the rule was calibrated on.
+          rows 23 -> 34. RULED 2026-11-25 (owner, "Leave it"): lean's entry
+          stays at band 0.05 / wide 0.18 / five rows. The six-row cap is not
+          taken up until it is read on emgl and Skyline, the field corpora
+          the rule was calibrated on; nothing in HCR is waiting on that read.
         calibration_state: >-
           2026-11-25, full width only. Qwen/Qwen3-Embedding-4B: floor 0.42,
           gate 0.60/0.60 (first 0.48/0.46; see hook_mode_findings), count rule band 0.12 / wide 0.14
