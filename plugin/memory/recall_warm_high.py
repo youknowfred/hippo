@@ -155,7 +155,13 @@ def pin_blas_threads(environ=None) -> bool:
 
 
 def _kick_rerank() -> None:
-    """High profile: the warm reranker loads once per process, in the background."""
+    """High profile with ``HIPPO_RERANK`` on: the warm reranker loads once per process, in
+    the background. Off (the default), nothing loads, so the 0.6 GB and its load stay unpaid."""
+    from .recall_rank import _rerank_enabled
+
+    if not _rerank_enabled():
+        _ST.rerank = None
+        return
     from .rerank_mlx import WARM_MODEL, start_loading
 
     _ST.rerank = WARM_MODEL
@@ -275,9 +281,9 @@ def serving(memory_dir, lean_load) -> Iterator[None]:
 
 @contextmanager
 def _warm_reranker() -> Iterator[None]:
-    """HCR-4: once the warm reranker has loaded, a served call scores with it (and
-    ``HIPPO_RERANK`` defaults ON inside). Until then — or off the high profile — the call
-    runs exactly as before. Never raises."""
+    """HCR-4: with ``HIPPO_RERANK`` on and the warm reranker loaded, a served call scores
+    with it. Otherwise — the default, before the load finishes, or off the high profile —
+    the call runs exactly as before. Never raises."""
     model = None
     try:
         from .rerank_mlx import loaded

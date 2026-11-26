@@ -85,7 +85,7 @@ def main(argv=None) -> int:
         "HIPPO_TRUST_FILE": os.path.join(tmp, "trust.json"), "HIPPO_TRUST_ALL": "1",
         "HF_HUB_OFFLINE": "1",
     })
-    os.environ.pop("HIPPO_RERANK", None)
+    os.environ["HIPPO_RERANK"] = "1"  # the warm reranker loads and scores only when it is on
     subprocess.run(["git", "init", "-q", project], check=True)
 
     from memory import build_index as B
@@ -168,7 +168,7 @@ def main(argv=None) -> int:
                     os.environ["HIPPO_RERANK"] = "0"
                 before = len(scored)
                 out, ms = serve(sid, p)
-                os.environ.pop("HIPPO_RERANK", None)
+                os.environ["HIPPO_RERANK"] = "1"
                 assert "additionalContext" in out, "a served call injected nothing"
                 arms[arm].append(ms)
                 trips[arm] += bool(W._SESSIONS[sid].tripped)
@@ -208,7 +208,6 @@ def main(argv=None) -> int:
     report["explicit"] = explicit
 
     if not args.skip_ab and os.path.isfile(hard_set):
-        R.default_on = lambda: False  # the OFF arm is the fused order; the flag decides
         os.environ["HIPPO_RERANK_TIMEOUT"] = "60"  # no arm silently degrades to fused order
         runs = {}
         bases = [("lean_index", idx, None)]

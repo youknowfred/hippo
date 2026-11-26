@@ -7,10 +7,12 @@ named here. A reranker is active only inside ``using_reranker`` (a ContextVar, c
 ``run_bounded``'s worker by ``contextvars.copy_context``), and only two callers enter one:
 
 * **The warm server's served call** (``recall_warm_high.serving``), on the high profile,
-  once ``WARM_MODEL`` (Qwen3-Reranker-0.6B) has finished loading in the background. There
-  ``HIPPO_RERANK`` defaults ON (``default_on``; an explicit falsy value still turns it off),
-  and the call is bounded by ``WARM_TIMEOUT_SECS`` so a slow rerank degrades to the fused
-  order well inside the warm server's serve budget.
+  when ``HIPPO_RERANK`` is set truthy and ``WARM_MODEL`` (Qwen3-Reranker-0.6B) has finished
+  loading in the background (the warm server starts that load only when the flag is on). It
+  is OFF by default, as on every path: HCR-4 shipped it ON, and HCR-6's evidence
+  (planning/HCR-6.evidence.2026-11-25.json) found it lowering high's MRR at HCR-3's floor, so
+  the owner turned the default off. The call is bounded by ``WARM_TIMEOUT_SECS`` so a slow
+  rerank degrades to the fused order well inside the warm server's serve budget.
 * **The explicit surfaces** (``recall_view.describe``: ``/hippo:recall`` and the MCP
   ``recall`` tool), on the high profile, when ``EXPLICIT_MODEL`` (Qwen3-Reranker-4B) is
   servable here. Nothing turns rerank on there that was not already on (the explicit
@@ -55,7 +57,7 @@ RERANK_MODELS: Dict[str, Dict] = {
         "download_bytes": 4_161_975_208,
     },
 }
-WARM_MODEL = "Qwen/Qwen3-Reranker-0.6B"  # the warm hot path: default ON there
+WARM_MODEL = "Qwen/Qwen3-Reranker-0.6B"  # the warm hot path, when HIPPO_RERANK is on
 EXPLICIT_MODEL = "Qwen/Qwen3-Reranker-4B"  # /hippo:recall and the MCP recall tool
 
 # The warm path's own bound. The warm server's breaker trips one served call over 1500 ms
@@ -99,11 +101,6 @@ def pair_text(query: str, doc: str) -> str:
 def active_reranker() -> Optional[str]:
     """The Qwen3 reranker this context scores with, or None (the fastembed MiniLM)."""
     return _ACTIVE.get()
-
-
-def default_on() -> bool:
-    """``HIPPO_RERANK`` unset means ON only inside the warm server's high-profile call."""
-    return _ACTIVE.get() == WARM_MODEL
 
 
 @contextmanager
