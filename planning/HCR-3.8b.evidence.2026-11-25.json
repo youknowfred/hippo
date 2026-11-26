@@ -4380,5 +4380,312 @@
  ],
  "not_calibrated": {
   "MRL-truncated spaces (model@dim)": "different cosine spaces; a width needs its own run once HCR-6's bench picks one. Doctor names it."
+ },
+ "with_warm_reranker": {
+  "note": "Re-run after HCR-4 (#237) landed, on main at bc1839d plus this change: the same hook-mode measure with the warm reranker (Qwen/Qwen3-Reranker-0.6B) active, as recall_warm_high.serving runs a high-profile call once the reranker has loaded. HIPPO_RERANK_TIMEOUT raised so every call is reranked; a production call that passes the 0.8 s warm bound falls back to the fused order, which is the case the rest of this file measures. So the entry has to cost no row in both orders, and it does.",
+  "reranker": "Qwen/Qwen3-Reranker-0.6B",
+  "rerank_score_calls": 2216,
+  "entry": "0.11/0.12",
+  "hook_mode": {
+   "off": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.83,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 3
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.8013,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 5.34,
+     "served_rows_median": 6,
+     "rows_on_leaked_off_topic_probes": 10
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 9.47,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 72,
+     "replay_injecting": 261,
+     "replay_rows_mean": 9.62,
+     "replay_rows_median": 10,
+     "replay_wide": 0,
+     "replay_chars_mean": 1568
+    }
+   },
+   "0.11/0.12": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.83,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.8013,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 5.31,
+     "served_rows_median": 6,
+     "rows_on_leaked_off_topic_probes": 5
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 9.37,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 34,
+     "replay_injecting": 261,
+     "replay_rows_mean": 9.0,
+     "replay_rows_median": 10,
+     "replay_wide": 225,
+     "replay_chars_mean": 1489
+    }
+   },
+   "0.11/0.1": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.83,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "31/32",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.8013,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 5.31,
+     "served_rows_median": 6,
+     "rows_on_leaked_off_topic_probes": 5
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 9.47,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 34,
+     "replay_injecting": 261,
+     "replay_rows_mean": 9.29,
+     "replay_rows_median": 10,
+     "replay_wide": 240,
+     "replay_chars_mean": 1525
+    }
+   },
+   "0.11/0.14": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.83,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7857,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 5.25,
+     "served_rows_median": 6,
+     "rows_on_leaked_off_topic_probes": 5
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 9.16,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 34,
+     "replay_injecting": 261,
+     "replay_rows_mean": 8.57,
+     "replay_rows_median": 10,
+     "replay_wide": 203,
+     "replay_chars_mean": 1436
+    }
+   },
+   "0.11/0.18": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.83,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7857,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 5.06,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 5
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 8.89,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 34,
+     "replay_injecting": 261,
+     "replay_rows_mean": 7.75,
+     "replay_rows_median": 10,
+     "replay_wide": 157,
+     "replay_chars_mean": 1333
+    }
+   },
+   "0.11/0.22": {
+    "golden": {
+     "hard_set_hits": "18/18",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 1.0,
+     "abstained": {
+      "fixture": "5/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.78,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 2
+    },
+    "packs": {
+     "hard_set_hits": "30/32",
+     "rows_lost_vs_off": 1,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.7875,
+     "abstained": {
+      "fixture": "6/6",
+      "generic": "12/12",
+      "adjacent": "11/12"
+     },
+     "served_rows_mean": 4.88,
+     "served_rows_median": 5,
+     "rows_on_leaked_off_topic_probes": 5
+    },
+    "hippo": {
+     "hard_set_hits": "26/38",
+     "rows_lost_vs_off": 0,
+     "rows_gained_vs_off": 0,
+     "mrr": 0.4731,
+     "abstained": {
+      "fixture": "7/11",
+      "generic": "10/12",
+      "adjacent": "10/12"
+     },
+     "served_rows_mean": 8.66,
+     "served_rows_median": 10,
+     "rows_on_leaked_off_topic_probes": 34,
+     "replay_injecting": 261,
+     "replay_rows_mean": 6.83,
+     "replay_rows_median": 5,
+     "replay_wide": 111,
+     "replay_chars_mean": 1221
+    }
+   }
+  },
+  "findings": [
+   "Entry 0.11/0.12 with the reranker on: hard sets 18/18, 31/32, 26/38 on and off, MRR identical; rows on leaked off-topic probes 85 -> 41 over the three corpora; replay 9.62 -> 9.00 rows per injecting prompt.",
+   "wide 0.14 still cuts a starter-pack row with the reranker on.",
+   "The reranker itself, count rule off, hook mode: golden MRR 0.956 -> 1.000; starter packs 0.784 -> 0.801; live corpus 26/38 = 26/38 and MRR 0.498 -> 0.473."
+  ]
  }
 }
