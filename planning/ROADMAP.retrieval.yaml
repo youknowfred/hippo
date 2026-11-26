@@ -235,8 +235,10 @@ workstream:
           because the 4B gate's `support` (0.46) sits 0.04 over the floor, so
           nearly any memory both lanes rank corroborates a prompt. Strong 0.60
           with support 0.56 gives 230, 0.60/0.60 gives 227, and no cell
-          changes a hard-set hit or a probe on any corpus. OPEN FOR OWNER:
-          whether the 4B's gate moves to 0.60/0.60 (the 8B's was not swept).
+          changes a hard-set hit or a probe on any corpus. RULED 2026-11-25
+          (owner, "Yes, 0.60/0.60"): the 4B's gate is 0.60/0.60, built with
+          this entry. Not known: whether the 44 prompts it stops were wanted
+          (the replay has no labels). The 8B's gate was not swept and stays.
           (3) Lean's own count entry costs the starter packs 5 hard-set rows
           in hook mode (29/32 -> 24/32), all multi-hop: 2 by the five-row cap
           alone, 1 by the band alone, 2 by both. No setting short of the rule
@@ -247,7 +249,7 @@ workstream:
           after a read on the field corpora the rule was calibrated on.
         calibration_state: >-
           2026-11-25, full width only. Qwen/Qwen3-Embedding-4B: floor 0.42,
-          gate 0.48/0.46 (HCR-3.evidence), count rule band 0.12 / wide 0.14
+          gate 0.60/0.60 (first 0.48/0.46; see hook_mode_findings), count rule band 0.12 / wide 0.14
           (HCR-3.count.evidence). Qwen/Qwen3-Embedding-8B: floor 0.40, gate
           0.50/0.48, count rule band 0.11 / wide 0.12 (HCR-3.8b.evidence;
           explicit mode 18/18, 32/32, 34/38 against lean's 18/18, 32/32,

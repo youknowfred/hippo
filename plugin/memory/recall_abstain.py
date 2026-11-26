@@ -55,9 +55,18 @@ _STRONG_DESC_COVERAGE = 0.40
 # off-topic probes abstained (lean: 18 of 23). Its on/off-topic best cosines separate
 # cleanly (on-topic min 0.495; off-topic max 0.454 over every probe on three corpora,
 # 12 adjacent technical ones included), so both thresholds sit inside that gap: no measured
-# off-topic probe clears either, and ``strong`` is under every on-topic best. Every
-# ``strong`` from 0.46 to 0.60 and every ``support`` from 0.42 to 0.48 gave identical
-# results; 0.40 leaked.
+# off-topic probe clears either. Every ``strong`` from 0.46 to 0.60 and every ``support``
+# from 0.42 to 0.48 gave identical results on those sets; 0.40 leaked. HCR-3 first set
+# 0.48/0.46, the low side of the gap.
+# Moved to 0.60/0.60 the same day (planning/HCR-3.hook-gaps.evidence.2026-11-25.json).
+# The probes and hard sets could not tell the two apart; 300 replayed prompts could. At
+# 0.48/0.46 high injected on 271 of them where lean injects on 229, because ``support``
+# sat 0.04 over the floor and nearly any memory both lanes rank cleared it. At 0.60/0.60
+# it injects on 227, and no hard-set hit, MRR, probe abstention or leaked-probe row moved
+# on any of the three corpora, in explicit or hook mode. ``strong`` is no longer under
+# every on-topic best (the lowest is 0.495): those queries are admitted by corroboration.
+# With the two equal, a cosine never corroborates alone: a memory in both lanes' top 10
+# needs two shared terms, or the query already cleared ``strong``.
 #
 # Qwen3-Embedding-8B, full width (planning/HCR-3.8b.evidence.2026-11-25.json). Its classes do
 # NOT separate as cleanly: one adjacent technical probe reaches 0.491 on the golden corpus,
@@ -68,7 +77,7 @@ _STRONG_DESC_COVERAGE = 0.40
 # (0.42 to 0.46: 9; 0.40: 8).
 _COSINE_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": {"strong": 0.76, "support": 0.72},
-    "Qwen/Qwen3-Embedding-4B": {"strong": 0.48, "support": 0.46},
+    "Qwen/Qwen3-Embedding-4B": {"strong": 0.60, "support": 0.60},
     "Qwen/Qwen3-Embedding-8B": {"strong": 0.50, "support": 0.48},
 }
 

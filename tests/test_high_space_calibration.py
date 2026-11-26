@@ -22,6 +22,9 @@ from memory.recall_query import tokenize
 _EVIDENCE = os.path.join(
     os.path.dirname(__file__), "..", "planning", "HCR-3.evidence.2026-11-25.json"
 )
+_GATE_EVIDENCE = os.path.join(
+    os.path.dirname(__file__), "..", "planning", "HCR-3.hook-gaps.evidence.2026-11-25.json"
+)
 _COUNT_EVIDENCE = os.path.join(
     os.path.dirname(__file__), "..", "planning", "HCR-3.count.evidence.2026-11-25.json"
 )
@@ -47,13 +50,32 @@ def test_the_full_width_4b_space_is_the_plain_model_id():
 def test_floor_and_gate_entries_match_the_dated_evidence():
     chosen = _chosen()
     assert rr._DENSE_FLOOR_BY_MODEL[FOUR_B] == chosen["_DENSE_FLOOR_BY_MODEL"][FOUR_B]
-    assert recall_abstain._COSINE_BY_MODEL[FOUR_B] == chosen["_COSINE_BY_MODEL"][FOUR_B]
     assert rr._dense_floor(FOUR_B) == 0.42
+    # the gate HCR-3 first set is the "was" of the sweep that moved it
+    with open(_GATE_EVIDENCE, encoding="utf-8") as fh:
+        moved = json.load(fh)["chosen"]
+    assert moved["was"] == chosen["_COSINE_BY_MODEL"][FOUR_B]
+    assert recall_abstain._COSINE_BY_MODEL[FOUR_B] == moved["_COSINE_BY_MODEL"][FOUR_B]
 
 
 def test_gate_thresholds_sit_above_the_floor_and_in_order():
     th = recall_abstain._COSINE_BY_MODEL[FOUR_B]
-    assert rr._dense_floor(FOUR_B) < th["support"] < th["strong"]
+    assert rr._dense_floor(FOUR_B) < th["support"] <= th["strong"]
+
+
+def test_the_moved_gate_cost_nothing_the_sweep_measured_and_levels_the_replay_with_lean():
+    with open(_GATE_EVIDENCE, encoding="utf-8") as fh:
+        ev = json.load(fh)["replay_injection_gap"]
+    th = recall_abstain._COSINE_BY_MODEL[FOUR_B]
+    cells = ev["gate_threshold_sweep_high"]["cells"]
+    now, was = cells[f"{th['strong']}/{th['support']}"], cells["0.48/0.46"]
+    for corpus in ("golden", "packs", "hippo"):
+        for key in ("explicit_hits", "explicit_mrr", "explicit_abstained", "hook_hits", "hook_mrr",
+                    "hook_abstained", "leaked_probe_rows"):
+            assert now[corpus][key] == was[corpus][key], (corpus, key)
+    lean = ev["counts"]["lean_inject"]
+    assert was["hippo"]["field"]["injecting"] - lean > 40
+    assert abs(now["hippo"]["field"]["injecting"] - lean) <= 5
 
 
 def test_the_band_default_is_unchanged_by_the_new_space():
@@ -78,7 +100,10 @@ def test_the_count_entry_matches_its_dated_evidence_and_cost_no_hard_set_row():
     assert recall_count.thresholds(FOUR_B) == {"band": 0.12, "wide": 0.14}
     # measured against the floor and gate this file's other tests pin
     assert ev["configured"]["dense_floor"] == rr._DENSE_FLOOR_BY_MODEL[FOUR_B]
-    assert ev["configured"]["gate"] == recall_abstain._COSINE_BY_MODEL[FOUR_B]
+    # ...and at the gate HCR-3 first set; the gate sweep re-ran the hook with this entry on
+    # at the gate that replaced it (the test above reads its hard-set hits as unchanged)
+    with open(_GATE_EVIDENCE, encoding="utf-8") as fh:
+        assert ev["configured"]["gate"] == json.load(fh)["chosen"]["was"]
     # the rule the entry was admitted under: no hard-set row lost on any corpus, abstention equal
     runs = ev["shipped_vs_off_hook_mode_high"]
     assert set(runs["shipped"]) == {"golden", "packs", "hippo"}
@@ -137,9 +162,15 @@ def test_the_gate_now_applies_to_a_4b_index():
 
 
 def test_a_4b_cosine_over_strong_admits_on_dense_alone():
-    # The lowest on-topic best cosine measured was 0.4949, over ``strong``.
-    verdict = _verdict([0.4949, 0.30, 0.20], "something with no shared words at all", [])
+    verdict = _verdict([0.61, 0.30, 0.20], "something with no shared words at all", [])
     assert verdict["admit"] is True and verdict["why"] == "strong"
+
+
+def test_a_4b_cosine_under_strong_needs_the_lexical_lane_to_agree():
+    # The lowest on-topic best cosine measured was 0.4949. The first gate (0.48) admitted
+    # it on dense alone; the gate that replaced it asks for corroboration.
+    verdict = _verdict([0.4949, 0.30, 0.20], "something with no shared words at all", [])
+    assert verdict["admit"] is False and verdict["why"] == "uncorroborated"
 
 
 def test_the_embedder_loads_without_the_language_model_head(monkeypatch, tmp_path):
