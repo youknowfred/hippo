@@ -470,7 +470,7 @@ A profile is how much model a machine spends on recall. There are three, and a m
 |---|---|---|---|
 | `floor` | none: keyword (BM25) only | none | anything |
 | `lean` (default) | bge-small-en-v1.5 (384-dim, ONNX) | off on the hot path | anything Python runs on |
-| `high` | Qwen3-Embedding-4B through MLX | Qwen3-Reranker-0.6B on warm recall; Qwen3-Reranker-4B on `/hippo:recall` and the MCP `recall` tool | Apple Silicon Macs, through [warm recall](#warm-recall-opt-in) |
+| `high` | Qwen3-Embedding-4B through MLX | off on warm recall (Qwen3-Reranker-0.6B with `HIPPO_RERANK=1`); Qwen3-Reranker-4B on `/hippo:recall` and the MCP `recall` tool | Apple Silicon Macs, through [warm recall](#warm-recall-opt-in) |
 
 ```
 hippo setup --profile                      # the active profile, where it was set, and what it serves here
@@ -501,16 +501,16 @@ time limit keeps the order it was given. None of these raises or blocks a prompt
 downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
 
 **Cost.** No money and no network once the weights are on disk. Memory is the cost: each session's
-warm server holds its own copy of the embedder (4.1 GB of unified memory, measured) and the warm
-reranker (0.6 GB); the larger reranker (4.1 GB) loads the first time an explicit recall asks for
-it. Each loads in about 0.4 to 2 seconds from a warm disk cache, and the first load after a reboot
+warm server holds its own copy of the embedder (4.1 GB of unified memory, measured), plus the
+warm reranker (0.6 GB) only if you turn it on with `HIPPO_RERANK=1`; the larger reranker (4.1 GB)
+loads the first time an explicit recall asks for it. Each loads in about 0.4 to 2 seconds from a warm disk cache, and the first load after a reboot
 takes about 5 seconds for each 4B model.
 
 **What `high` buys, measured.** On hippo's own corpus (108 memories, a 38-question test set of 16
 single-hop and 22 multi-hop questions, top 10), `high` does **not** yet beat `lean` at finding
 the right memory: `lean` finds 33 of 38 and `high` finds 31. What `high` finds, it ranks higher
 (mean reciprocal rank 0.59 against 0.57). The reranker raises `lean`'s ranking (0.62, still 33 of
-38), but on `high` it lowers it slightly (0.57). Reranking the top 30 candidates instead of the
+38), but on `high` it lowers it slightly (0.57), which is why it is off by default there. Reranking the top 30 candidates instead of the
 top 10 lifts `high` to 34 of 38, the best of any setup tried, but hippo does not do that yet: it
 is too slow for the per-prompt budget as measured. Every setup injects about the same amount per
 prompt (roughly 600 tokens). The numbers, the method and the setups not listed here are in

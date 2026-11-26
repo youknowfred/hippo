@@ -76,6 +76,15 @@ meta:
         change to the embedder or floor; (D4) the HCR-5 PPR lane is PARKED:
         default OFF, code kept, re-run once over the high index in HCR-6 and
         the flag retired if it is still flat.
+    - date: 2026-11-25
+      decisions: >-
+        Third ruling, on HCR-6's evidence ("turn off the rerank default for
+        high"): high's warm rerank default is OFF. HIPPO_RERANK unset now means
+        no rerank on every path; the warm server loads the 0.6B only when the
+        flag is on. Evidence: planning/HCR-6.evidence.2026-11-25.json — at
+        HCR-3's 0.42 floor the 0.6B lowers high's MRR 0.592 -> 0.573 with
+        recall flat at 31/38. Reverses Q3 (2026-11-25, first ruling) for the
+        warm path only; the explicit surfaces keep the 4B.
 
 workstream:
   - id: HCR
@@ -188,7 +197,7 @@ workstream:
         title: Rerank seam upgrade — Qwen3-Reranker-0.6B warm-default, 4B explicit
         priority: P1
         effort: M
-        status: done            # 2026-11-25: measured on the owner's Mac; planning/HCR-4.evidence.2026-11-25.json
+        status: done            # 2026-11-25: measured on the owner's Mac; planning/HCR-4.evidence.2026-11-25.json. Warm default turned OFF the same day on HCR-6's evidence (third owner ruling)
         gated_on: [HCR-2]
         problem: >-
           The rerank lane is a 2022 6-layer MiniLM, and it is off by default on
@@ -315,7 +324,7 @@ workstream:
         title: Evidence spine + docs capstone — bench-before-flip made mechanical
         priority: P1
         effort: M
-        status: built           # 2026-11-25: harness + evidence + docs; four owner calls open (open_for_owner)
+        status: built           # 2026-11-25: harness + evidence + docs; three owner calls open (open_for_owner)
         gated_on: [HCR-2, HCR-3, HCR-4, HCR-5]
         problem: >-
           The workstream's law (no flips without evidence) needs an instrument
@@ -354,8 +363,8 @@ workstream:
           SETTLED: keep native 2560 (1024: 30 / 0.598, 2048: 31 / 0.578 at the
           same floor). Injection flat (578-597 tokens).
         open_for_owner: >-
-          (1) high's warm rerank default (ON since HCR-4) LOWERS MRR at HCR-3's
-          0.42 floor (0.592 -> 0.573): keep, or turn it off for high; (2) the
+          (1) RULED 2026-11-25 (third owner ruling): high's warm rerank default
+          is off; (2) the
           deep pool closes high's gap but its median (~1.7-1.9 s under load)
           misses SERVE_BUDGET_MS: measure smaller pools, or pool only on the
           explicit surfaces; (3) D2: lean+rerank's quality case holds (+0.050
