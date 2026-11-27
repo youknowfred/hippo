@@ -1,0 +1,123 @@
+{
+ "item": "HCR-9 (as released: the profiles v1.49.0 ships, on HCR-8's held-out set)",
+ "date": "2026-11-27",
+ "method": "bench/mmr_eval.py's 'organic' condition, which is HCR-8's set and scoring (347 held-out questions over three corpora, pooled-judged gold, plain recall() top 10), run once per space with the tables as committed for v1.49.0, on the corpus copies the calibration used. The two runs are paired question by question. high's v1.48 arm is planning/HCR-8.evidence.2026-11-26.json's 'pipe/high' (303 of 347, MRR 0.712): it needs description rows, which this run's index no longer holds.",
+ "corpus_labels": "hippo's own corpus (108 memories) and two private project corpora (113 and 1,070)",
+ "arms": {
+  "lean, v1.49 (bge-small, description rows, re-cut pool-scaled at 0.4)": {
+   "n": 347,
+   "hits": 302,
+   "hit_rate": 0.8703,
+   "hit_rate_ci95": [
+    0.8309,
+    0.9016
+   ],
+   "hits_at_5": 272,
+   "mrr": 0.6836,
+   "mrr_ci95": [
+    0.6397,
+    0.7254
+   ]
+  },
+  "high, v1.49 (Qwen3-Embedding-4B, whole-memory rows, floor 0.44, re-cut pool-scaled at 0.4)": {
+   "n": 347,
+   "hits": 336,
+   "hit_rate": 0.9683,
+   "hit_rate_ci95": [
+    0.9441,
+    0.9822
+   ],
+   "hits_at_5": 320,
+   "mrr": 0.7739,
+   "mrr_ci95": [
+    0.738,
+    0.8089
+   ]
+  },
+  "lean, v1.48 (the re-cut at lambda 0.8 on the raw score)": {
+   "n": 347,
+   "hits": 286,
+   "hit_rate": 0.8242,
+   "hit_rate_ci95": [
+    0.7807,
+    0.8606
+   ],
+   "hits_at_5": 264,
+   "mrr": 0.6679,
+   "mrr_ci95": [
+    0.6219,
+    0.7115
+   ]
+  }
+ },
+ "paired": {
+  "high v1.49 against lean v1.49": {
+   "n": 347,
+   "only_this_found": 36,
+   "only_reference_found": 2,
+   "hit_rate_delta": 0.098,
+   "hit_rate_delta_ci95": [
+    0.0663,
+    0.1326
+   ],
+   "mrr_delta": 0.0904,
+   "mrr_delta_ci95": [
+    0.0611,
+    0.1218
+   ],
+   "resolved": {
+    "hits": true,
+    "mrr": true
+   }
+  },
+  "high v1.49 against lean v1.48": {
+   "n": 347,
+   "only_this_found": 52,
+   "only_reference_found": 2,
+   "hit_rate_delta": 0.1441,
+   "hit_rate_delta_ci95": [
+    0.1066,
+    0.1844
+   ],
+   "mrr_delta": 0.106,
+   "mrr_delta_ci95": [
+    0.0751,
+    0.14
+   ],
+   "resolved": {
+    "hits": true,
+    "mrr": true
+   }
+  },
+  "lean v1.49 against lean v1.48": {
+   "n": 347,
+   "only_this_found": 19,
+   "only_reference_found": 3,
+   "hit_rate_delta": 0.0461,
+   "hit_rate_delta_ci95": [
+    0.0231,
+    0.072
+   ],
+   "mrr_delta": 0.0157,
+   "mrr_delta_ci95": [
+    0.0077,
+    0.0247
+   ],
+   "resolved": {
+    "hits": true,
+    "mrr": true
+   }
+  }
+ },
+ "summary": [
+  "high as released finds 336 of 347 in the top 10 ([0.9441, 0.9822]), MRR 0.7739 [0.738, 0.8089]. lean as released finds 302 ([0.8309, 0.9016]), MRR 0.6836 [0.6397, 0.7254].",
+  "The released margin of high over lean: +0.0980 [0.0663, 0.1326] in hit rate (36 questions only high found, 2 only lean), +0.0904 [0.0611, 0.1218] in MRR.",
+  "It is wider than the tuned-against-tuned margin of step 1 (+0.0519 [0.0231, 0.0807], planning/HCR-9.tuned-lean.evidence.2026-11-27.json) because lean keeps description rows in this release: that file gave lean whole-memory rows too.",
+  "lean itself moved with the re-cut: +0.0461 [0.0231, 0.072] against v1.48, on the same index."
+ ],
+ "caveats": [
+  "Plain recall() top 10; the hook-mode and abstention readings are in planning/HCR-9.calibration.evidence.2026-11-27.json.",
+  "HCR-8's caveats carry over: model-written questions and judgments, one target per question, a bias toward the head of each file."
+ ],
+ "note": "counts and intervals only, no query and no memory name. Intervals are 95%: Wilson for a hit rate, percentile bootstrap (2000 resamples) for a mean and for every paired difference."
+}

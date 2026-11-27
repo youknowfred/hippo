@@ -10,6 +10,8 @@
 # STATE 2026-11-25: HCR-1..4 and HCR-6 are done; HCR-5 (the PPR lane) was built,
 # measured flat and retired. Each item's status line below says what shipped.
 # 2026-11-26: HCR-7 (one shared embedder per machine) is proposed and unbuilt.
+# 2026-11-27: HCR-8 (the held-out eval) and HCR-9 (whole-memory rows for the 4B, its
+# calibration re-run, the MMR re-cut rescaled) are done; HCR-9 ships in v1.49.0.
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -137,6 +139,28 @@ meta:
         arm is added to HCR-7's evidence run: the 8B with the warm reranker in
         HOOK mode (explicit mode read 34/38, MRR 0.652, the best measured; the
         hook has not been read). No default changes without that file.
+    - date: 2026-11-27
+      decisions: >-
+        Seventh ruling, on HCR-8's evidence ("build and deploy and
+        tag/release"): the next release is the one where high is meaningfully
+        better than lean, built in this order. (G1) Measure the missing arm
+        first, lean with whole-memory rows and the MMR re-cut off together;
+        if it lands inside tuned high's interval, stop and ask whether the
+        release is "better lean for every machine" instead. (G2) Embed whole
+        memories in the index build in place of the description row, for
+        high, and for lean too if G1 supports it; rebuilds automatic. (G3)
+        Recalibrate the changed space(s) by HCR-3's method, with off-topic
+        probes, so abstention and injection volume are checked. (G4) Decide
+        the MMR re-cut on a set that can measure it (near-duplicate clusters),
+        and change it only if that evidence supports it. (G5) Release, tag,
+        install on the owner's Mac and switch it back to high. (G6) HCR-7 is a
+        separate change after the release. Built as HCR-9. G1's stop did not
+        fire (the margin's interval excludes zero). Three calls inside the
+        ruling were the builder's, on the evidence, and are recorded under
+        HCR-9's open_for_owner for the owner to overturn: lean keeps
+        description rows in this release; the re-cut is rescaled, not removed;
+        the 4B's count rule is kept where a wider one would serve lean's
+        volume for ten fewer rows found.
 
 workstream:
   - id: HCR
@@ -620,6 +644,130 @@ workstream:
           HCR-6 bench, and halves the cost at best. MRL truncation: shrinks the
           index, not the model — no memory saved. Sharing weight pages between
           processes: not available, mx.load copies into private Metal buffers.
+
+      - id: HCR-8
+        title: A held-out eval that can resolve high against lean, and its ablations
+        priority: P0
+        effort: M
+        status: done            # 2026-11-26: bench + counts-only evidence (#257); no shipped default changed
+        gated_on: [HCR-6]
+        problem: >-
+          HCR-6's 38 rows could not tell high from lean (31 against 33), and
+          the owner's read was that high was under-optimized. Nothing said
+          which knob moves it.
+        as_built: >-
+          bench/high_eval_set.py, high_eval.py, high_eval_report.py,
+          rerank_latency.py. 347 questions over three corpora (hippo's own and
+          two private ones of 110 and 1,070 memories), each written from one
+          memory with no retriever in the loop, gold checked by blind pooled
+          judging. Every number carries a 95% interval.
+        ab_result: >-
+          planning/HCR-8.evidence.2026-11-26.json. lean 286 of 347, high as
+          shipped 303 (+0.049 [+0.012, +0.089]), lean + the 0.6B reranker over
+          30: 306. The query instruction, the dense floor and the fusion weight
+          move nothing. The document text is the largest lever: whole-memory
+          rows take the 4B 303 -> 320 and lean 286 -> 307. The MMR re-cut costs
+          hits on both (off: lean 302, 4B on whole rows 335), on a set with one
+          target per question that cannot score what the re-cut is for. The 8B
+          ties the 4B wherever recall() serves. Not measured: lean with both
+          changes together; abstention and injection volume on the changed
+          rows. HCR-9 took both up.
+
+      - id: HCR-9
+        title: Whole-memory rows for the 4B, its space re-measured, the MMR re-cut rescaled
+        priority: P0
+        effort: L
+        status: done            # 2026-11-27: built on the seventh owner ruling; ships in v1.49.0
+        gated_on: [HCR-8]
+        problem: >-
+          HCR-8 found what moves high (the text an entry row embeds, and the
+          MMR re-cut) but changed nothing: whole rows are another cosine
+          distribution than the one HCR-3 calibrated, the re-cut had only been
+          measured by what it costs, and the two changes had never been run
+          together on lean, so the real margin was unknown.
+        design: >-
+          The seventh ruling's six steps, in order. One table says which
+          models' entry rows embed the whole file
+          (build_index_dense.WHOLE_ROW_MODELS); a model joins it only with its
+          own calibration run, so the row text and the thresholds move
+          together or not at all.
+        as_built: >-
+          2026-11-27. (1) The index: an entry carries row_hash (sha1 over the
+          whole file) beside its doc_text hash; in a listed space the entry row
+          embeds the whole file (cut at the embedder's 1,024 tokens), the
+          manifest records row_text "whole", and rows are reused on row_hash.
+          No schema bump: a lean manifest gains the key at its next refresh with
+          every row reused, and a twin built on description rows is not served
+          (recall_warm_high.fresh) until its entry rows are re-embedded; its
+          body-chunk rows are reused. BM25, the description on display and
+          every lean row are untouched. (2) The twin build, because whole rows
+          double it (about 36 minutes for 1,070 memories, unloaded): one
+          builder per twin across sessions (a flock on high/.build.lock; ten
+          sessions used to embed one corpus ten times at once), and each pass
+          embeds at most 256 rows and persists them, so a session that ends
+          mid-build costs one pass. (3) The 4B's space re-measured on whole
+          rows over five corpora (bench/space_calibration.py): floor 0.42 ->
+          0.44, gate 0.60/0.60 kept, count rule 0.12/0.14 kept, band default
+          kept. (4) The MMR re-cut: its relevance term was the raw fused score
+          (about 0.02) against a cosine (about 0.7), so lambda 0.8 weighed
+          diversity about nine to one. Relevance is now scaled to the pool and
+          lambda is 0.4 (bench/mmr_eval.py), on every profile.
+        ab_result: >-
+          Four files, all 2026-11-27, every comparison with a 95% interval.
+          HCR-9.tuned-lean.evidence: tuned lean (whole rows, re-cut off) 317 of
+          347 against tuned high 335; the margin is +0.052 [+0.023, +0.081]
+          hits and +0.053 [+0.025, +0.081] MRR, all of it on paraphrased
+          questions, so G1's stop did not fire. HCR-9.mmr.evidence: 274
+          re-captures of 75 questions' targets and strongest wrong competitors.
+          The v1.48 re-cut removed duplicates (-0.75 and -1.21 competitor rows
+          of the top 10, lean and high) and lost right answers even there
+          (hit@5 -0.107 [-0.187, -0.027] and -0.080 [-0.147, -0.027]); on the
+          corpora as they are it cost -0.046 [-0.075, -0.020] and -0.043
+          [-0.069, -0.017] hits. Pool-scaled at 0.4 loses nothing resolved
+          against the re-cut off (lean 302 = 302, high 336 against 335 of 347)
+          and still takes a triplicated fact's rows in the top 5 down by 0.51
+          [0.35, 0.68] on high and 0.20 [0.11, 0.29] on lean. 0.3 costs the 4B
+          a resolved 1.2 points of hit@5. HCR-9.calibration.evidence: on whole
+          rows the generic off-topic ceiling is 0.433 (was 0.402) and the lowest
+          on-topic best still 0.495; the floor decides little (481 to 484 of
+          539 on-topic rows from 0.30 to 0.50, the same abstentions at every
+          floor with the gate on). As released, high against lean on the same
+          539 rows: explicit 482 against 438, hook 369 against 324; injecting
+          replayed prompts 225 and 219 against 227 and 211; rows per injecting
+          prompt 8.7 against 5.3 and 5.5. HCR-9.release.evidence: high as
+          released 336 of 347 (MRR 0.774), lean as released 302 (MRR 0.684);
+          the released margin is +0.098 [+0.066, +0.133] hits, +0.090 [+0.061,
+          +0.122] MRR. lean against its v1.48 self: +0.046 [+0.023, +0.072].
+        open_for_owner: >-
+          Three calls made by the builder inside the seventh ruling, each with
+          the evidence and what would overturn it. (1) lean keeps description
+          rows. G2 said "for lean too if G1 supports it", and G1 does for plain
+          recall (whole rows on top of the re-cut off: +0.043 [+0.014, +0.072]).
+          The calibration run says it does not for what lean serves on every
+          prompt: in hook mode whole rows read 320 of 539 against 316, with the
+          same abstentions and replay volume. And every machine would pay: a
+          full re-embed at 512 tokens a memory (an unbudgeted build of the
+          1,070-memory corpus took 1,209 s against 409 s, at 11 GB), behind a
+          15-second SessionStart budget that would leave a large corpus on BM25
+          for many sessions, plus LIF-2's duplicate thresholds, which are
+          calibrated on description rows. To adopt it: add bge-small to
+          WHOLE_ROW_MODELS with a schema bump, a bounded-memory build, and
+          new_memory's duplicate check re-measured. (2) The MMR re-cut is
+          rescaled, not turned off. Off is the simpler reading of HCR-8; 0.4
+          pool-scaled is within every interval of off and keeps part of what
+          the re-cut is for. HIPPO_MMR_LAMBDA=1.0 is off. (3) The 4B's count
+          rule stays 0.12/0.14, HCR-3's no-row-lost rule: it serves 8.7 rows
+          per injecting prompt where lean serves 5.3 and 5.5. wide 0.26 serves
+          lean's volume (5.4 and 5.7) and finds 359 rows in hook mode against
+          369; 0.18 finds 363 at 7.3 and 7.6. Volume against rows found is the
+          same call the owner made for lean on 2026-11-25 ("Leave it").
+        not_done: >-
+          The 8B keeps description rows and its HCR-3 entries: it was not
+          re-run, and HCR-8 has it tied with the 4B. Abstention on adjacent
+          technical probes is still behind lean on hippo's corpus (8 of 12
+          against 11) and on a large corpus's own probes (12 of 20 against
+          15), as it was on description rows. The warm reranker was not
+          re-read on whole rows (it is off by default).
 
   # Severed / explicitly out of scope (dated at ratification, 2026-11-25):
   #   - TrustGraph platform adoption — standing rejection re-affirmed; ops

@@ -247,22 +247,44 @@ you, and nothing downloads until you run the fetch with `--yes`.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/readme/profile-bench-dark.svg">
-    <img src="assets/readme/profile-bench.svg" alt="Right memory in the top 10, out of 38 questions on hippo's own corpus. lean (bge-small-en-v1.5): 33, MRR 0.57. high (Qwen3-Embedding-4B): 31, MRR 0.59. high asked by hand (4B plus Qwen3-Reranker over the top 30): 34, MRR 0.60. Qwen3-Embedding-8B in plain recall: 34, MRR 0.60." width="820">
+    <img src="assets/readme/profile-bench.svg" alt="Right memory in the top 10, out of 347 held-out questions over three corpora. lean in v1.48: 286, MRR 0.67. lean in v1.49: 302, MRR 0.68. high in v1.48: 303, MRR 0.71. high in v1.49, with whole-memory rows: 336, MRR 0.78." width="820">
   </picture>
 </p>
 
-On hippo's own corpus (108 memories, a 38-question test set of 16
-single-hop and 22 multi-hop questions, top 10), `high` does **not** yet beat `lean` at finding
-the right memory: `lean` finds 33 of 38 and `high` finds 31. What `high` finds, it ranks higher
-(mean reciprocal rank 0.59 against 0.57). The reranker raises `lean`'s ranking (0.62, still 33 of
-38), but on `high` it lowers it slightly (0.57), which is why it is off by default there. Reranking the top 30 candidates instead of the
-top 10 lifts `high` to 34 of 38, the best of any setup tried. That is too slow for the per-prompt
-budget as measured (about 1.9 seconds), so only `/hippo:recall` and the MCP `recall` tool do it,
-on `high`. Every setup injects about the same amount per
-prompt (roughly 600 tokens). The numbers, the method and the setups not listed here are in
-[planning/HCR-6.evidence.2026-11-25.json](planning/HCR-6.evidence.2026-11-25.json); re-run them on
-your own corpus with `python -m bench.profile_ab` (the command is at the top of
-[bench/profile_ab.py](bench/profile_ab.py)).
+On 347 held-out questions over three corpora (hippo's own, and two private project corpora of
+113 and 1,070 memories; each question written from one memory, with no retriever in the loop),
+`high` finds the right memory in the top 10 for 336 and `lean` for 302. That is 9.8 points, and
+between 6.6 and 13.3 at 95% confidence. The gap is on questions that paraphrase the memory: when
+a question uses the memory's own words, every setup tried finds 96 to 99 of 100.
+
+In v1.48 the two read 303 and 286. Two changes moved them:
+
+- **`high` now embeds each whole memory**, where it embedded the memory's one-line description
+  (the body sections are indexed beside it on both profiles, as before). This was the largest
+  single lever measured. `lean` keeps description rows: whole rows help its plain recall too, but
+  not what it serves per prompt, and they would triple its index build on every machine.
+- **The diversity re-cut was rescaled, on both profiles.** After ranking, hippo re-cuts the top
+  rows so near-duplicates do not crowd out other memories. Its relevance term was on a far smaller
+  scale than its diversity term, so it pushed right answers out: 16 of 347 on `lean`, 15 on
+  `high`. Rescaled, it loses none that the set can resolve and still trims duplicate rows.
+
+In the per-prompt hook, over 539 questions on five corpora, `high` puts the right memory on a
+rendered line for 369 and `lean` for 324. It injects on about as many prompts as `lean` (225 and
+219 of two corpora's 300 replayed prompts, against 227 and 211), and puts more rows in each block:
+8.7 against 5.4. Off-topic prompts are turned away about equally; `high` is behind on technical
+questions that sit next to a corpus's subject (8 of 12 turned away against 11 on hippo's corpus).
+
+`/hippo:recall` and the MCP `recall` tool on `high` still rerank the top 30 candidates. That was
+measured before these changes, and on whole-memory rows it added nothing the set could resolve,
+for about a second per call.
+
+The numbers, their intervals and what was not measured are in
+[planning/HCR-9.release.evidence.2026-11-27.json](planning/HCR-9.release.evidence.2026-11-27.json)
+and [planning/HCR-9.calibration.evidence.2026-11-27.json](planning/HCR-9.calibration.evidence.2026-11-27.json);
+the question set's method is in
+[planning/HCR-8.evidence.2026-11-26.json](planning/HCR-8.evidence.2026-11-26.json). One machine,
+three to five corpora. To compare the profiles on your own corpus, run `python -m bench.profile_ab`
+(the command is at the top of [bench/profile_ab.py](bench/profile_ab.py)).
 
 ### How `high` behaves
 

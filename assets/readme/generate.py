@@ -168,14 +168,15 @@ def profiles(t):
 
 # --------------------------------------------------------------------------- bench bars
 def bench(t):
+    total = 347
     rows = [
-        ("lean", "bge-small-en-v1.5", 33, "0.57", False),
-        ("high", "Qwen3-Embedding-4B", 31, "0.59", False),
-        ("high, asked by hand", "4B + Qwen3-Reranker over the top 30", 34, "0.60", True),
-        ("8B, plain recall", "Qwen3-Embedding-8B", 34, "0.60", False),
+        ("lean, v1.48", "bge-small-en-v1.5", 286, "0.67", False),
+        ("lean, v1.49", "the same index; diversity re-cut rescaled", 302, "0.68", False),
+        ("high, v1.48", "Qwen3-Embedding-4B, description rows", 303, "0.71", False),
+        ("high, v1.49", "whole-memory rows; re-cut rescaled", 336, "0.78", True),
     ]
     b = []
-    b.append('<text class="k" x="24" y="30">RIGHT MEMORY IN THE TOP 10, OF 38 QUESTIONS</text>')
+    b.append(f'<text class="k" x="24" y="30">RIGHT MEMORY IN THE TOP 10, OF {total} HELD-OUT QUESTIONS</text>')
     x0, wmax = 330, 400
     b.append(f'<text class="s" x="{x0 + wmax + 92}" y="30" text-anchor="middle">MRR</text>')
     for i, (name, sub, n, mrr, best) in enumerate(rows):
@@ -183,15 +184,15 @@ def bench(t):
         b.append(f'<text class="h" x="24" y="{y + 18}">{name}</text>')
         b.append(f'<text class="s" x="24" y="{y + 36}">{sub}</text>')
         b.append(f'<rect class="track" x="{x0}" y="{y + 6}" width="{wmax}" height="26" rx="6"/>')
-        w = wmax * n / 38
+        w = wmax * n / total
         b.append(f'<rect class="{"best" if best else "bar"}" x="{x0}" y="{y + 6}" width="{w:.0f}" height="26" rx="6"/>')
         b.append(f'<text class="h" x="{x0 + wmax + 14}" y="{y + 24}">{n}</text>')
         b.append(f'<text class="s" x="{x0 + wmax + 92}" y="{y + 24}" text-anchor="middle" font-size="13.5">{mrr}</text>')
-    b.append('<text class="s" x="24" y="302">hippo&#8217;s own corpus: 108 memories, 16 single-hop and 22 multi-hop '
-             'questions. One corpus on one machine, 2026-11-25.</text>')
-    return svg(880, 316, "Bar chart of memories found in the top 10 out of 38 questions on hippo's own corpus: "
-               "lean 33 (MRR 0.57), high with Qwen3-Embedding-4B 31 (MRR 0.59), high with the Qwen3 reranker "
-               "over the top 30 candidates 34 (MRR 0.60), Qwen3-Embedding-8B in plain recall 34 (MRR 0.60).",
+    b.append('<text class="s" x="24" y="302">Three corpora (108, 113 and 1,070 memories), questions written from one '
+             'memory each. One machine, 2026-11-27.</text>')
+    return svg(880, 316, f"Bar chart of memories found in the top 10 out of {total} held-out questions over three "
+               "corpora: lean in v1.48 286 (MRR 0.67), lean in v1.49 302 (MRR 0.68), high in v1.48 303 (MRR 0.71), "
+               "high in v1.49 with whole-memory rows 336 (MRR 0.78).",
                "\n".join(b), t)
 
 
