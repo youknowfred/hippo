@@ -132,7 +132,7 @@ releases:
       - "`hippo tend` judges every diet line against the floor as it is, so with lanes declared it can show a line as safe that stops being safe once earlier lines go (8 shown and 4 safe on a fixture). The review weighs the floor again after each line; the queue's list is unchanged"
   - version: v1.48.0
     theme: "Retrieval profiles (the HCR workstream of ROADMAP.retrieval.yaml, ratified 2026-11-25: a per-machine profile, floor | lean | high; high is Qwen3-Embedding-4B through MLX on Apple Silicon, served by warm recall only, with the 8B as a knob; the explicit surfaces on high rerank the top 30; the PPR graph lane was built, measured flat and removed). lean is the default and is unchanged. No ROADMAP.v2 item"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "high does not beat lean at plain recall on hippo's corpus (31/38 against 33/38, top 10); only the explicit surfaces' 30-hit rerank does (34/38)"
@@ -140,6 +140,16 @@ releases:
       - "The 4B's gate at 0.60/0.60 stops 44 of 300 replayed prompts that 0.48/0.46 admitted; whether those injections were wanted is not known (the replay has no labels). The 8B's gate was not swept"
       - "lean's row-count rule costs the starter packs 5 of 32 hard-set rows in hook mode; a six-row cap restores 2. Left as is by the owner's ruling until it is read on emgl and Skyline"
       - "Hook-mode hard-set numbers count a floor-collapsed expected memory as a miss (7 of 38 rows on hippo's corpus); no instrument reports both readings yet"
+  - version: v1.49.0
+    theme: "Whole memories (HCR-9 of ROADMAP.retrieval.yaml, on the owner's seventh ruling there: high's index embeds each whole memory, its space re-measured on five corpora, floor 0.42 to 0.44; the diversity re-cut rescaled on every profile; one builder per high index, in resumable passes; and the MLX cache cap of #254). lean is the default and keeps description rows. No ROADMAP.v2 item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "Three calls inside the ruling were the builder's and wait on the owner (ROADMAP.retrieval.yaml, HCR-9 open_for_owner): lean keeps description rows; the re-cut is rescaled where off was the simpler reading; high's row-count rule is kept at 8.7 rows per injecting prompt where a wider one serves lean's 5.4 for ten fewer rows found of 539"
+      - "The released margin (336 against 302 of 347, +9.8 points [+6.6, +13.3]) is one machine, three corpora, questions and judgments written by a model"
+      - "high turns away fewer technical-but-unrelated prompts than lean on hippo's corpus (8 of 12 against 11) and on a large corpus's own probes (12 of 20 against 15)"
+      - "The 8B was not re-measured: it keeps description rows and its v1.48 calibration"
+      - "Each session's warm server still loads its own copy of the embedder (HCR-7, proposed)"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned

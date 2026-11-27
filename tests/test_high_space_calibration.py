@@ -4,6 +4,11 @@ The numbers come from planning/HCR-3.evidence.2026-11-25.json (a real-model run,
 reproducible in CI: the test venv has no MLX on purpose). These tests pin the table entries
 to that file, key them by the space id the high index stamps, and check that a space the
 evidence did not measure (an MRL-truncated width of either model) stays uncalibrated.
+
+HCR-9 (2026-11-27) moved the 4B's entry rows to whole memories and re-ran the method on
+them: planning/HCR-9.calibration.evidence.2026-11-27.json is what the 4B's entries are
+pinned to now, and HCR-3's files are its "was". The 8B was not re-run and keeps both its
+description rows and its HCR-3 entries.
 """
 
 from __future__ import annotations
@@ -28,6 +33,9 @@ _GATE_EVIDENCE = os.path.join(
 _COUNT_EVIDENCE = os.path.join(
     os.path.dirname(__file__), "..", "planning", "HCR-3.count.evidence.2026-11-25.json"
 )
+_WHOLE_ROWS_EVIDENCE = os.path.join(
+    os.path.dirname(__file__), "..", "planning", "HCR-9.calibration.evidence.2026-11-27.json"
+)
 FOUR_B = embed_mlx.space_id(embed_mlx.DEFAULT_HIGH_MODEL)
 
 
@@ -47,10 +55,19 @@ def test_the_full_width_4b_space_is_the_plain_model_id():
     assert FOUR_B == "Qwen/Qwen3-Embedding-4B"
 
 
+def _whole():
+    with open(_WHOLE_ROWS_EVIDENCE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def test_floor_and_gate_entries_match_the_dated_evidence():
-    chosen = _chosen()
-    assert rr._DENSE_FLOOR_BY_MODEL[FOUR_B] == chosen["_DENSE_FLOOR_BY_MODEL"][FOUR_B]
-    assert rr._dense_floor(FOUR_B) == 0.42
+    chosen, now = _chosen(), _whole()["chosen"]
+    # HCR-3's floor is the "was" of the whole-row run that moved it
+    assert now["was"]["_DENSE_FLOOR_BY_MODEL"][FOUR_B] == chosen["_DENSE_FLOOR_BY_MODEL"][FOUR_B] == 0.42
+    assert rr._DENSE_FLOOR_BY_MODEL[FOUR_B] == now["_DENSE_FLOOR_BY_MODEL"][FOUR_B]
+    assert rr._dense_floor(FOUR_B) == 0.44
+    assert recall_abstain._COSINE_BY_MODEL[FOUR_B] == now["_COSINE_BY_MODEL"][FOUR_B]
+    assert recall_count._COUNT_BY_MODEL[FOUR_B] == now["_COUNT_BY_MODEL"][FOUR_B]
     # the gate HCR-3 first set is the "was" of the sweep that moved it
     with open(_GATE_EVIDENCE, encoding="utf-8") as fh:
         moved = json.load(fh)["chosen"]
@@ -98,8 +115,9 @@ def test_the_count_entry_matches_its_dated_evidence_and_cost_no_hard_set_row():
         ev = json.load(fh)
     assert recall_count._COUNT_BY_MODEL[FOUR_B] == ev["chosen"]["_COUNT_BY_MODEL"][FOUR_B]
     assert recall_count.thresholds(FOUR_B) == {"band": 0.12, "wide": 0.14}
-    # measured against the floor and gate this file's other tests pin
-    assert ev["configured"]["dense_floor"] == rr._DENSE_FLOOR_BY_MODEL[FOUR_B]
+    # measured against the floor HCR-3 set (description rows); HCR-9 re-ran the entry on
+    # whole rows at the floor that replaced it (test_the_count_entry_on_whole_rows_...)
+    assert ev["configured"]["dense_floor"] == _whole()["chosen"]["was"]["_DENSE_FLOOR_BY_MODEL"][FOUR_B]
     # ...and at the gate HCR-3 first set; the gate sweep re-ran the hook with this entry on
     # at the gate that replaced it (the test above reads its hard-set hits as unchanged)
     with open(_GATE_EVIDENCE, encoding="utf-8") as fh:
@@ -123,9 +141,79 @@ def test_the_count_band_covers_what_each_measured_corpus_asks_for():
 
 
 def test_the_private_corpus_evidence_carries_no_text():
-    with open(_COUNT_EVIDENCE, encoding="utf-8") as fh:
-        raw = fh.read()
-    assert '"query"' not in raw and '"expected"' not in raw and '"name"' not in raw
+    for path in (_COUNT_EVIDENCE, _WHOLE_ROWS_EVIDENCE):
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        assert '"query"' not in raw and '"expected"' not in raw and '"name"' not in raw, path
+
+
+# --------------------------------------------------------------------------- #
+# HCR-9: the 4B on whole-memory rows
+# --------------------------------------------------------------------------- #
+def _n(cell: str) -> int:
+    return int(cell.split("/")[0])
+
+
+def test_the_models_on_whole_rows_are_the_ones_the_evidence_measured():
+    from memory import build_index_dense as bd
+
+    ev = _whole()
+    assert sorted(bd.WHOLE_ROW_MODELS) == ev["chosen"]["WHOLE_ROW_MODELS"] == [FOUR_B]
+    assert bd.row_text(FOUR_B) == "whole"
+    # the row text and the thresholds move together: nothing else was re-measured
+    assert set(ev["not_changed"]) >= {"BAAI/bge-small-en-v1.5", "Qwen/Qwen3-Embedding-8B"}
+    for model in ev["not_changed"]:
+        assert bd.row_text(model) == "description", model
+    assert rr._DENSE_FLOOR_BY_MODEL["BAAI/bge-small-en-v1.5"] == 0.60
+    assert rr._DENSE_FLOOR_BY_MODEL[EIGHT_B] == 0.40
+
+
+def test_the_whole_row_floor_sits_between_the_measured_classes():
+    ev = _whole()
+    floor = rr._DENSE_FLOOR_BY_MODEL[FOUR_B]
+    strong = recall_abstain._COSINE_BY_MODEL[FOUR_B]["strong"]
+    assert len(ev["distributions_4b_whole_rows"]) == 5
+    for corpus, d in ev["distributions_4b_whole_rows"].items():
+        assert floor < d["on_topic_best_cosine"]["min"], corpus  # no on-topic query is cut at the floor
+        assert floor > d["off_topic_best_cosine"]["generic"]["max"], corpus  # every generic probe is under it
+        for kind, dist in d["off_topic_best_cosine"].items():
+            if dist.get("n"):
+                assert strong > dist["max"], (corpus, kind)  # none is admitted on dense alone
+    assert ev["gap"]["generic_off_topic_max"] > ev["chosen"]["was"]["_DENSE_FLOOR_BY_MODEL"][FOUR_B]  # why it moved
+
+
+def test_the_whole_row_entries_hold_lean_on_every_corpus():
+    arms = _whole()["as_released"]
+    high_key = next(k for k in arms if k.startswith("high"))
+    lean_key = next(k for k in arms if k.startswith("lean"))
+    high = next(v for k, v in arms[high_key].items() if "count=off" not in k)
+    lean = next(iter(arms[lean_key].values()))
+    assert set(high) == set(lean) == {"golden", "packs", "hippo", "corpus-b", "corpus-c"}
+    for corpus in high:
+        he, le = high[corpus]["explicit"], lean[corpus]["explicit"]
+        assert _n(he["hits"]) >= _n(le["hits"]) and he["mrr"] > le["mrr"], corpus
+        assert _n(high[corpus]["hook"]["hits"]) >= _n(lean[corpus]["hook"]["hits"]), corpus
+        # generic off-topic probes: never fewer abstentions than lean
+        assert _n(he["abstained"]["generic"]) >= _n(le["abstained"]["generic"]), corpus
+    # the gate keeps the number of injecting prompts level with lean's on the replays
+    for corpus in ("hippo", "corpus-c"):
+        assert abs(high[corpus]["replay"]["injecting"] - lean[corpus]["replay"]["injecting"]) <= 10, corpus
+
+
+def test_the_count_entry_on_whole_rows_finds_more_than_the_rule_off_and_serves_less_on_leaks():
+    ev = _whole()
+    entry = recall_count._COUNT_BY_MODEL[FOUR_B]
+    grid = ev["count_grid_at_floor_0.44"]
+    on, off = grid[f"count={entry['band']}/{entry['wide']}"], grid["count=off"]
+    assert _n(on["hook_hits"]) > _n(off["hook_hits"])
+    assert on["leaked_probe_rows"] < off["leaked_probe_rows"]
+    assert on["explicit_hits"] == off["explicit_hits"]  # the rule never applies outside the hook
+    for corpus, rec in on["replay"].items():
+        assert rec["rows_mean"] < off["replay"][corpus]["rows_mean"], corpus
+    # a wider "wide" serves fewer rows and finds fewer: the trade the roadmap leaves with the owner
+    wider = [grid[f"count=0.12/{w}"] for w in ("0.18", "0.22", "0.26", "0.3")]
+    found = [_n(on["hook_hits"])] + [_n(c["hook_hits"]) for c in wider]
+    assert found == sorted(found, reverse=True) and found[0] > found[-1]
 
 
 def test_env_override_still_wins_in_the_high_space(monkeypatch):

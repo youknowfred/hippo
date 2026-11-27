@@ -728,6 +728,8 @@ def compute_corpus(
     ``entries`` is untouched), and body chunks are threaded to the caller (``build_index``)
     out-of-band instead of growing the entry dict.
     """
+    from .build_index_dense import row_hash  # HCR-9: the whole file's key, see row_plan
+
     entries: List[dict] = []
     globs = journal_globs(memory_dir)  # HOT-7: read once per scan, not per file
     for path in _iter_memory_files(memory_dir):
@@ -753,7 +755,7 @@ def compute_corpus(
                 "file": os.path.basename(path),
                 "doc_text": doc_text,
                 "description": desc,  # stored separately so display never re-parses doc_text
-                "hash": _hash(doc_text),
+                "hash": _hash(doc_text), "row_hash": row_hash(text),
                 "tokens": bm25_terms(tokenize(doc_text)),
                 "invalid_after": _extract_invalid_after(fm),
                 "source_commit_time": read_source_commit_time(text),
@@ -1175,6 +1177,7 @@ def build_index(
     force: bool = False,
     allow_download: bool = True,
     preserve_on_dense_fail: bool = False,
+    max_new_rows: Optional[int] = None,  # HCR-9: embed at most this many missing rows, persist, return
 ) -> dict:
     """(Re)build the hybrid index. Returns the manifest dict. Never raises on dense failure.
 
@@ -1266,9 +1269,10 @@ def build_index(
         for chunk in body_chunks_by_entry.get(entry_idx, []):
             body_chunks.append({"entry": entry_idx, "hash": chunk["hash"], "tokens": chunk["tokens"], "text": chunk["text"]})
 
+    from .build_index_dense import ROW_WHOLE, row_plan
     from .embed_mlx import active_space, manifest_fields
 
-    space, want_dense, dense_rows = active_space() or DEFAULT_MODEL, not dense_disabled(), None
+    space, want_dense, dense_rows, row_mode = active_space() or DEFAULT_MODEL, not dense_disabled(), None, None
     dense_ready = False
     if want_dense:
         try:
@@ -1278,29 +1282,13 @@ def build_index(
             n_chunks = len(body_chunks)
             n_total = n_entries + n_chunks
 
-            # NOTE: gated on the model matching + a dense matrix being present — NOT on
-            # old_manifest["dense_ready"] — so a PARTIALLY-embedded manifest (COR-3 chunked
-            # embed, dense_ready=False but some entries do have a row) still contributes its
-            # already-embedded rows here, letting a large corpus converge across sessions
-            # instead of re-embedding from scratch every time the prior attempt fell short.
-            # RET-2: this hash->row map is now populated from BOTH the old entries AND the
-            # old body_chunks blocks -- a chunk hash-hit is exactly as cache-reusable as an
-            # entry hash-hit (same incremental-embed contract, same manifest, same dense.npy).
-            old_row_by_hash: Dict[str, int] = {}
-            if old_manifest and old_dense is not None and old_manifest.get("model") == space:
-                for e in old_manifest.get("entries", []):
-                    if "row" in e and e["row"] is not None and 0 <= e["row"] < len(old_dense):
-                        old_row_by_hash[e["hash"]] = e["row"]
-                for c in old_manifest.get("body_chunks", []) or []:
-                    if c.get("row") is not None and 0 <= c["row"] < len(old_dense):
-                        old_row_by_hash[c["hash"]] = c["row"]
+            # HCR-9: the work list (entries first, rows 0..N-1; body chunks appended) and the
+            # rows a prior build in this space already holds, keyed by what each row embeds:
+            # build_index_dense.row_plan. A partially-embedded prior still contributes.
+            row_mode, all_hashes, all_texts, old_row_by_hash = row_plan(
+                entries, body_chunks, texts, space, old_manifest, old_dense)
 
-            # Unified (doc_text, hash) work list: entries first (rows 0..N-1), chunks appended
-            # (rows N..) -- this is the row order dense_rows is assembled in below.
-            all_hashes = [e["hash"] for e in entries] + [c["hash"] for c in body_chunks]
-            all_texts = [e["doc_text"] for e in entries] + [c["text"] for c in body_chunks]
-
-            to_embed_idx = [i for i in range(n_total) if all_hashes[i] not in old_row_by_hash]
+            to_embed_idx = [i for i in range(n_total) if all_hashes[i] not in old_row_by_hash][:max_new_rows]
             new_vecs_by_idx: Dict[int, "np.ndarray"] = {}
             if to_embed_idx:
                 if allow_download:
@@ -1418,6 +1406,7 @@ def build_index(
         # A partially-embedded manifest still names its model (space) so the next build reuses rows.
         "model": space if dense_rows is not None else None,
         **(manifest_fields(space) if dense_rows is not None else {}),  # HCR-2: high only; lean adds none
+        **({"row_text": row_mode} if dense_rows is not None and row_mode == ROW_WHOLE else {}),  # HCR-9
         "dense_ready": dense_ready,
         "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),
@@ -1494,8 +1483,9 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
         sections = plan_sections(memory_dir, texts)  # HOT-11
         old = _load_manifest(index_dir)
         if old is not None:
-            old_hashes = [e.get("hash") for e in old.get("entries", [])]
-            now_hashes = [e["hash"] for e in entries_now]
+            # HCR-9: with each entry's whole-file key, which a whole-row twin is built from
+            old_hashes = [(e.get("hash"), e.get("row_hash")) for e in old.get("entries", [])]
+            now_hashes = [(e["hash"], e["row_hash"]) for e in entries_now]
             old_chunk_hashes = [c.get("hash") for c in old.get("body_chunks", []) or []]
             now_chunk_hashes = [
                 chunk["hash"]

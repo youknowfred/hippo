@@ -7,6 +7,109 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.49.0 — 2026-11-27 — "Whole memories"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**.
+Nothing is re-embedded on `lean`. On `high`, the `high/` index rebuilds itself: automatically,
+in the background, once per project, while recall serves `lean`.
+
+**Operator action: none required.** `lean` is still the default. A machine on `high` waits for
+its `high/` index to rebuild (about a second per memory); nothing needs running.
+
+**Changed**
+- **`high` embeds each whole memory (HCR-9).** A memory's dense row on the Qwen3-Embedding-4B
+  now embeds the whole file, frontmatter included, cut at the embedder's 1,024 tokens. It used
+  to embed the name and the one-line description. The body rows beside it, keyword search and
+  the description recall shows are unchanged, on every profile. `lean` and the 8B keep
+  description rows: a model's rows change only together with its own calibration run
+  (`build_index_dense.WHOLE_ROW_MODELS`).
+- **The 4B's space was measured again on whole-memory rows**, on five corpora, with off-topic
+  probes and replayed prompts. Dense floor 0.42 -> 0.44. Gate 0.60/0.60, row-count rule (band
+  0.12, wide 0.14) and floor band 0.002 are unchanged, each re-checked. `/hippo:doctor`'s
+  `high_space_calibration` line now says the numbers are for whole-memory rows.
+- **The diversity re-cut is rescaled, on every profile.** After ranking, recall re-cuts the top
+  rows so near-duplicates do not crowd out other memories (MMR). Its relevance term was the raw
+  fused score, near 0.02, against a similarity near 0.7, so at its setting of 0.8 it weighed
+  diversity about nine times more than relevance and set the order by dissimilarity. Relevance
+  is now scaled to the candidates (best 1.0, worst 0.0) and the weight is 0.4.
+  `HIPPO_MMR_LAMBDA` still overrides it and `1.0` still turns the re-cut off; the number weighs
+  the scaled score now.
+- **One session builds a project's `high/` index at a time.** Every session's warm server
+  watches the same index, and each used to embed it for itself when the corpus moved: ten
+  sessions, ten builds of one corpus at once. A lock file beside the index lets one build while
+  the others wait for its result.
+- **A `high/` build keeps what it has embedded.** It works in passes of at most 256 rows and
+  writes each pass, so a session that ends mid-build loses one pass and the next server
+  resumes. One pass over everything kept nothing until its last row.
+
+- **The index records each memory file's whole content.** An entry carries a second key
+  (`row_hash`) over the whole file, which is what a whole-memory row is built from. One side
+  effect on every profile: an edit anywhere in a memory file now makes the next refresh rewrite
+  the index manifest, with every embedding row reused. Edits outside the description and the
+  first body sections used to leave the index untouched.
+
+**Fixed**
+- **An index build on `high` no longer grows MLX's buffer cache without limit (#254).** The
+  cache is capped at 512 MB (`HIPPO_MLX_CACHE_MB`) before either model loads. Uncapped, a
+  build over a 1,054-memory corpus ran a 128 GB machine out of memory on 2026-11-26.
+- **`/hippo:doctor`'s index-alignment check reads an index whose rows are whole memories.** It
+  samples body rows there, whose text the index holds, where it sampled description rows.
+
+**Measured.** 347 held-out questions over three corpora (hippo's own, and two private project
+corpora of 113 and 1,070 memories), each written from one memory with no retriever in the
+loop; right memory in the top 10. Every interval is 95%.
+- `high` as released: 336 of 347 (96.8% [94.4, 98.2]), MRR 0.774 [0.738, 0.809]. `lean` as
+  released: 302 (87.0% [83.1, 90.2]), MRR 0.684 [0.640, 0.725].
+- **`high` over `lean`: +9.8 points [+6.6, +13.3]**, MRR +0.090 [+0.061, +0.122]. 36 questions
+  only `high` found, 2 only `lean`. In v1.48 it was +4.9 [+1.2, +8.9] (303 against 286).
+- If `lean` were given whole-memory rows too, the margin would be +5.2 [+2.3, +8.1] (335
+  against 317, both with the re-cut off). All of it is on questions that paraphrase the
+  memory; on questions that use its own words the two tie.
+- `lean` against its v1.48 self, same index: +4.6 [+2.3, +7.2] (302 against 286), from the
+  re-cut alone.
+- The re-cut as it was did remove duplicates, and lost right answers doing it. On a set built
+  to test it (274 re-captures of 75 questions' target memories and of their strongest wrong
+  competitors): with a competitor saved three times it took 0.75 and 1.21 of that
+  competitor's rows out of the top 10 (`lean`, `high`), and the right answer left the top 5
+  more often (-10.7 points [-18.7, -2.7] and -8.0 [-14.7, -2.7]). Rescaled at 0.4 it loses
+  nothing the sets can resolve against the re-cut off, and a fact saved three times still
+  takes half a row less of the top 5 on `high` (-0.51 [-0.68, -0.35]) and a fifth of a row on
+  `lean` (-0.20 [-0.29, -0.11]).
+- In the prompt hook, 539 questions on five corpora: `high` 369, `lean` 324. `high` injects on
+  225 and 219 of two corpora's 300 replayed prompts, `lean` on 227 and 211. `high` serves 8.7
+  rows per injecting prompt, `lean` 5.3 and 5.5.
+- Off-topic probes turned away, `high` then `lean`, by corpus (its own probes / 12 generic /
+  12 technical-but-unrelated): 5/12/12 and 5/12/12; 6/11/11 and 6/11/11; 7/10/8 and 7/10/11;
+  -/11/7 and -/11/8; 12/10/5 and 15/7/5 (of 20/12/12).
+- A `high/` build with whole rows costs about a second per memory on an idle machine (1,218 s
+  for 1,070 memories' rows; their body rows, about 17 minutes more on a first build, are reused
+  on an upgrade). The process building it held 6.0 to 6.5 GB and peaked at 6.8 GB, measured
+  alone on a machine whose GPU was shared; a warm server that is not building holds 4.1 GB.
+  Stopped after its first pass, it had kept that pass's 256 rows.
+
+Evidence, all dated 2026-11-27 under `planning/`: `HCR-9.tuned-lean.evidence`,
+`HCR-9.mmr.evidence`, `HCR-9.calibration.evidence`, `HCR-9.release.evidence`. The question set
+is `HCR-8.evidence.2026-11-26`. The ruling and the three calls made under it are in
+`planning/ROADMAP.retrieval.yaml` (HCR-9).
+
+**Known and not changed.**
+- `lean` keeps description rows. Whole rows raise its plain recall (+4.3 points [+1.4, +7.2] on
+  top of the re-cut change) and not what the hook serves (320 of 539 against 316), and they
+  would triple its index build on every machine and re-embed every corpus.
+- `high` serves more rows per prompt than `lean` (8.7 against 5.4). A wider row-count rule
+  brings it to `lean`'s volume and finds 359 of 539 in the hook instead of 369. Left as it is.
+- `high` turns away fewer technical-but-unrelated prompts than `lean` on hippo's own corpus
+  (8 of 12 against 11), as before this release.
+- The 8B was not re-measured. It keeps description rows and its v1.48 calibration.
+- The 30-candidate rerank on `/hippo:recall` and the MCP `recall` tool is unchanged and was
+  not re-measured on the released configuration.
+
+**Contributors.** Three benches: `bench/space_calibration.py` (one space's floor, gate, count
+rule and band, explicit and hook mode, with probes and replayed prompts), `bench/mmr_eval.py`
+(the re-cut on near-duplicate clusters), and `bench/high_eval.py --phase2 --lean-only` (the
+lean arms without loading a model). Commands are in `bench/README.md`.
+
 ## v1.48.0 — 2026-11-25 — "Retrieval profiles"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

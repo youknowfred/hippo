@@ -379,6 +379,10 @@ def check_high_space_calibration(ctx: DoctorContext) -> Optional[Dict[str, str]]
         have = (f"floor {_DENSE_FLOOR_BY_MODEL[space]}, gate {gate['strong']}/{gate['support']}, "
                 + (f"row-count band {count['band']} / wide {count['wide']}" if count
                    else "no row-count rule (a served call carries up to k rows)"))
+        from .build_index_dense import ROW_WHOLE, row_text
+
+        if row_text(space) == ROW_WHOLE:  # HCR-9: what those numbers were measured on
+            have += ", on whole-memory rows"
         from .eval_floor import read_floor_sweep
 
         sweep = read_floor_sweep(ctx.memory_dir, high=True)

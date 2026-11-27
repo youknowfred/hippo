@@ -42,7 +42,12 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 HIGH_SUBDIR = "high"
 REFRESH_EVERY_S = 30.0  # idle re-check; a served call on a changed lean index wakes it now
-_MAX_PASSES = 8  # each pass embeds every missing row; more passes only chase a moving lean index
+_MAX_PASSES = 8  # passes that may chase a moving lean index once every row is embedded
+# HCR-9: rows embedded per build pass. Each pass persists what it embedded, so a session that
+# ends mid-build (or a crash) costs at most one pass and the next server resumes from there.
+# One unbounded pass over a 1,070-memory corpus took ~36 minutes with whole-memory rows and
+# kept nothing until its last row.
+_PASS_ROWS = 256
 
 
 def high_index_dir(index_dir: str) -> str:
@@ -84,8 +89,28 @@ def _tiers(memory_dir: str) -> List[Tuple[str, str]]:
     return [(corpus, idx) for corpus, idx, _label in _recall_tier_dirs(memory_dir, None)]
 
 
-def _hashes(li) -> Tuple[List[str], List[str]]:
-    return [e.get("hash") for e in li.entries], [c.get("hash") for c in li.body_chunks]
+def _same_rows(lean, high) -> bool:
+    """``high`` holds ``lean``'s entries and body chunks, in order. HCR-9: an entry is its
+    doc_text hash AND its whole-file key (what a whole row embeds). A lean manifest written
+    before entries carried that key matches on the doc_text hash alone, as it always did,
+    until its next refresh adds it."""
+    if len(lean.entries) != len(high.entries):
+        return False
+    for a, b in zip(lean.entries, high.entries):
+        if a.get("hash") != b.get("hash"):
+            return False
+        if a.get("row_hash") is not None and a.get("row_hash") != b.get("row_hash"):
+            return False
+    return [c.get("hash") for c in lean.body_chunks] == [c.get("hash") for c in high.body_chunks]
+
+
+def _row_text_ok(high, space: str) -> bool:
+    """HCR-9: ``high``'s entry rows embed the text this space's thresholds were calibrated
+    on. A twin built before the space moved to whole-memory rows is not served; the next
+    pass re-embeds its entry rows (its body-chunk rows are reused)."""
+    from .build_index_dense import ROW_DESCRIPTION, row_text
+
+    return (high.manifest.get("row_text") or ROW_DESCRIPTION) == row_text(space)
 
 
 def _rows_done(li, space: str) -> int:
@@ -105,7 +130,7 @@ def fresh(lean, high, space: str) -> bool:
     if memo is not None and memo[0] is lean and memo[1] is high and memo[2] == space:
         return memo[3]
     hit = bool(high.dense_ready and high.dense is not None and high.model == space
-               and _hashes(high) == _hashes(lean))
+               and _row_text_ok(high, space) and _same_rows(lean, high))
     if len(_ST.fresh_memo) > 64:
         _ST.fresh_memo.clear()
     _ST.fresh_memo[key] = (lean, high, space, hit)
@@ -226,29 +251,75 @@ def _run(space: str) -> None:
         _ST.wake.clear()
 
 
+def _build_lock(hdir: str):
+    """HCR-9: one builder per twin. Every session's server watches the same ``high/``, and
+    each used to embed it for itself the moment the lean index moved: ten sessions, ten
+    builds of one corpus at once, each at a build's peak memory. A non-blocking ``flock``
+    on ``<hdir>/.build.lock``: the open file, or None while another process holds it (that
+    build's result is this server's too). Released when the file closes or the holder dies.
+    A platform without ``fcntl`` builds unlocked, as before."""
+    os.makedirs(hdir, exist_ok=True)
+    fh = open(os.path.join(hdir, ".build.lock"), "a")
+    try:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except ImportError:
+        pass
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 def refresh_tier(memory_dir: str, index_dir: str, space: str) -> bool:
     """Bring ``<index_dir>/high`` level with the lean index. True when it is fresh."""
+    from .build_index import load_index
+
+    hdir = high_index_dir(index_dir)
+    lean = load_index(index_dir)
+    if lean is None:
+        return False  # nothing to mirror yet; the lean side builds it
+    if fresh(lean, load_index(hdir), space):
+        return True
+    lock = _build_lock(hdir)
+    if lock is None:
+        return False  # another session is building this twin; the next wake reads its result
+    try:
+        return _catch_up(memory_dir, index_dir, hdir, space)
+    finally:
+        lock.close()
+
+
+def _catch_up(memory_dir: str, index_dir: str, hdir: str, space: str) -> bool:
     from .build_index import build_index, load_index
     from .embed_mlx import using_space
 
-    hdir = high_index_dir(index_dir)
-    for _ in range(_MAX_PASSES):
+    chases, prev = 0, None
+    while chases < _MAX_PASSES:
         lean, high = load_index(index_dir), load_index(hdir)
         if lean is None:
-            return False  # nothing to mirror yet; the lean side builds it
+            return False
         if fresh(lean, high, space):
             return True
-        before = _rows_done(high, space)
-        # Unbounded (``allow_download=True`` is build_index's one-batch online path): this
-        # thread has no hook deadline, and the lean refresh's 15 s budget never fits a 64-doc
-        # slice of a 4B model (measured: such a build never converged). The high embedder
-        # itself never downloads, whatever this flag says, and feeds its worker in short
-        # slices, so a served call is never queued behind the whole batch.
+        # ``allow_download=True`` is build_index's one-batch path with no wall-clock budget:
+        # this thread has no hook deadline, and the lean refresh's 15 s budget never fits a
+        # 64-doc slice of a 4B model (measured: such a build never converged). The high
+        # embedder itself never downloads, whatever this flag says, and feeds its worker in
+        # short slices, so a served call is never queued behind the whole batch.
         with using_space(space):
-            build_index(memory_dir, hdir, allow_download=True)
+            build_index(memory_dir, hdir, allow_download=True, max_new_rows=_PASS_ROWS)
         after = load_index(hdir)
-        if not fresh(lean, after, space) and _rows_done(after, space) <= before:
-            return False  # no progress (the model is failing): the next wake retries
+        if fresh(lean, after, space):
+            return True
+        done = _rows_done(after, space)
+        if after is not None and after.dense_ready:
+            if high is not None and high.dense_ready and _same_rows(high, after):
+                return False  # the twin already matched the files: the lean index is behind them
+            chases += 1  # every row embedded, yet not lean's rows: lean moved meanwhile
+        elif prev is not None and done <= prev:
+            return False  # a pass that added no row (the model is failing): the next wake retries
+        prev = done
     return False
 
 

@@ -333,18 +333,30 @@ def test_refresh_is_a_no_op_when_nothing_changed(corpus):
     assert (os.stat(p).st_mtime_ns, open(p, "rb").read()) == before
 
 
-def test_a_section_edit_reaches_the_sub_index_without_a_main_rebuild(corpus):
+def test_a_section_edit_reaches_the_sub_index_and_re_embeds_no_main_row(corpus, monkeypatch):
     md, idx = corpus()
-    main = os.path.join(idx, "manifest.json")
-    main_before = open(main, "rb").read()
+    before = B.load_index(idx)
     dp = os.path.join(md, "folded-garden.md")
     text = open(dp, encoding="utf-8").read().replace("Compost ratio of browns", "Compost ratio of dry browns")
     with open(dp, "w", encoding="utf-8") as fh:
         fh.write(text)
+    embedded = []
+    real = B.embed_documents
+    monkeypatch.setattr(B, "embed_documents", lambda texts, **kw: embedded.append(list(texts)) or real(texts, **kw))
     B.refresh_index(md, idx)
     sm = S.read_manifest(idx)
     assert any("dry browns" in e["description"] for e in sm["entries"])
-    assert open(main, "rb").read() == main_before
+    # HCR-9: the main manifest records the digest file's new whole-file key (a whole-row twin
+    # re-embeds that one row from it) and nothing else moves: no main row is embedded again.
+    after = B.load_index(idx)
+    strip = lambda li: [{k: v for k, v in e.items() if k != "row_hash"} for e in li.entries]  # noqa: E731
+    assert strip(after) == strip(before) and after.body_chunks == before.body_chunks
+    changed = [a["name"] for a, b in zip(after.entries, before.entries) if a["row_hash"] != b["row_hash"]]
+    assert changed == ["folded-garden"]
+    main_texts = {e["doc_text"] for e in after.entries} | {c["text"] for c in after.body_chunks}
+    assert not any(t in main_texts for batch in embedded for t in batch)
+    if before.dense is not None:
+        assert (after.dense == before.dense).all()
 
 
 def test_a_corpus_that_loses_its_sections_loses_the_sub_index(corpus):

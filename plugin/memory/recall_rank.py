@@ -58,6 +58,14 @@ _RRF_K = 60
 # live corpus's hard set plateaus at its best from 0.38 to 0.42 and loses rows from 0.43 up.
 # The key is the space id: an MRL-truncated space (``model@dim``) is a different cosine
 # space and is NOT covered by this entry. Evidence: planning/HCR-3.evidence.2026-11-25.json.
+# Moved to 0.44 on 2026-11-27 (HCR-9), when this space's entry rows became whole memories
+# (build_index_dense.WHOLE_ROW_MODELS): the same method, re-run on five corpora (the three
+# above, two more private ones, HCR-8's held-out questions added to the on-topic side). The
+# generic off-topic ceiling rose to 0.433, over the old floor; the lowest on-topic best is
+# still 0.495. 0.44 is the low side of that gap again. It decides little: from 0.30 to 0.50
+# the five corpora find 481 to 484 of 539 on-topic rows and abstain on the same probes at
+# every value (the gate does the abstaining). Against 0.42 it serves 5% fewer rows per
+# injecting prompt and loses no row. Evidence: planning/HCR-9.calibration.evidence.2026-11-27.json.
 #
 # Qwen3-Embedding-8B at full width (4096), same day, same method, same three corpora
 # (planning/HCR-3.8b.evidence.2026-11-25.json). On-topic best [0.609, 0.818] golden,
@@ -68,7 +76,7 @@ _RRF_K = 60
 _DENSE_FLOOR_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": 0.60,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
-    "Qwen/Qwen3-Embedding-4B": 0.42,
+    "Qwen/Qwen3-Embedding-4B": 0.44,
     "Qwen/Qwen3-Embedding-8B": 0.40,
 }
 # Fallback for any OTHER model id (a future default bump, a user-supplied HIPPO_EMBED_MODEL
@@ -124,6 +132,8 @@ def _dense_floor(model: Optional[str]) -> float:
 # starter-pack and live corpora; near-floor density is LOWER there than bge-small's at 0.60
 # (rows within 0.002 under the floor per on-topic query: 3.05 vs 4.84 live, 0.39 vs 1.00
 # golden), so the one shared default stands.
+# Re-checked again on the 4B's whole-memory rows at its 0.44 floor (HCR-9, 2026-11-27, five
+# corpora): bands 0 to 0.02 keep the same abstentions and move two on-topic rows of 539.
 # ``HIPPO_DENSE_FLOOR_BAND`` overrides it; 0 turns the band off (byte-identical to the floor).
 _DENSE_FLOOR_BAND_DEFAULT = 0.002
 _BAND_CORROBORATION_DEPTH = 10  # = recall_abstain._AGREE_DEPTH, HOT-2's agreement depth
@@ -714,12 +724,25 @@ def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
 # Runs AFTER graph expansion + salience (both already reordered `penalized`) and BEFORE the
 # emission loop, so graph neighbors are diversified too and the knee cutoff (which lives
 # inside the emission loop) measures gaps on the FINAL, diversified order.
-_MMR_LAMBDA = 0.8  # override: HIPPO_MMR_LAMBDA -- relevance weight (1-lambda is diversity weight).
-# Calibrated on the shipped starter-pack golden corpus (see the RCL-4 commit body): the
-# roadmap's suggested ~0.7 measurably eroded hard_recall@10/MRR (still above the absolute
-# gates, but a real, avoidable cost) by letting a WEAK diversity pick occasionally outrank a
-# genuinely-relevant close second; 0.8 recovers nearly all of that margin while an adversarial
-# near-paraphrase fixture (two memories on one decision) still gets diversified.
+# HCR-9 (2026-11-27) rescaled the re-cut. As RCL-4 shipped it, the relevance term was the raw
+# fused score: reciprocal-rank sums near 0.02, against a diversity term (a cosine) near 0.7. At
+# lambda 0.8 that is 0.016 of relevance against 0.14 of diversity, so after the first pick the
+# order was set by dissimilarity, not by the relevance weight the number names. Measured on 347
+# held-out questions over three corpora (planning/HCR-9.mmr.evidence.2026-11-27.json): it cost
+# 16 right answers of 302 on bge-small and 15 of 335 on the Qwen3 4B. It did remove re-captured
+# duplicates (about one row of the top 10), and still lost right answers on the questions built
+# for it (hit@5 -0.11 [-0.19, -0.03] and -0.08 [-0.15, -0.03]). ``_mmr_relevance`` now scales
+# relevance to the pool (best 1.0, worst 0.0), which puts both terms on one scale and lets
+# lambda mean a weight.
+_MMR_NORMALIZE = True  # False: the raw fused score, kept so bench/mmr_eval.py can run that arm
+# override: HIPPO_MMR_LAMBDA -- relevance weight on the pool-scaled score (1-lambda is the
+# diversity weight); 1.0 turns the re-cut off. 0.4 is the lowest of 0.8 / 0.6 / 0.4 / 0.3 / 0.2
+# that lost nothing the same evidence could resolve, on either space: hits in the top 10 and
+# top 5 and MRR all within their intervals of the re-cut off (4B: 336 of 347 against 335),
+# while a fact saved three times takes about half a row less of the top 5 (4B -0.51
+# [-0.68, -0.35], bge-small -0.20 [-0.29, -0.11]). 0.3 removes more and costs the 4B a
+# resolved 1.2 points of hit@5.
+_MMR_LAMBDA = 0.4
 _MMR_POOL_MULT = 2  # candidates considered for the re-cut, as a multiple of k
 
 
@@ -732,6 +755,19 @@ def _mmr_lambda() -> float:
         return float(raw)
     except ValueError:
         return _MMR_LAMBDA
+
+
+def _mmr_relevance(scores: List[float]) -> List[float]:
+    """The relevance term of each pool candidate, on the scale the diversity term is on.
+
+    Min-max over the pool, so the best candidate reads 1.0 and the worst 0.0 (all equal: all
+    1.0). With ``_MMR_NORMALIZE`` off: the raw fused score, as RCL-4 shipped it."""
+    if not _MMR_NORMALIZE or not scores:
+        return list(scores)
+    lo, hi = min(scores), max(scores)
+    if hi <= lo:
+        return [1.0] * len(scores)
+    return [(s - lo) / (hi - lo) for s in scores]
 
 
 def _mmr_rerank(
@@ -788,6 +824,7 @@ def _mmr_rerank(
         rows = np.array([e[3] for e in eligible])
         sims = dense[rows] @ dense[rows].T  # rows are L2-normalized -> dot == cosine
         lam = _mmr_lambda()
+        relevance_of = _mmr_relevance([e[2] for e in eligible])
 
         remaining = list(range(len(eligible)))
         max_sim_to_picked = np.zeros(len(eligible))
@@ -795,7 +832,7 @@ def _mmr_rerank(
         while remaining:
             best_local, best_val = None, None
             for local_i in remaining:
-                relevance = eligible[local_i][2]
+                relevance = relevance_of[local_i]
                 mmr_score = lam * relevance - (1.0 - lam) * max_sim_to_picked[local_i]
                 if best_val is None or mmr_score > best_val:
                     best_val, best_local = mmr_score, local_i

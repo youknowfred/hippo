@@ -59,6 +59,15 @@ from .recall_abstain import _AGREE_DEPTH, _STRONG_DESC_TERMS, _ranks
 # served on leaked off-topic probes 75 -> 38; over 300 replayed prompts of the live corpus
 # 9.41 -> 8.06 rows per injecting prompt (the median stays 10; lean's entry reads 5 there).
 # Like the floor, the key is the space id: a truncated ``model@dim`` width is not covered.
+# Kept on whole-memory rows (HCR-9, planning/HCR-9.calibration.evidence.2026-11-27.json, five
+# corpora, 539 on-topic rows, floor 0.44). Whole rows put an on-topic best further over the
+# floor, so this entry now serves 8.7 rows per injecting prompt on the replays (lean: 5.3 and
+# 5.5) where it served 8.1. It still earns its place: against the rule off it finds 369 rows
+# in hook mode where off finds 336 (a full block spends the render budget before the right
+# row), and halves the rows on leaked probes (265 -> 137). No nearby entry is better: 0.12/0.10,
+# 0.08/0.14, 0.16/0.14 and 0.20/0.14 read 367 to 371. A wider ``wide`` is the lever on volume
+# and it costs rows: 0.18 reads 363 at 7.5 rows, 0.22 361 at 6.4, 0.26 359 at 5.5 (lean's
+# volume), 0.30 355 at 5.2. That trade is the owner's, recorded in the roadmap (HCR-9).
 #
 # Qwen/Qwen3-Embedding-8B (full width, same rule and method;
 # planning/HCR-3.8b.evidence.2026-11-25.json). ``band`` 0.11 is the live corpus's

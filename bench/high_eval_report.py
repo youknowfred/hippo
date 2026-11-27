@@ -93,6 +93,11 @@ def main(argv=None) -> int:
     ap.add_argument("--method", default=None, help="a JSON file describing how the set was made")
     ap.add_argument("--rerank-summary", default=None,
                     help="the counts-only summary of bench/rerank_latency.py's run, rescored with --gold")
+    ap.add_argument("--item", default="HCR-8")
+    ap.add_argument("--labels", default="",
+                    help="rename corpora in the output, e.g. site=corpus-b,emgl=corpus-c")
+    ap.add_argument("--arms", default="",
+                    help="comma-separated arm names (as reported) to keep; default all")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
 
@@ -104,15 +109,21 @@ def main(argv=None) -> int:
     refs = [r for r in args.references.split(",") if r]
 
     # (model tag) -> arm -> list of (corpus, style, rr, ms) aligned by question
-    report = {"item": "HCR-8", "date": datetime.date.today().isoformat(), "runs": [], "models": {}}
+    labels = dict(pair.split("=", 1) for pair in args.labels.split(",") if "=" in pair)
+    keep = {a for a in args.arms.split(",") if a}
+    report = {"item": args.item, "date": datetime.date.today().isoformat(), "runs": [], "models": {}}
     by_model: dict = {}
+    seen: dict = {}  # (model tag, corpus, arm) -> the tops first recorded for it
+    repeats: list = []
     for run in runs:
         tag = run["model"].rsplit("-", 1)[-1].lower()
+        raw_corpus = run["corpus"]
         golds = []
         for q in run["questions"]:
-            more = extra.get(f"{run['corpus']}::{q['stem']}", [])
+            more = extra.get(f"{raw_corpus}::{q['stem']}", [])
             golds.append({q["stem"], *more})
         cost = run["cost"]
+        run["corpus"] = labels.get(raw_corpus, raw_corpus)
         report["runs"].append({
             "corpus": run["corpus"], "model": run["model"], "entries": run["entries"],
             "body_chunks": run["body_chunks"], "questions": len(run["questions"]),
@@ -120,15 +131,29 @@ def main(argv=None) -> int:
             "extra_gold_memories": sum(len(g) - 1 for g in golds),
             "baseline_self_check": "pass" if run["baseline_self_check"] else "FAIL",
             "floors": run["floors"], "cost": cost,
+            **({"lean_only": True} if run.get("lean_only") else {}),
         })
         for arm, rec in run["arms"].items():
             if arm.startswith("p2/"):
                 arm = arm[3:] + " [p2]"  # the follow-up pass: its own baseline, same questions
+            if keep and arm not in keep:
+                continue
+            first = seen.setdefault((tag, run["corpus"], arm), rec["top"])
+            if first is not rec["top"]:
+                # a later run repeated an arm an earlier one holds: counted once, and the repeat is
+                # the check that both runs read the same corpus (so their arms can be paired)
+                repeats.append({"model": tag, "corpus": run["corpus"], "arm": arm, "questions": len(first),
+                                "identical_top_k": sum(a == b for a, b in zip(first, rec["top"]))})
+                continue
             rows = by_model.setdefault(tag, {}).setdefault(arm, [])
             for q, gold, top, ms in zip(run["questions"], golds, rec["top"], rec["ms"]):
                 rows.append((run["corpus"], q.get("style") or "", rr_of(top, gold), ms))
 
+    if repeats:
+        report["repeated_arms"] = repeats
     for tag, arms in sorted(by_model.items()):
+        for rows in arms.values():
+            rows.sort(key=lambda r: r[0])  # stable: by corpus, question order kept, so arms pair up
         out = {"arms": {}, "against": {}}
         for arm, rows in arms.items():
             if arm.endswith("#2"):
