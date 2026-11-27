@@ -619,11 +619,11 @@ def test_a_twin_built_with_description_rows_is_not_served_and_heals(fakes, proje
     from memory import build_index_dense as BD
 
     B.build_index(project["md"], project["idx"])
-    monkeypatch.setattr(BD, "WHOLE_ROW_MODELS", frozenset())  # how every twin was built before HCR-9
-    with E.using_space(_SPACE):
-        old = B.build_index(project["md"], project["high"], allow_download=False)
+    with monkeypatch.context() as before:  # how every twin was built before HCR-9
+        before.setattr(BD, "WHOLE_ROW_MODELS", frozenset())
+        with E.using_space(_SPACE):
+            old = B.build_index(project["md"], project["high"], allow_download=False)
     assert "row_text" not in old and old["dense_ready"]
-    monkeypatch.undo()
     lean, twin = B.load_index(project["idx"]), B.load_index(project["high"])
     assert not H.fresh(lean, twin, _SPACE)  # same entries, same model: the rows embed the other text
     qwen = _FakeQwen.made[0]
