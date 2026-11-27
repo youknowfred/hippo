@@ -314,6 +314,8 @@ def _catch_up(memory_dir: str, index_dir: str, hdir: str, space: str) -> bool:
             return True
         done = _rows_done(after, space)
         if after is not None and after.dense_ready:
+            if high is not None and high.dense_ready and _same_rows(high, after):
+                return False  # the twin already matched the files: the lean index is behind them
             chases += 1  # every row embedded, yet not lean's rows: lean moved meanwhile
         elif prev is not None and done <= prev:
             return False  # a pass that added no row (the model is failing): the next wake retries

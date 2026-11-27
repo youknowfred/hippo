@@ -694,3 +694,22 @@ def test_a_model_that_embeds_nothing_stops_the_pass_loop(fakes, project, monkeyp
     monkeypatch.setattr(B, "build_index", lambda *a, **kw: calls.append(1) or real(*a, **kw))
     assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
     assert len(calls) == 2  # the second pass added no row: stop until the next wake
+
+
+def test_a_lean_index_behind_the_files_costs_one_pass_a_wake_not_a_chase(fakes, project, monkeypatch):
+    """The twin is built from the files. When a file changed after the lean index was last
+    refreshed, the twin can match the files and still not match lean: rebuilding it again
+    changes nothing, so the loop stops until lean's next refresh."""
+    B.build_index(project["md"], project["idx"])
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    stale_lean = open(os.path.join(project["idx"], "manifest.json"), "rb").read()
+    _write_mem(project["md"], "zebra_deploy_runbook", "How the zebra service is deployed now — blue/green.")
+    B.build_index(project["md"], project["idx"])  # lean and the twin both move to the new file...
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    with open(os.path.join(project["idx"], "manifest.json"), "wb") as fh:
+        fh.write(stale_lean)  # ...and lean is behind the files again (as after a mid-session edit)
+    calls = []
+    real = B.build_index
+    monkeypatch.setattr(B, "build_index", lambda *a, **kw: calls.append(1) or real(*a, **kw))
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
+    assert len(calls) == 1
