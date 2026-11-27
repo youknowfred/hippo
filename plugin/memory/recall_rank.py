@@ -58,6 +58,14 @@ _RRF_K = 60
 # live corpus's hard set plateaus at its best from 0.38 to 0.42 and loses rows from 0.43 up.
 # The key is the space id: an MRL-truncated space (``model@dim``) is a different cosine
 # space and is NOT covered by this entry. Evidence: planning/HCR-3.evidence.2026-11-25.json.
+# Moved to 0.44 on 2026-11-27 (HCR-9), when this space's entry rows became whole memories
+# (build_index_dense.WHOLE_ROW_MODELS): the same method, re-run on five corpora (the three
+# above, two more private ones, HCR-8's held-out questions added to the on-topic side). The
+# generic off-topic ceiling rose to 0.433, over the old floor; the lowest on-topic best is
+# still 0.495. 0.44 is the low side of that gap again. It decides little: from 0.30 to 0.50
+# the five corpora find 481 to 484 of 539 on-topic rows and abstain on the same probes at
+# every value (the gate does the abstaining). Against 0.42 it serves 5% fewer rows per
+# injecting prompt and loses no row. Evidence: planning/HCR-9.calibration.evidence.2026-11-27.json.
 #
 # Qwen3-Embedding-8B at full width (4096), same day, same method, same three corpora
 # (planning/HCR-3.8b.evidence.2026-11-25.json). On-topic best [0.609, 0.818] golden,
@@ -68,7 +76,7 @@ _RRF_K = 60
 _DENSE_FLOOR_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": 0.60,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
-    "Qwen/Qwen3-Embedding-4B": 0.42,
+    "Qwen/Qwen3-Embedding-4B": 0.44,
     "Qwen/Qwen3-Embedding-8B": 0.40,
 }
 # Fallback for any OTHER model id (a future default bump, a user-supplied HIPPO_EMBED_MODEL
@@ -124,6 +132,8 @@ def _dense_floor(model: Optional[str]) -> float:
 # starter-pack and live corpora; near-floor density is LOWER there than bge-small's at 0.60
 # (rows within 0.002 under the floor per on-topic query: 3.05 vs 4.84 live, 0.39 vs 1.00
 # golden), so the one shared default stands.
+# Re-checked again on the 4B's whole-memory rows at its 0.44 floor (HCR-9, 2026-11-27, five
+# corpora): bands 0 to 0.02 keep the same abstentions and move two on-topic rows of 539.
 # ``HIPPO_DENSE_FLOOR_BAND`` overrides it; 0 turns the band off (byte-identical to the floor).
 _DENSE_FLOOR_BAND_DEFAULT = 0.002
 _BAND_CORROBORATION_DEPTH = 10  # = recall_abstain._AGREE_DEPTH, HOT-2's agreement depth

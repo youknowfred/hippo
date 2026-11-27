@@ -178,6 +178,23 @@ high index holds exactly the lean index's entries, warm calls serve lean. A serv
 high swaps only the loaded index and enters the space; links, rules and sidecars are still
 read from the lean dir.
 
+**What a row embeds** ([`build_index_dense.py`](build_index_dense.py), HCR-9). Every index
+holds one dense row per memory and up to three per body. On `lean` the memory's row embeds
+its name and description. On the 4B it embeds the whole file, frontmatter included, cut at
+the embedder's 1,024 tokens: the largest lever HCR-8 measured (303 to 320 of 347 held-out
+questions). `WHOLE_ROW_MODELS` lists the models whose rows are whole files, and a model
+joins it only with its own calibration run, because the floor, gate and count rule are
+cosines in the space the rows make. BM25 and the description on display read `doc_text` on
+every profile. Each entry carries two keys: `hash` (its `doc_text`) and `row_hash` (the whole
+file), and a manifest whose rows are whole files says `row_text: whole`. A twin whose
+manifest does not match its space's row text is not served until its entry rows are
+re-embedded; its body-chunk rows are reused.
+
+**Building the twin.** A whole row costs about a second on the 4B, so a 1,000-memory corpus
+is a long build. One server builds a given `high/` at a time (a lock file beside it; the
+other sessions wait for its result), and each pass embeds at most 256 rows and writes them,
+so a session that ends mid-build loses one pass and the next one resumes.
+
 **The reranker** ([`rerank_mlx.py`](rerank_mlx.py), HCR-4). Qwen3-Reranker-0.6B, scored as
 the model card specifies: `P(yes)` from the final position's yes/no logits. It sits behind
 the one rerank seam (`recall_rank._cross_encoder_rerank`, whose other backend is fastembed's
@@ -195,23 +212,26 @@ only; recall never scores with it.
 
 A cosine from one model means nothing in another's space, so every threshold is keyed by the
 space id (a truncated `model@dim` width is a different space and is not covered: doctor warns
-while `HIPPO_HIGH_EMBED_DIM` is set). Each Qwen3 value was measured on three corpora on
-2026-11-25.
+while `HIPPO_HIGH_EMBED_DIM` is set). The 8B's values were measured on three corpora on
+2026-11-25, on description rows. The 4B's were measured again on whole-memory rows on
+2026-11-27, on five corpora.
 
 | | `lean`: bge-small-en-v1.5 | `high`: Qwen3-Embedding-4B | Qwen3-Embedding-8B |
 |---|---|---|---|
 | Width | 384 | 2,560 | 4,096 |
 | Weights | about 130 MB, ONNX | 4.2 GB, mxfp8 | 7.8 GB, mxfp8 |
-| Dense floor ([`recall_rank.py`](recall_rank.py)) | 0.60 | 0.42 | 0.40 |
+| Entry row embeds | name + description | the whole memory | name + description |
+| Dense floor ([`recall_rank.py`](recall_rank.py)) | 0.60 | 0.44 | 0.40 |
 | Gate `strong` / `support` ([`recall_abstain.py`](recall_abstain.py)) | 0.76 / 0.72 | 0.60 / 0.60 | 0.50 / 0.48 |
 | Count rule `band` / `wide` ([`recall_count.py`](recall_count.py)) | 0.05 / 0.18 | 0.12 / 0.14 | 0.11 / 0.12 |
 
-The instruction-aware space separates on-topic from off-topic far more cleanly than
-bge-small: on the 4B every measured off-topic best cosine sat under 0.41 and every on-topic
-best over 0.49, where bge-small's classes overlap on a live corpus. Each constant's comment
-carries its method and the evidence file under [`planning/`](../../planning/README.md)
-(`HCR-3.evidence`, `HCR-3.8b.evidence`, `HCR-3.count.evidence`,
-`HCR-3.hook-gaps.evidence`). `hippo eval --floor-sweep` sweeps inside the high space on a
+The instruction-aware space separates on-topic from off-topic more cleanly than bge-small.
+On the 4B's whole-memory rows every generic off-topic probe's best cosine sits under 0.44
+and every on-topic best over 0.49; a technical question next to a corpus's subject can reach
+0.55, which is why the gate's `strong` is 0.60. Each constant's comment carries its method
+and the evidence file under [`planning/`](../../planning/README.md)
+(`HCR-9.calibration.evidence` for the 4B; `HCR-3.evidence`, `HCR-3.8b.evidence`,
+`HCR-3.count.evidence`, `HCR-3.hook-gaps.evidence` for the first run and the 8B). `hippo eval --floor-sweep` sweeps inside the high space on a
 high-profile machine, and `/hippo:doctor`'s `high_space_calibration` line says whether the
 active space is calibrated.
 

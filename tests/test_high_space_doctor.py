@@ -139,17 +139,17 @@ def test_a_high_sweep_is_compared_with_its_own_floor(repo, memory_dir, monkeypat
     _write_high_sweep(memory_dir, recommended=0.473, off_max=0.3284, on_min=0.6177)
     r = D.check_high_space_calibration(_ctx(memory_dir, repo))
     assert r["status"] == "ok", r
-    assert "configured 0.42 sits inside this corpus's clean gap" in r["message"]
+    assert "configured 0.44 sits inside this corpus's clean gap" in r["message"]
     assert "0.3284" in r["message"] and "0.6177" in r["message"] and "0.473" in r["message"]
     assert "STALE" not in r["message"]
     # a probe above the floor: the floor is outside the gap, so both numbers and the remedy
     _write_high_sweep(memory_dir, recommended=0.5, off_max=0.45, on_min=0.55)
     r = D.check_high_space_calibration(_ctx(memory_dir, repo))
-    assert r["status"] == "warn" and "configured 0.42 vs sweep-recommended 0.5" in r["message"]
+    assert r["status"] == "warn" and "configured 0.44 vs sweep-recommended 0.5" in r["message"]
     # no clean gap at all: never the in-gap reading
     _write_high_sweep(memory_dir, recommended=0.43, off_max=0.3, on_min=0.6, overlap=True)
     r = D.check_high_space_calibration(_ctx(memory_dir, repo))
-    assert "configured 0.42 ≈ recommended 0.43" in r["message"] and "clean gap" not in r["message"]
+    assert "configured 0.44 ≈ recommended 0.43" in r["message"] and "clean gap" not in r["message"]
 
 
 def test_the_lean_line_keeps_comparing_with_the_midpoint(repo, memory_dir, monkeypatch, tmp_path):

@@ -83,6 +83,30 @@ OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.rerank_latency --ques
   --memory-dirs LABEL=DIR ... --mlx-cache MLX --fastembed-cache FE --out PRIVATE_DIR/rerank.json
 python -m bench.high_eval_report --results PRIVATE_DIR --gold PRIVATE_DIR/gold.json \
   --out planning/HCR-8.evidence.DATE.json
+
+# HCR-9: lean's arms of the phase-2 pass alone (lean as shipped, with whole-memory rows, with
+# the MMR re-cut off, and with both). Loads no MLX model, so it runs in minutes.
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.high_eval --phase2 --lean-only \
+  --corpus LABEL --memory-dir DIR --questions PRIVATE_DIR/questions.jsonl --mlx-cache MLX \
+  --fastembed-cache FE --out PRIVATE_DIR/results-LABEL-leanonly.json
+
+# HCR-9: calibrate ONE embedding space (floor, gate, count rule, band) on the two public corpora
+# and any live ones, with off-topic probes and replayed prompts; explicit and hook mode per cell.
+# --space lean or a high space id; --rows says what an entry row embeds for this run. The corpus
+# copies and their indexes persist under --work, so a second run only pays the model load.
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.space_calibration \
+  --space Qwen/Qwen3-Embedding-4B --rows whole --work SCRATCH --live LABEL=DIR ... \
+  [--heldout PRIVATE_DIR/questions.jsonl --gold PRIVATE_DIR/gold.json] \
+  [--replay LABEL=PROJECT/.hippo/telemetry] --mlx-cache MLX --fastembed-cache FE \
+  --floors 0.42,0.44 --gates table,off,0.56/0.56 --counts table,off --bands table \
+  --out PRIVATE_DIR/calibration.json
+
+# HCR-9: the MMR re-cut on near-duplicate clusters (re-captures of a question's target and of
+# its strongest wrong competitor, added to a copy of each corpus under the same --work).
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.mmr_eval --space lean \
+  --rows description --work SCRATCH --live LABEL=DIR ... --questions PRIVATE_DIR/questions.jsonl \
+  --gold PRIVATE_DIR/gold.json --selection PRIVATE_DIR/selection.json --dups PRIVATE_DIR \
+  --out PRIVATE_DIR/mmr.json
 ```
 
 These used to run as `python -m memory.eval_recall --calibrate` and `--ab HIPPO_DREAM`; those

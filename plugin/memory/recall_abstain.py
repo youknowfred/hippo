@@ -67,6 +67,12 @@ _STRONG_DESC_COVERAGE = 0.40
 # every on-topic best (the lowest is 0.495): those queries are admitted by corroboration.
 # With the two equal, a cosine never corroborates alone: a memory in both lanes' top 10
 # needs two shared terms, or the query already cleared ``strong``.
+# Kept at 0.60/0.60 on whole-memory rows (HCR-9, planning/HCR-9.calibration.evidence.2026-11-27.json,
+# five corpora). ``strong`` is over every off-topic best measured there (0.555 at most, a 1,070-
+# memory corpus's own probes; 0.553 for an adjacent technical probe on a web project's corpus).
+# 0.56/0.56 and 0.64/0.64 abstain on exactly the same probes; 0.56 injects on 236 and 241 of two
+# corpora's 300 replayed prompts where lean injects on 227 and 211 and 0.60 on 225 and 223, and
+# 0.64 costs three on-topic rows.
 #
 # Qwen3-Embedding-8B, full width (planning/HCR-3.8b.evidence.2026-11-25.json). Its classes do
 # NOT separate as cleanly: one adjacent technical probe reaches 0.491 on the golden corpus,
