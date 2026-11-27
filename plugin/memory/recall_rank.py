@@ -714,12 +714,25 @@ def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
 # Runs AFTER graph expansion + salience (both already reordered `penalized`) and BEFORE the
 # emission loop, so graph neighbors are diversified too and the knee cutoff (which lives
 # inside the emission loop) measures gaps on the FINAL, diversified order.
-_MMR_LAMBDA = 0.8  # override: HIPPO_MMR_LAMBDA -- relevance weight (1-lambda is diversity weight).
-# Calibrated on the shipped starter-pack golden corpus (see the RCL-4 commit body): the
-# roadmap's suggested ~0.7 measurably eroded hard_recall@10/MRR (still above the absolute
-# gates, but a real, avoidable cost) by letting a WEAK diversity pick occasionally outrank a
-# genuinely-relevant close second; 0.8 recovers nearly all of that margin while an adversarial
-# near-paraphrase fixture (two memories on one decision) still gets diversified.
+# HCR-9 (2026-11-27) rescaled the re-cut. As RCL-4 shipped it, the relevance term was the raw
+# fused score: reciprocal-rank sums near 0.02, against a diversity term (a cosine) near 0.7. At
+# lambda 0.8 that is 0.016 of relevance against 0.14 of diversity, so after the first pick the
+# order was set by dissimilarity, not by the relevance weight the number names. Measured on 347
+# held-out questions over three corpora (planning/HCR-9.mmr.evidence.2026-11-27.json): it cost
+# 16 right answers of 302 on bge-small and 15 of 335 on the Qwen3 4B. It did remove re-captured
+# duplicates (about one row of the top 10), and still lost right answers on the questions built
+# for it (hit@5 -0.11 [-0.19, -0.03] and -0.08 [-0.15, -0.03]). ``_mmr_relevance`` now scales
+# relevance to the pool (best 1.0, worst 0.0), which puts both terms on one scale and lets
+# lambda mean a weight.
+_MMR_NORMALIZE = True  # False: the raw fused score, kept so bench/mmr_eval.py can run that arm
+# override: HIPPO_MMR_LAMBDA -- relevance weight on the pool-scaled score (1-lambda is the
+# diversity weight); 1.0 turns the re-cut off. 0.4 is the lowest of 0.8 / 0.6 / 0.4 / 0.3 / 0.2
+# that lost nothing the same evidence could resolve, on either space: hits in the top 10 and
+# top 5 and MRR all within their intervals of the re-cut off (4B: 336 of 347 against 335),
+# while a fact saved three times takes about half a row less of the top 5 (4B -0.51
+# [-0.68, -0.35], bge-small -0.20 [-0.29, -0.11]). 0.3 removes more and costs the 4B a
+# resolved 1.2 points of hit@5.
+_MMR_LAMBDA = 0.4
 _MMR_POOL_MULT = 2  # candidates considered for the re-cut, as a multiple of k
 
 
@@ -732,6 +745,19 @@ def _mmr_lambda() -> float:
         return float(raw)
     except ValueError:
         return _MMR_LAMBDA
+
+
+def _mmr_relevance(scores: List[float]) -> List[float]:
+    """The relevance term of each pool candidate, on the scale the diversity term is on.
+
+    Min-max over the pool, so the best candidate reads 1.0 and the worst 0.0 (all equal: all
+    1.0). With ``_MMR_NORMALIZE`` off: the raw fused score, as RCL-4 shipped it."""
+    if not _MMR_NORMALIZE or not scores:
+        return list(scores)
+    lo, hi = min(scores), max(scores)
+    if hi <= lo:
+        return [1.0] * len(scores)
+    return [(s - lo) / (hi - lo) for s in scores]
 
 
 def _mmr_rerank(
@@ -788,6 +814,7 @@ def _mmr_rerank(
         rows = np.array([e[3] for e in eligible])
         sims = dense[rows] @ dense[rows].T  # rows are L2-normalized -> dot == cosine
         lam = _mmr_lambda()
+        relevance_of = _mmr_relevance([e[2] for e in eligible])
 
         remaining = list(range(len(eligible)))
         max_sim_to_picked = np.zeros(len(eligible))
@@ -795,7 +822,7 @@ def _mmr_rerank(
         while remaining:
             best_local, best_val = None, None
             for local_i in remaining:
-                relevance = eligible[local_i][2]
+                relevance = relevance_of[local_i]
                 mmr_score = lam * relevance - (1.0 - lam) * max_sim_to_picked[local_i]
                 if best_val is None or mmr_score > best_val:
                     best_val, best_local = mmr_score, local_i

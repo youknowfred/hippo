@@ -1302,7 +1302,11 @@ def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
     B.build_index(md, idx)
     query = "deploy pipeline manual approval gate rollout"
 
-    # WITH MMR (the real function, still in effect): the block spans both facets.
+    # WITH MMR (the real function, still in effect): the block spans both facets. HCR-9:
+    # relevance is scaled to the pool, and this pool is three rows whose last reads 0.0, so
+    # the default weight keeps the pair; a diversity-heavy weight shows the re-cut is wired in.
+    # test_mmr_default_weight_on_a_full_pool pins the default on a pool the size recall has.
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "0.1")
     names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
     assert names == ["deploy_gate_a", "db_migration"]
 
@@ -1311,6 +1315,45 @@ def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
     monkeypatch.setattr(R, "_mmr_rerank", lambda penalized, entries, dense, k, **kw: penalized)
     baseline_names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
     assert baseline_names == ["deploy_gate_a", "deploy_gate_b"]
+
+
+def _unit(*xs):
+    v = np.array(xs, dtype="float32")
+    return v / np.linalg.norm(v)
+
+
+def test_mmr_default_weight_on_a_full_pool(monkeypatch):
+    """HCR-9: at the default weight, on a pool of fused scores shaped like recall's (reciprocal
+    ranks), a re-captured duplicate of the top hit gives way to the next distinct memories, a
+    merely related row keeps its place, and nothing leaves the pool."""
+    monkeypatch.delenv("HIPPO_MMR_LAMBDA", raising=False)
+    assert R._MMR_LAMBDA == 0.4 and RR._MMR_NORMALIZE is True
+    # Every pair shares one axis (cosine 0.5 between unrelated memories, as in a real corpus).
+    dense = np.stack([
+        _unit(1, 1, 0, 0, 0, 0, 0, 0, 0),       # 0: the top hit
+        _unit(1, 1, 0.25, 0, 0, 0, 0, 0, 0),    # 1: the same fact saved again (0.98 to 0)
+        _unit(1, 0.4, 0, 1, 0, 0, 0, 0, 0),     # 2: related (0.67 to 0), a different memory
+        _unit(1, 0, 0, 0, 1, 0, 0, 0, 0),
+        _unit(1, 0, 0, 0, 0, 1, 0, 0, 0),
+        _unit(1, 0, 0, 0, 0, 0, 1, 0, 0),
+        _unit(1, 0, 0, 0, 0, 0, 0, 1, 0),
+        _unit(1, 0, 0, 0, 0, 0, 0, 0, 1),
+    ])
+    entries = [{"row": i} for i in range(8)]
+    penalized = [(i, 2.0 / (61 + i), None) for i in range(8)]
+    order = [t[0] for t in R._mmr_rerank(penalized, entries, dense, k=4)]
+    assert sorted(order) == list(range(8))
+    assert order[0] == 0 and order.index(1) > order.index(5)  # the duplicate gave way to four others
+    assert order.index(2) <= 2  # related is not duplicate: it stays in the top three
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "1.0")
+    assert [t[0] for t in R._mmr_rerank(penalized, entries, dense, k=4)] == list(range(8))  # off
+
+
+def test_mmr_relevance_is_scaled_to_the_pool(monkeypatch):
+    assert RR._mmr_relevance([0.03, 0.02, 0.01]) == pytest.approx([1.0, 0.5, 0.0])
+    assert RR._mmr_relevance([0.02, 0.02]) == [1.0, 1.0] and RR._mmr_relevance([]) == []
+    monkeypatch.setattr(RR, "_MMR_NORMALIZE", False)  # the v1.48 scale, for the bench arm
+    assert RR._mmr_relevance([0.03, 0.02]) == [0.03, 0.02]
 
 
 def test_mmr_rerank_is_noop_without_dense_matrix():
