@@ -11,6 +11,31 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.49.0: `high` embeds whole memories; the diversity re-cut is rescaled
+
+**Nothing to run.** The index schema is unchanged (still 8) and no `lean` row is re-embedded.
+
+- **On `lean` (every machine that set no profile):** the first session after the update
+  rewrites the index manifest once, to add one key per memory, with every embedding row reused.
+  Ranking changes slightly: the diversity re-cut no longer pushes right answers out of the top
+  10 (see the CHANGELOG for the measurement). No setting restores the old order, which came
+  from a scaling fault. `HIPPO_MMR_LAMBDA=1.0` turns the re-cut off.
+- **On `high`:** the `high/` index rebuilds itself in the background the first time a warm
+  server runs on each project, because its rows now embed whole memories. Until it finishes,
+  recall serves `lean`, as during any catch-up. Expect about a second per memory (most of an
+  hour for 1,000 memories) plus the body rows it reuses. One session builds a project's index
+  at a time and the others wait for it; a session that ends mid-build loses at most 256 rows of
+  work and the next one resumes. `/hippo:doctor`'s retrieval-profile line says "serving lean
+  while the high index catches up" until it is done.
+- **If you set `HIPPO_MMR_LAMBDA`:** the number now weighs a relevance score scaled from 0 to 1
+  across the candidates, where it weighed a raw score near 0.02. The default is 0.4. A value you
+  tuned against the old scale no longer means what it did; unset it unless you want the re-cut
+  off (`1.0`).
+- **If you run the 8B** (`HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B`): nothing changes for
+  it. It keeps description rows and its calibration; only the 4B was re-measured.
+- The MLX buffer cache cap from the unreleased fix (512 MB, `HIPPO_MLX_CACHE_MB`) ships in this
+  release. A machine that left `high` because an index build exhausted its memory can go back.
+
 ### v1.48.0: retrieval profiles (opt-in)
 
 **Nothing rebuilds.** The index schema is unchanged, and a machine that sets no profile is on
