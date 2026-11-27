@@ -92,6 +92,77 @@ def _attr(obj, name, value):
         setattr(obj, name, prev)
 
 
+def _lean_only(args, rows, queries, lean, names, md, idx, k, space, cost, tmp) -> int:
+    """Phase 2's lean arms alone, under the names the full pass gives them: no MLX model loads.
+
+    ``p2/lean`` repeats the full pass's arm of that name, so the report can check that this
+    run and the earlier one read the same corpus before it pairs an arm here with one there.
+    """
+    import numpy as np
+
+    from memory import build_index as B
+    from memory import recall as RC
+
+    def body_of(name: str) -> str:
+        try:
+            return open(os.path.join(md, name + ".md"), encoding="utf-8", errors="ignore").read()
+        except OSError:
+            return ""
+
+    whole_docs = [body_of(e["name"]) or e["doc_text"] for e in lean.entries]
+    lean_whole = copy.copy(lean)
+    dense = np.array(lean.dense, copy=True)
+    t0 = time.monotonic()
+    dense[np.array([e["row"] for e in lean.entries])] = B.embed_documents(whole_docs)
+    cost["build_s"]["doc:whole(lean)"] = round(time.monotonic() - t0, 1)
+    lean_whole.dense = dense
+    arms: dict = {}
+
+    def pipe(name: str, index, env=None, **meta) -> None:
+        tops, millis = [], []
+        with _env({"HIPPO_RERANK": "0", **(env or {})}):
+            def one(query: str):
+                got = RC.recall(query, k=k, index=index, index_dir=idx, memory_dir=md)
+                return [r["name"] for r in got if r.get("corpus") != "rule"][:k]
+
+            one(queries[0])
+            for q in queries:
+                t0 = time.perf_counter()
+                tops.append(one(q))
+                millis.append((time.perf_counter() - t0) * 1000.0)
+        arms[name] = {"top": tops, "ms": [round(m, 1) for m in millis], "tier": "pipe", "space": "lean",
+                      "pool": 0, "env": dict(env or {}), "dense_w": None, "instruction": "shipped", **meta}
+        hits = sum(r["stem"] in t for r, t in zip(rows, tops))
+        _log(f"{name}: {hits}/{len(rows)} in top {k}; p50 {sorted(millis)[len(millis) // 2]:.0f} ms")
+
+    mmr_off = {"HIPPO_MMR_LAMBDA": "1.0"}
+    pipe("p2/lean", lean)
+    pipe("p2/lean/doc=whole", lean_whole, doc="whole")
+    pipe("p2/lean/mmr-off", lean, env=mmr_off)
+    pipe("p2/lean/doc=whole/mmr-off", lean_whole, env=mmr_off, doc="whole")
+    pipe("p2/lean#2", lean)
+    self_check = arms["p2/lean"]["top"] == arms.pop("p2/lean#2")["top"]
+    cost["footprint_bytes"]["end"] = _footprint_bytes()
+    cost["load_average_1m"] = round(os.getloadavg()[0], 1)
+    from memory import recall_rank as RR
+
+    out = {
+        "corpus": args.corpus, "model": args.model, "space": space, "k": k, "lean_only": True,
+        "entries": len(lean.entries), "body_chunks": len(lean.body_chunks),
+        "questions": [{"stem": r["stem"], "style": r.get("style"), "query": r["query"],
+                       "resolvable": r["stem"] in set(names)} for r in rows],
+        "floors": {"lean": RR._DENSE_FLOOR_BY_MODEL.get(B.DEFAULT_MODEL, RR._DENSE_FLOOR_DEFAULT),
+                   "high": RR._DENSE_FLOOR_BY_MODEL.get(space, RR._DENSE_FLOOR_DEFAULT)},
+        "baseline_self_check": self_check, "cost": cost, "arms": arms,
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(out, fh)
+    _log(f"wrote {args.out}; baseline self-check {'pass' if self_check else 'FAIL'}")
+    shutil.rmtree(tmp, ignore_errors=True)
+    return 0 if self_check else 2
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True, help="a label for this corpus in the results")
@@ -107,7 +178,12 @@ def main(argv=None) -> int:
     ap.add_argument("--phase2", action="store_true",
                     help="the follow-up arms only: whole-memory rows with the fusion weight and the "
                          "reranker, the same rows on lean, and the pipeline with MMR or the graph off")
+    ap.add_argument("--lean-only", action="store_true",
+                    help="with --phase2: only the arms that need no high model (lean as shipped, with "
+                         "whole-memory rows, with MMR off, and with both). Loads no MLX model")
     args = ap.parse_args(argv)
+    if args.lean_only and not args.phase2:
+        ap.error("--lean-only goes with --phase2")
 
     rows = [json.loads(line) for line in open(args.questions, encoding="utf-8") if line.strip()]
     rows = [r for r in rows if r.get("corpus") == args.corpus and r.get("query") and not r.get("skip")]
@@ -166,6 +242,9 @@ def main(argv=None) -> int:
     missing = sorted({r["stem"] for r in rows} - set(names))
     _log(f"lean index: {len(lean.entries)} entries, {len(lean.body_chunks)} chunks; "
          f"{len(rows)} questions, {len(missing)} with no entry")
+
+    if args.lean_only:
+        return _lean_only(args, rows, queries, lean, names, md, idx, k, space, cost, tmp)
 
     emb = E.high_embedder(space)
     cost["model"] = {"space": space, "load_ms": round(emb.load_ms, 1), "resident_bytes": emb.resident_bytes,
@@ -315,6 +394,8 @@ def main(argv=None) -> int:
         pipe("p2/lean", index=lean)
         pipe("p2/lean/doc=whole", index=lean_whole, doc="whole")
         pipe("p2/lean/doc=whole+rerank/pool=30", index=lean_whole, pool=30, doc="whole")
+        # tuned lean: both changes that helped it, together (the arm HCR-8's first pass left out)
+        pipe("p2/lean/doc=whole/mmr-off", index=lean_whole, env={"HIPPO_MMR_LAMBDA": "1.0"}, doc="whole")
         pipe("p2/high/doc=whole", index=whole, high=True, doc="whole")
         for w in (2.0, 3.0, 5.0, 10.0):
             pipe(f"p2/high/doc=whole/dense_w={w}", index=whole, high=True, dense_w=w, doc="whole")
