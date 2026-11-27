@@ -84,8 +84,9 @@ loop; right memory in the top 10. Every interval is 95%.
   -/11/7 and -/11/8; 12/10/5 and 15/7/5 (of 20/12/12).
 - A `high/` build with whole rows costs about a second per memory on an idle machine (1,218 s
   for 1,070 memories' rows; their body rows, about 17 minutes more on a first build, are reused
-  on an upgrade). The process building it held 6.0 GB and peaked at 6.4 GB, measured alone;
-  a warm server that is not building holds 4.1 GB.
+  on an upgrade). The process building it held 6.0 to 6.5 GB and peaked at 6.8 GB, measured
+  alone on a machine whose GPU was shared; a warm server that is not building holds 4.1 GB.
+  Stopped after its first pass, it had kept that pass's 256 rows.
 
 Evidence, all dated 2026-11-27 under `planning/`: `HCR-9.tuned-lean.evidence`,
 `HCR-9.mmr.evidence`, `HCR-9.calibration.evidence`, `HCR-9.release.evidence`. The question set
