@@ -71,6 +71,18 @@ PYTHONPATH=plugin python -m bench.calibrate_thresholds --memory-dir DIR --hard-s
 # the /dream snapshot-diff A/B over the committed fixture (tests/fixtures/dream_ab), or over a
 # copy of a live corpus with --live (measure-only)
 PYTHONPATH=plugin python -m bench.dream_eval [--live [--memory-dir DIR]] [--rebuilds N] [--pin]
+
+# HCR-8: the held-out high-vs-lean eval. Build the set (sample, then pool and gold after a run),
+# run one corpus and one embedder per process, then write the counts-only evidence. The set,
+# the per-question results and the judgments name memories: keep them outside the repository.
+python -m bench.high_eval_set sample --corpus LABEL=DIR ... --n LABEL=N ... --out PRIVATE_DIR
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.high_eval --corpus LABEL \
+  --memory-dir DIR --questions PRIVATE_DIR/questions.jsonl --mlx-cache MLX --fastembed-cache FE \
+  [--model Qwen/Qwen3-Embedding-8B] [--phase2] --out PRIVATE_DIR/results-LABEL-4b.json
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.rerank_latency --questions ... \
+  --memory-dirs LABEL=DIR ... --mlx-cache MLX --fastembed-cache FE --out PRIVATE_DIR/rerank.json
+python -m bench.high_eval_report --results PRIVATE_DIR --gold PRIVATE_DIR/gold.json \
+  --out planning/HCR-8.evidence.DATE.json
 ```
 
 These used to run as `python -m memory.eval_recall --calibrate` and `--ab HIPPO_DREAM`; those
