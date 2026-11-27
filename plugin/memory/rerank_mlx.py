@@ -37,6 +37,10 @@ Scoring is the model card's, exactly: a causal LM reads
 right-padded and the last real position gathered per row (exact for a causal model, as in
 ``embed_mlx``), so only those rows go through the tied output head. All MLX work runs on
 ``embed_mlx.mlx_executor()``, the process's one MLX thread.
+
+HCR-7: by default that thread is the embedding daemon's, and ``reranker`` hands this process
+a client of it (``embed_remote.RemoteReranker``); a daemon that cannot score in time is one
+more way to ``RerankUnavailable``, and the seam keeps the fused order.
 """
 
 from __future__ import annotations
@@ -293,6 +297,18 @@ class RerankUnavailable(RuntimeError):
     """The active reranker cannot score right now; the seam keeps the fused order."""
 
 
+def _backend() -> Callable[[str, str], object]:
+    """HCR-7: the daemon's client unless a backend was put in ``BACKEND`` or
+    ``HIPPO_EMBED_DAEMON=0`` keeps the model in this process (``embed_mlx.uses_daemon``'s
+    rule). The daemon scores on its one MLX thread; nothing loads here."""
+    if BACKEND is _MLXReranker:
+        from . import embed_remote
+
+        if embed_remote.enabled():
+            return embed_remote.RemoteReranker
+    return BACKEND
+
+
 def loaded(model: str):
     """The reranker already in memory, or None — never loads."""
     return _LOADED.get(model)
@@ -314,7 +330,7 @@ def reranker(model: str):
             raise RerankUnavailable(reason)
         _STATUS[model] = {"status": "loading", "reason": ""}
         try:
-            rr = BACKEND(model, snapshot_dir(model))
+            rr = _backend()(model, snapshot_dir(model))
         except Exception as exc:
             _STATUS[model] = {"status": "failed", "reason": f"model load failed: {exc}"}
             raise RerankUnavailable(str(exc)) from exc

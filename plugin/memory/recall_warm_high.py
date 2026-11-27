@@ -1,4 +1,4 @@
-"""HCR-2: the high profile's warm half — the one process that ever loads the big embedder.
+"""HCR-2: the high profile's warm half — the only path that serves the big embedder.
 
 How the two paths coexist (the roadmap's warm-first rule, made concrete):
 
@@ -12,8 +12,8 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
   own top-level files), and the high build never writes outside it: neither can tear the
   other. Concurrent sessions building the same ``high/`` are IDX-1's case, already safe.
 * **Only this server builds or reads it.** On the first warm call of a high-profile
-  session the server starts one daemon thread that loads the model (off the serving path,
-  so the cold load never counts against ``COLD_BUDGET_MS``) and then keeps every recall
+  session the server starts one daemon thread that gets the model ready (off the serving
+  path, so the cold load never counts against ``COLD_BUDGET_MS``) and then keeps every recall
   tier's ``high/`` index caught up with its lean twin — offline (the high embedder never
   downloads) and incremental (rows reused by hash). Until the model is loaded and EVERY tier's high index
   holds exactly the lean index's entries and chunks (same hashes, dense-ready, same space),
@@ -29,7 +29,15 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
   failed load: the status records why (the heartbeat carries it; doctor reports it) and the
   server keeps serving lean. Recall never downloads.
 
-Each session's MCP server is its own process, so each loads its own copy of the model.
+* **The model is not in this process (HCR-7).** Each session's MCP server is its own
+  process, and each used to load its own copy (4.1 GB; ten sessions, 41 GB). Now the loader
+  thread makes sure the machine's one embedding daemon is running (``embed_remote.ensure``)
+  and this server holds a client: it never imports MLX. A served call asks the daemon
+  whether it holds the model (``_plan``); absent, starting, or with the model dropped while
+  idle, the call serves lean. A query embed that fails or runs late mid-call makes
+  ``recall_warm`` discard the high attempt and serve that prompt lean (``note_fault``), then
+  hold high off for ``FAULT_HOLD_S`` so the next prompts do not wait on a daemon that is
+  struggling. ``HIPPO_EMBED_DAEMON=0`` loads the model here instead, as before.
 """
 
 from __future__ import annotations
@@ -48,6 +56,9 @@ _MAX_PASSES = 8  # passes that may chase a moving lean index once every row is e
 # One unbounded pass over a 1,070-memory corpus took ~36 minutes with whole-memory rows and
 # kept nothing until its last row.
 _PASS_ROWS = 256
+# HCR-7: after a daemon fault on a served call, how long this server serves lean without
+# asking. A daemon that was killed is back and loaded well inside it (about 3 s).
+FAULT_HOLD_S = 30.0
 
 
 def high_index_dir(index_dir: str) -> str:
@@ -68,6 +79,10 @@ class _State:
         self.wake = threading.Event()
         self.lock = threading.Lock()
         self.fresh_memo: Dict[Tuple[int, int], tuple] = {}
+        self.daemon = False  # HCR-7: the embedder is the daemon's client
+        self.hold_until = 0.0  # monotonic: no high attempt before this (a daemon fault)
+        self.faults = 0
+        self.fault = ""
 
 
 _ST = _State()
@@ -149,6 +164,10 @@ def status() -> Dict:
         "load_ms": round(_ST.load_ms, 1) if _ST.load_ms is not None else None,
         "resident_bytes": _ST.resident_bytes,
     }
+    if _ST.daemon:  # HCR-7: the bytes above are the daemon's, not this server's
+        out["daemon"] = True
+        if _ST.faults:
+            out["faults"], out["fault"] = _ST.faults, _ST.fault
     if _ST.rerank is not None:
         from .rerank_mlx import status as rerank_status
 
@@ -235,20 +254,59 @@ def _run(space: str) -> None:
 
     try:
         emb = E.high_embedder(space)
-        _ST.load_ms = getattr(emb, "load_ms", None)
-        _ST.resident_bytes = getattr(emb, "resident_bytes", None)
-        _ST.status = "ready"
+        ensure = getattr(emb, "ensure", None)  # HCR-7: the daemon's client has one
+        _ST.daemon = ensure is not None
+        if ensure is None:  # a model loaded in this process: loaded now, for good
+            _ST.load_ms = getattr(emb, "load_ms", None)
+            _ST.resident_bytes = getattr(emb, "resident_bytes", None)
+            _ST.status = "ready"
     except Exception as exc:
         _ST.status, _ST.reason = "failed", f"model load failed: {exc}"
         return
+    first = True
     while _ST.space == space:
-        for memory_dir, index_dir in list(_ST.tiers):
-            try:
-                refresh_tier(memory_dir, index_dir, space)
-            except Exception:
-                pass  # the next pass retries; serving stays lean meanwhile
+        if ensure is None or _ensure_daemon(ensure, first):
+            first = False
+            for memory_dir, index_dir in list(_ST.tiers):
+                try:
+                    refresh_tier(memory_dir, index_dir, space)
+                except Exception:
+                    pass  # the next pass retries; serving stays lean meanwhile
         _ST.wake.wait(REFRESH_EVERY_S)
         _ST.wake.clear()
+
+
+def _ensure_daemon(ensure, first: bool) -> bool:
+    """HCR-7: the embedding daemon is running (started here when it is not), and on this
+    server's first pass it holds the model. A later pass only checks: an idle daemon that
+    dropped the model is left alone until a prompt or a build asks. False (status ``failed``,
+    with the reason; serving stays lean) is retried at the next wake, and ``embed_remote``
+    spaces out the starts."""
+    try:
+        info, why = ensure(load=first), ""
+    except Exception as exc:
+        info, why = {}, f"embedding daemon: {exc}"
+    if _ST.thread is not threading.current_thread():
+        return False  # this loop was replaced while it waited: the state is no longer its own
+    if why:
+        _ST.status, _ST.reason = "failed", why
+        return False
+    if info.get("load_ms") is not None:
+        _ST.load_ms = info["load_ms"]
+    _ST.resident_bytes = info.get("resident_bytes")
+    _ST.status, _ST.reason = "ready", ""
+    return True
+
+
+def note_fault(reason: str) -> None:
+    """HCR-7: a served call's query embed failed or ran late, and that prompt was served
+    lean. Hold high off for ``FAULT_HOLD_S`` and wake the loader, which restarts a daemon
+    that is gone."""
+    _ST.faults += 1
+    _ST.fault = reason
+    _ST.hold_until = time.monotonic() + FAULT_HOLD_S
+    _ST.engaged = False
+    _ST.wake.set()
 
 
 def _build_lock(hdir: str):
@@ -326,10 +384,16 @@ def _catch_up(memory_dir: str, index_dir: str, hdir: str, space: str) -> bool:
 
 
 @contextmanager
-def serving(memory_dir, lean_load) -> Iterator[None]:
+def serving(memory_dir, lean_load, *, lean_only: bool = False) -> Iterator[None]:
     """Wrap one served call: on high, with the model loaded and every tier's high index
     fresh, each tier's index resolves to its high twin and the query embeds in the high
-    space. Otherwise this is a no-op and the call serves lean, exactly as before."""
+    space. Otherwise this is a no-op and the call serves lean, exactly as before.
+    ``lean_only`` (HCR-7: the re-run after a daemon fault) is that no-op by request: no plan,
+    no reranker, nothing that could wait on the daemon again."""
+    if lean_only:
+        _ST.engaged = False
+        yield
+        return
     plan: Optional[Dict[str, object]] = None
     try:
         kick(memory_dir)
@@ -380,6 +444,8 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
     space = _ST.space
     if _ST.status != "ready" or not space or loaded(space) is None or not _ST.tiers:
         return None
+    if time.monotonic() < _ST.hold_until:
+        return None  # HCR-7: a daemon fault a moment ago; lean until the hold is over
     plan: Dict[str, object] = {}
     for _memory_dir, index_dir in _ST.tiers:
         lean = lean_load(index_dir)
@@ -394,7 +460,16 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
             _ST.wake.set()  # lean moved on: catch the twin up now
             return None
         plan[index_dir] = high
-    return plan or None
+    if not plan:
+        return None
+    # HCR-7: asked last, once everything else says high would serve. The daemon answers
+    # "loaded" or this prompt is lean: absent or silent wakes the loader (which restarts it),
+    # and one that dropped the model while idle starts loading it on this very question.
+    ready = getattr(loaded(space), "ready", None)
+    if ready is not None and not ready():
+        _ST.wake.set()
+        return None
+    return plan
 
 
 def _reset_for_tests() -> None:
@@ -419,8 +494,14 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
     why = E.unavailable_reason(E.parse_space(space)[0])
     if why:
         return f"{lean}; high model {space} is not servable here", f"High degrades to lean: {why}."
-    meaning = f"dense {space} via MLX in the warm server (the spawned hook serves lean: {lean})"
+    daemon = E.uses_daemon()  # HCR-7: where the model is, and the daemon's own state
+    where = "the machine's one embedding daemon, for the warm servers" if daemon else "the warm server"
+    meaning = f"dense {space} via MLX in {where} (the spawned hook serves lean: {lean})"
     from .recall_warm import server_states
+    if daemon:
+        from .embed_remote import describe
+
+        meaning = f"{meaning}; {describe(space)}"
 
     live = [r["high"] for r in server_states() if r.get("alive") and isinstance(r.get("high"), dict)]
     if not live:
@@ -433,8 +514,10 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
             "serving high" if h.get("engaged") else "serving lean while the high index catches up"]
     if h.get("load_ms") is not None:
         bits.append(f"model load {h['load_ms'] / 1000:.1f} s")
-    if h.get("resident_bytes"):
+    if h.get("resident_bytes") and not h.get("daemon"):
         bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident")
+    if h.get("faults"):
+        bits.append(f"{h['faults']} prompt(s) served lean on a daemon fault (last: {h.get('fault')})")
     rr = h.get("rerank") if isinstance(h.get("rerank"), dict) else {}
     if rr.get("model"):
         bits.append(f"reranker {rr['model']} {rr.get('status') or 'idle'}"

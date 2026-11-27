@@ -338,7 +338,8 @@ def high_floor_sweep(
     """HCR-3: the same sweep inside the machine's resolved high embedding space. None when
     the retrieval profile is not high (every lean/floor machine: nothing loads, nothing is
     written). ``{"ok": False, "space", "error"}`` when the high model cannot be served here
-    or its index cannot be brought level. Loads the big model in THIS process and brings
+    or its index cannot be brought level. Uses the big model as recall does (HCR-7: the
+    machine's embedding daemon; in THIS process with ``HIPPO_EMBED_DAEMON=0``) and brings
     ``<index>/high`` level with the lean index first, as the warm server does; never downloads."""
     from .build_index import dense_disabled
     from .retrieval_profile import resolve_retrieval_profile

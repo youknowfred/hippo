@@ -2,12 +2,14 @@
 
 Kept beside the lane rather than in it, which sits at its module-size cap. The lane passes in
 its own tear machinery (``arm``/``snap``/``assert_unchanged``) and lists what ``scenarios``
-returns in ``_SCENARIOS``; ``CRASH_CONTRACT`` there declares the same three sites.
+returns in ``_SCENARIOS``; ``CRASH_CONTRACT`` there declares the same sites (HCR-7 added the
+embedding daemon's record, which the warm servers' doctor line reads).
 """
 
 from __future__ import annotations
 
 import os
+import threading
 
 
 def scenarios(arm, snap, assert_unchanged):
@@ -50,8 +52,33 @@ def scenarios(arm, snap, assert_unchanged):
 
         return scenario
 
+    def daemon_record_intact(tmp_path, monkeypatch):
+        """HCR-7: a torn write of the embedding daemon's record is SILENT. The daemon still
+        takes the socket and answers; no partial record lands, and doctor finds the daemon
+        by asking its socket."""
+        from memory import embed_daemon, embed_remote
+
+        space = "Qwen/Qwen3-Embedding-4B"
+        monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "data"))
+        embed_remote._reset_for_tests()
+        arm(monkeypatch, "embed_daemon", "_record")
+        daemon = embed_daemon.Daemon(space, load_embedder=lambda: None, live=lambda: 1, tick_s=0.02)
+        assert daemon.start()
+        thread = threading.Thread(target=daemon.serve_forever, daemon=True)
+        thread.start()
+        try:
+            assert not os.path.exists(embed_remote.paths(space).meta), "absent, never partial"
+            assert embed_remote.hello(space, timeout=2.0)["pid"] == os.getpid()
+            assert f"pid {os.getpid()}" in embed_remote.describe(space)
+        finally:
+            daemon.stop()
+            thread.join(10)
+            daemon.close()
+            embed_remote._reset_for_tests()
+
     return [
         (("recall_warm", "_publish"), "intact", heartbeat_intact),
+        (("embed_daemon", "_record"), "intact", daemon_record_intact),
         (("setup_cli", "_apply"), "detected", setup_detected("_apply")),
         (("setup_cli", "_backup"), "detected", setup_detected("_backup")),
     ]

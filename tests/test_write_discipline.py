@@ -72,6 +72,8 @@ WRITE_OPEN_ALLOWLIST = {
     ("telemetry_rollup", "_locked"): "flock lock file opened in append mode; nothing is ever written to it",
     ("derived_dirs", "_try_lock"): "MIG-10 flock lock file opened in append mode; nothing is ever written to it",
     ("recall_warm_high", "_build_lock"): "HCR-9 flock lock file opened in append mode; nothing is ever written to it",
+    ("embed_daemon", "start"): "HCR-7 flock lock file opened in append mode; nothing is ever written to it",
+    ("embed_remote", "_spawn"): "HCR-7 the daemon's stderr log, append-only, machine-local, rotated at 512 KB; never read back",
     ("derived_dirs", "_append_file"): "MIG-10 fold: appends an older hippo's append-only ledger lines to the live gitignored ledger",
     ("cli", "_note_cli_use"): "one append-only spool line in an existing gitignored telemetry dir, the same line bash's hippo_note_usage appends (OBS-2)",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",

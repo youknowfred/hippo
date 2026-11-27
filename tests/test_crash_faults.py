@@ -128,6 +128,7 @@ CRASH_CONTRACT = {
     ("derived_dirs", "_write_stub"): ("intact",),  # MIG-10: the move stands and the stub dir exists; only its note is missing
     ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
     ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
+    ("embed_daemon", "_record"): ("intact",),  # HCR-7 the daemon's record for doctor: it serves without one; doctor asks the socket
     ("setup_cli", "_apply"): ("detected",),  # HOT-6 settings write: exit 1, "Nothing was changed"
     ("setup_cli", "_backup"): ("detected",),  # the backup tears first: the settings write never starts
     ("gate_cli", "install"): ("detected",),  # GAT-2 pre-commit hook: exit 1, "nothing was changed", prior hook intact

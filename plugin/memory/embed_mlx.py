@@ -28,6 +28,10 @@ row with no attention mask. All MLX work runs on the process's ONE MLX worker th
 (``mlx_executor``; MLX arrays and streams are not shared across threads, and the rerankers
 submit there too); a document batch is fed to it in small
 slices so a query waiting behind a background build waits one slice, not the whole batch.
+
+HCR-7: by default that process is the machine's one embedding daemon (``embed_daemon``), and
+``high_embedder`` hands every other process a client of it (``embed_remote``). The classes
+here are what the daemon loads; ``HIPPO_EMBED_DAEMON=0`` loads them in the caller instead.
 """
 
 from __future__ import annotations
@@ -459,9 +463,22 @@ _LOADED: Dict[str, object] = {}
 _LOAD_LOCK = threading.Lock()
 
 
+def uses_daemon() -> bool:
+    """HCR-7: this process's high embedder is the machine's daemon, not a model loaded here.
+    True unless a backend was put in ``BACKEND`` (tests, a bench's own) or
+    ``HIPPO_EMBED_DAEMON=0`` keeps the model in-process (the benches, the byte-identity check).
+    The daemon itself calls ``BACKEND`` directly and never asks."""
+    if BACKEND is not _MLXEmbedder:
+        return False
+    from .embed_remote import enabled
+
+    return enabled()
+
+
 def high_embedder(space: str):
-    """The loaded embedder for ``space`` — offline only; raises ``DenseUnavailable`` (a
-    recall_fallback token) when this machine cannot serve it, never downloads."""
+    """The embedder for ``space`` — offline only; raises ``DenseUnavailable`` (a
+    recall_fallback token) when this machine cannot serve it, never downloads. HCR-7: by
+    default it is the daemon's client (``embed_remote.RemoteEmbedder``), the same shape."""
     from .build_index import DenseUnavailable
 
     parsed = parse_space(space)
@@ -475,7 +492,12 @@ def high_embedder(space: str):
         reason = unavailable_reason(model)
         if reason:
             raise DenseUnavailable(reason, "model_not_warmed")
-        emb = BACKEND(model, dim, snapshot_dir(model))
+        if uses_daemon():  # HCR-7: a client; nothing loads in this process, MLX is not imported
+            from .embed_remote import RemoteEmbedder
+
+            emb = RemoteEmbedder(model, dim, snapshot_dir(model))
+        else:
+            emb = BACKEND(model, dim, snapshot_dir(model))
         _LOADED[space] = emb
         return emb
 
