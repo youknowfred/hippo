@@ -75,7 +75,9 @@ DIM_ENV = "HIPPO_HIGH_EMBED_DIM"
 MODEL_PRESET_KEY = "high_embed_model"
 DIM_PRESET_KEY = "high_embed_dim"
 _MIN_DIM = 32  # Qwen3-Embedding's documented MRL floor
-_MAX_TOKENS = 1024  # longest input embedded; hippo's docs and body chunks sit far below it
+# Longest input embedded. Body chunks sit far below it; a whole-memory row (HCR-9) is cut here,
+# so a long memory is embedded by its first ~1,024 tokens (what HCR-8 measured).
+_MAX_TOKENS = 1024
 # Padded tokens per forward pass: bounds a waiting query's wait. Measured on the 4B (M-series,
 # 128 GB): ~1,350 tok/s up to ~1.2k tokens a pass, falling to ~600 tok/s at ~4k.
 _SLICE_TOKENS = 1024

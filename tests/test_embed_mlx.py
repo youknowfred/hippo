@@ -575,3 +575,122 @@ def test_the_real_mlx_backend_embeds_asymmetric_normalizable_vectors(monkeypatch
     import mlx.core as mx
 
     assert mx.get_cache_memory() <= E.cache_limit_bytes()  # the cap held through the embeds
+
+
+# --------------------------------------------------------------------------- #
+# HCR-9: whole-memory rows in the high space
+# --------------------------------------------------------------------------- #
+def test_the_high_twin_embeds_each_whole_file_and_lean_keeps_its_description_rows(fakes, project):
+    lean = B.build_index(project["md"], project["idx"])
+    with E.using_space(_SPACE):
+        high = B.build_index(project["md"], project["high"], allow_download=False)
+    assert high["row_text"] == "whole" and "row_text" not in lean
+    docs = _FakeQwen.made[0].docs
+    whole = open(os.path.join(project["md"], "zebra_deploy_runbook.md"), encoding="utf-8").read()
+    assert whole in docs and whole.startswith("---\nname: zebra_deploy_runbook")
+    assert not any(d.startswith("zebra deploy runbook. ") for d in docs)  # no description row
+    # both manifests carry the whole-file key, so the twin can be compared with lean
+    assert [e["row_hash"] for e in high["entries"]] == [e["row_hash"] for e in lean["entries"]]
+    assert high["entries"][0]["row_hash"] != high["entries"][0]["hash"]
+    assert H.fresh(B.load_index(project["idx"]), B.load_index(project["high"]), _SPACE)
+
+
+def test_a_whole_row_is_re_embedded_only_when_its_file_changes(fakes, project):
+    B.build_index(project["md"], project["idx"])
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    qwen = _FakeQwen.made[0]
+    n = len(qwen.docs)
+    with E.using_space(_SPACE):
+        B.build_index(project["md"], project["high"], allow_download=False)
+    assert len(qwen.docs) == n  # nothing changed: every row reused
+    # a frontmatter-only edit: the description, and so the lean row, is untouched
+    path = os.path.join(project["md"], "llama_billing_cutover.md")
+    text = open(path, encoding="utf-8").read()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text.replace("  type: project\n", "  type: project\n  confidence: verified\n"))
+    lean = B.refresh_index(project["md"], project["idx"])  # SessionStart's refresh sees the new key
+    assert [e["name"] for e in lean["entries"]] == ["llama_billing_cutover", "zebra_deploy_runbook"]
+    assert not H.fresh(B.load_index(project["idx"]), B.load_index(project["high"]), _SPACE)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    assert len(qwen.docs) == n + 1 and "confidence: verified" in qwen.docs[-1]
+
+
+def test_a_twin_built_with_description_rows_is_not_served_and_heals(fakes, project, monkeypatch):
+    from memory import build_index_dense as BD
+
+    B.build_index(project["md"], project["idx"])
+    monkeypatch.setattr(BD, "WHOLE_ROW_MODELS", frozenset())  # how every twin was built before HCR-9
+    with E.using_space(_SPACE):
+        old = B.build_index(project["md"], project["high"], allow_download=False)
+    assert "row_text" not in old and old["dense_ready"]
+    monkeypatch.undo()
+    lean, twin = B.load_index(project["idx"]), B.load_index(project["high"])
+    assert not H.fresh(lean, twin, _SPACE)  # same entries, same model: the rows embed the other text
+    qwen = _FakeQwen.made[0]
+    n = len(qwen.docs)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    assert B.load_index(project["high"]).manifest["row_text"] == "whole"
+    new = qwen.docs[n:]
+    assert len(new) == len(_MEMS) and all(d.startswith("---\n") for d in new)  # entries only; chunk rows reused
+
+
+def test_a_lean_manifest_from_before_the_whole_file_key_still_pairs_with_its_twin(fakes, project):
+    B.build_index(project["md"], project["idx"])
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    path = os.path.join(project["idx"], "manifest.json")
+    manifest = json.load(open(path, encoding="utf-8"))
+    for e in manifest["entries"]:
+        del e["row_hash"]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh)
+    assert H.fresh(B.load_index(project["idx"]), B.load_index(project["high"]), _SPACE)
+    again = B.refresh_index(project["md"], project["idx"])  # the next refresh adds the key, embedding nothing
+    assert all(e.get("row_hash") for e in again["entries"])
+
+
+def test_one_session_builds_a_twin_and_the_others_wait_for_it(fakes, project):
+    B.build_index(project["md"], project["idx"])
+    held = H._build_lock(project["high"])  # another session's server, mid-build
+    assert held is not None and H._build_lock(project["high"]) is None
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
+    assert _FakeQwen.made == [] and B.load_index(project["high"]) is None  # nothing embedded here
+    held.close()
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+
+
+def test_a_twin_build_cut_short_resumes_where_it_stopped(fakes, project, monkeypatch):
+    for i in range(5):
+        _write_mem(project["md"], f"otter_note_{i}", f"Otter note {i} — the {i}th thing the otter team wrote down.")
+    B.build_index(project["md"], project["idx"])
+    monkeypatch.setattr(H, "_PASS_ROWS", 2)
+    real, calls = B.build_index, []
+
+    def dies_on_the_third_pass(*a, **kw):
+        calls.append(kw.get("max_new_rows"))
+        if len(calls) == 3:
+            raise RuntimeError("the session ended")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(B, "build_index", dies_on_the_third_pass)
+    with pytest.raises(RuntimeError):
+        H.refresh_tier(project["md"], project["idx"], _SPACE)
+    assert calls == [2, 2, 2]
+    partial = B.load_index(project["high"])
+    assert not partial.dense_ready and H._rows_done(partial, _SPACE) == 4  # two passes kept
+    assert H._build_lock(project["high"]) is not None  # the lock went with the failed build
+    monkeypatch.setattr(B, "build_index", real)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    done = B.load_index(project["high"])
+    embedded = _FakeQwen.made[0].docs
+    assert len(embedded) == len(done.entries) + len(done.body_chunks) == len(set(embedded))  # none twice
+
+
+def test_a_model_that_embeds_nothing_stops_the_pass_loop(fakes, project, monkeypatch):
+    B.build_index(project["md"], project["idx"])
+    E.high_embedder(_SPACE)
+    monkeypatch.setattr(_FakeQwen, "embed", lambda self, texts: (_ for _ in ()).throw(RuntimeError("metal")))
+    calls = []
+    real = B.build_index
+    monkeypatch.setattr(B, "build_index", lambda *a, **kw: calls.append(1) or real(*a, **kw))
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
+    assert len(calls) == 2  # the second pass added no row: stop until the next wake

@@ -196,3 +196,58 @@ def test_doctor_index_check_fails_on_a_torn_pair(tmp_path, embed, monkeypatch):
     _make_legacy(idx, roll=1)
     r = check_index_corruption(ctx)
     assert r["status"] == "fail" and "misaligned" in r["message"], r
+
+
+# --------------------------------------------------------------------------- #
+# HCR-9: a manifest says what its entry rows embed, and rows are reused only on that key
+# --------------------------------------------------------------------------- #
+_BODY = "The long form of the note, with enough words in its one paragraph to be indexed as a body chunk of its own."
+
+
+def _write_long(md: str) -> None:
+    os.makedirs(md, exist_ok=True)
+    for fname, desc in _CORPUS.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], desc).replace("body text", f"{desc}. {_BODY}"))
+
+
+def test_row_text_is_per_model_and_survives_an_mrl_suffix(monkeypatch):
+    assert D.row_text("Qwen/Qwen3-Embedding-4B") == D.ROW_WHOLE
+    assert D.row_text("Qwen/Qwen3-Embedding-4B@1024") == D.ROW_WHOLE
+    assert D.row_text(None) == D.ROW_DESCRIPTION and D.row_text("some/other-model") == D.ROW_DESCRIPTION
+    assert D.row_hash("x") != B._hash("x")  # never the doc_text hash of the same characters
+
+
+def test_a_mode_change_re_embeds_the_entry_rows_and_keeps_the_chunk_rows(tmp_path, embed, monkeypatch):
+    md, idx = str(tmp_path / "memory"), str(tmp_path / "index")
+    _write_long(md)
+    first = B.build_index(md, idx)
+    assert "row_text" not in first and len(first["body_chunks"]) == 3
+    assert sum(embed) == 6
+    del embed[:]
+    monkeypatch.setattr(D, "WHOLE_ROW_MODELS", frozenset({B.DEFAULT_MODEL}))
+    second = B.build_index(md, idx)
+    assert second["row_text"] == "whole" and sum(embed) == 3  # the three entries; chunk rows reused
+    loaded = B.load_index(idx)
+    for e in loaded.entries:  # each entry row is its whole file's vector now
+        whole = open(os.path.join(md, e["file"]), encoding="utf-8").read()
+        assert float(loaded.dense[e["row"]] @ _vec(whole)) > 0.99
+    del embed[:]
+    B.build_index(md, idx)
+    assert embed == []  # and is reused on the whole-file key from here on
+    monkeypatch.setattr(D, "WHOLE_ROW_MODELS", frozenset())
+    third = B.build_index(md, idx)
+    assert "row_text" not in third and sum(embed) == 3  # back: description rows are embedded again
+
+
+def test_alignment_is_checked_on_chunk_rows_when_entry_rows_embed_whole_files(tmp_path, embed, monkeypatch):
+    md, idx = str(tmp_path / "memory"), str(tmp_path / "index")
+    _write_long(md)
+    monkeypatch.setattr(D, "WHOLE_ROW_MODELS", frozenset({B.DEFAULT_MODEL}))
+    manifest = B.build_index(md, idx)
+    # the entry rows are not doc_text vectors, and that is not a torn index
+    assert B.check_index_alignment(idx) is None
+    dense = np.load(os.path.join(idx, manifest["dense_file"]))
+    assert D.prior_rows_aligned(manifest, dense, lambda t: np.vstack([_vec(x) for x in t])) is True
+    torn = np.roll(dense, 1, axis=0)
+    assert D.prior_rows_aligned(manifest, torn, lambda t: np.vstack([_vec(x) for x in t])) is False
