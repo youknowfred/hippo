@@ -713,3 +713,27 @@ def test_a_lean_index_behind_the_files_costs_one_pass_a_wake_not_a_chase(fakes, 
     monkeypatch.setattr(B, "build_index", lambda *a, **kw: calls.append(1) or real(*a, **kw))
     assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
     assert len(calls) == 1
+
+
+def test_an_empty_tier_does_not_keep_high_from_serving(fakes, project, monkeypatch, tmp_path):
+    """`hippo init` creates the private tier (`.claude/memory.local`) empty, and SessionStart
+    indexes it: a manifest with no entries, which can never be dense-ready. Recall skips an
+    empty tier on every path; the high plan waited for its twin forever, so on a project with
+    an empty private tier warm recall never served high (v1.48.0 and v1.49.0)."""
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    empty = str(tmp_path / "private-tier")
+    os.makedirs(empty)
+    monkeypatch.setenv("HIPPO_LOCAL_MEMORY_DIR", empty)
+    B.build_index(project["md"], project["idx"])
+    tiers = H._tiers(project["md"])
+    assert empty in [c for c, _i in tiers]
+    empty_idx = next(i for c, i in tiers if c == empty)
+    B.build_index(empty, empty_idx)  # SessionStart's refresh of the empty tier
+    assert len(B.load_index(empty_idx)) == 0
+    _serve_warm("s1", "p1")
+    _wait_fresh(project)
+    assert "zebra_deploy_runbook" in _serve_warm("s2", "p2", "zebra canary lane deploy steps")
+    assert _heartbeat("s2")["high"]["engaged"] is True
+    # and the loop builds nothing for it: no twin directory, no passes
+    assert H.refresh_tier(empty, empty_idx, _SPACE) is True
+    assert not os.path.exists(os.path.join(H.high_index_dir(empty_idx), "manifest.json"))

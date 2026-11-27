@@ -7,6 +7,35 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.49.1 — 2026-11-27 — "Past the empty tier"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**.
+Nothing re-indexes.
+
+**Operator action: none required.** Restart open sessions to load the fix. It matters only on
+the `high` profile.
+
+**Fixed**
+- **On `high`, warm recall never served the `high/` index for a project with an empty private
+  tier.** `hippo init` creates the private tier (`.claude/memory.local`) with no memory in it,
+  and SessionStart indexes it, which leaves an index with no entries. Recall skips an empty
+  tier on every path, but the warm server's plan waited for that tier's `high/` twin, and an
+  empty index can never have one. So the server loaded the model, kept its indexes level, and
+  served `lean` on every prompt: on every project whose private tier is empty, which is most
+  of them, in v1.48.0 and v1.49.0. Found while installing v1.49.0: on the machine it was
+  measured on, all six projects were in this state. The plan now skips an empty tier, as
+  recall does, and the catch-up loop builds nothing for one.
+- `/hippo:doctor`'s retrieval-profile line said "serving lean while the high index catches up"
+  throughout. With the fix it says "serving high" once the indexes are level.
+
+**What this does to the earlier numbers.** Nothing measured was wrong: every `high` figure in
+the v1.48.0 and v1.49.0 notes came from a bench that hands recall the `high/` index directly
+(explicit mode, and hook mode through the same function the warm server calls), not through
+the server's plan. What was wrong is the claim that a machine on `high` was being served
+those results per prompt. `/hippo:recall` and the MCP `recall` tool were not affected the same
+way: their rerank of the top 30 ran, over `lean`'s candidates.
+
 ## v1.49.0 — 2026-11-27 — "Whole memories"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

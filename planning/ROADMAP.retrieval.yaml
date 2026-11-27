@@ -761,6 +761,20 @@ workstream:
           lean's volume (5.4 and 5.7) and finds 359 rows in hook mode against
           369; 0.18 finds 363 at 7.3 and 7.6. Volume against rows found is the
           same call the owner made for lean on 2026-11-25 ("Leave it").
+        found_at_install: >-
+          2026-11-27, installing v1.49.0 on the owner's Mac with six projects.
+          recall_warm_high._plan returned no plan on any of them: each has an
+          empty private tier (.claude/memory.local as `hippo init` leaves it)
+          whose index has no entries and so can never have a dense-ready twin,
+          and the plan required one of every tier. Recall itself skips an empty
+          tier. So since v1.48.0 a warm server on high loaded the model, kept
+          its twins level and served lean on every prompt, wherever the private
+          tier was empty. Every measured high number stands (the benches hand
+          recall the high index directly); what did not hold is that the
+          profile was serving them. Fixed in v1.49.1: the plan and the catch-up
+          loop skip an empty tier. This is likely much of why high read as
+          under-optimized to the owner before HCR-8. What is still missing is a
+          bench that drives the warm server's own plan with real models.
         not_done: >-
           The 8B keeps description rows and its HCR-3 entries: it was not
           re-run, and HCR-8 has it tied with the 4B. Abstention on adjacent

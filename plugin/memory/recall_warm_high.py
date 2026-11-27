@@ -280,6 +280,8 @@ def refresh_tier(memory_dir: str, index_dir: str, space: str) -> bool:
     lean = load_index(index_dir)
     if lean is None:
         return False  # nothing to mirror yet; the lean side builds it
+    if not len(lean):
+        return True  # an empty tier (see _plan): nothing to embed, and no twin is made for it
     if fresh(lean, load_index(hdir), space):
         return True
     lock = _build_lock(hdir)
@@ -381,8 +383,12 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
     plan: Dict[str, object] = {}
     for _memory_dir, index_dir in _ST.tiers:
         lean = lean_load(index_dir)
-        if lean is None:
-            continue  # recall skips this tier on either path
+        if lean is None or not len(lean):
+            # Recall skips this tier on either path. An EMPTY tier is the common case, not a
+            # corner: `hippo init` makes the private tier with no memory in it and SessionStart
+            # indexes it, leaving a manifest with no entries that can never be dense-ready.
+            # Waiting for its twin kept every such project on lean for good (v1.48.0, v1.49.0).
+            continue
         high = _high_cache().load(high_index_dir(index_dir))
         if not fresh(lean, high, space):
             _ST.wake.set()  # lean moved on: catch the twin up now

@@ -11,6 +11,13 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.49.1: `high` is served on projects with an empty private tier
+
+**Nothing to run.** On `high`, restart open sessions. Before this fix a project whose
+`.claude/memory.local` holds no memory (the state `hippo init` leaves it in) was served `lean`
+on every prompt, however long its `high/` index had been ready. `/hippo:doctor`'s
+retrieval-profile line reads "serving high" once it works.
+
 ### v1.49.0: `high` embeds whole memories; the diversity re-cut is rescaled
 
 **Nothing to run.** The index schema is unchanged (still 8) and no `lean` row is re-embedded.

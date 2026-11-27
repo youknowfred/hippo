@@ -142,7 +142,7 @@ releases:
       - "Hook-mode hard-set numbers count a floor-collapsed expected memory as a miss (7 of 38 rows on hippo's corpus); no instrument reports both readings yet"
   - version: v1.49.0
     theme: "Whole memories (HCR-9 of ROADMAP.retrieval.yaml, on the owner's seventh ruling there: high's index embeds each whole memory, its space re-measured on five corpora, floor 0.42 to 0.44; the diversity re-cut rescaled on every profile; one builder per high index, in resumable passes; and the MLX cache cap of #254). lean is the default and keeps description rows. No ROADMAP.v2 item"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "Three calls inside the ruling were the builder's and wait on the owner (ROADMAP.retrieval.yaml, HCR-9 open_for_owner): lean keeps description rows; the re-cut is rescaled where off was the simpler reading; high's row-count rule is kept at 8.7 rows per injecting prompt where a wider one serves lean's 5.4 for ten fewer rows found of 539"
@@ -150,6 +150,12 @@ releases:
       - "high turns away fewer technical-but-unrelated prompts than lean on hippo's corpus (8 of 12 against 11) and on a large corpus's own probes (12 of 20 against 15)"
       - "The 8B was not re-measured: it keeps description rows and its v1.48 calibration"
       - "Each session's warm server still loads its own copy of the embedder (HCR-7, proposed)"
+  - version: v1.49.1
+    theme: "Past the empty tier (one fix: on high, the warm server's plan waited for the twin of an empty private tier, which cannot exist, so every project whose `.claude/memory.local` is empty was served lean on every prompt, in v1.48.0 and v1.49.0). No ROADMAP.v2 item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "No bench drives the warm server's own plan end to end with real models: every high number so far handed recall the high index directly, which is how this went unseen for two releases"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
