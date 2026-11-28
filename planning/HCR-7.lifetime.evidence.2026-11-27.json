@@ -856,7 +856,196 @@
    "query_faults_in_the_run": 0,
    "code": "this change, before its Server class moved to a file of its own (the same statements)"
   },
-  "lifetime_as_shipped_1800_s": null,
+  "lifetime_as_shipped_1800_s": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "drop",
+   "idle_s": 1800.0,
+   "grace_s": 60.0,
+   "trials": 1,
+   "load_average_at_start": 5.02099609375,
+   "load_average_at_end": 61.9365234375,
+   "first_prompt_served_lean": {
+    "k": 1,
+    "n": 1,
+    "ci95": [
+     0.2065,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 1,
+    "ci95": [
+     0.0,
+     0.7935
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 1,
+    "ci95": [
+     0.0,
+     0.7935
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 1,
+    "n": 1,
+    "ci95": [
+     0.2065,
+     1.0
+    ]
+   },
+   "daemon_left_s_after_the_last_server_closed": 60.0,
+   "first_prompt_server_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 97.3,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 97.3,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 97.3
+   },
+   "first_prompt_wall_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 106.8,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 106.8,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 106.8
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 1,
+    "unit": "ms",
+    "median": 992.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 992.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 992.2
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 1,
+    "unit": "ms",
+    "median": 992.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 992.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 992.2
+   },
+   "first_high_prompt_server_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 176.7,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 176.7,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 176.7
+   },
+   "daemon_load_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 963.0,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 963.0,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 963.0
+   },
+   "quiet_s_until_the_drop": {
+    "n": 1,
+    "unit": "s",
+    "median": 1800.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 1800.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 1800.2
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 1,
+    "unit": "MB",
+    "median": 4805.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 4805.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 4805.2
+   },
+   "daemon_mb_after": {
+    "n": 1,
+    "unit": "MB",
+    "median": 154.0,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 154.0,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 154.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 0,
+   "query_faults_in_the_run": 0,
+   "code": "this change before an explicit recall's retry was added to the reranker's client; the daemon and the served path are the same statements",
+   "each_trial": [
+    {
+     "quiet_s_until_the_drop": 1800.2,
+     "daemon_mb_after": 154.0,
+     "first_server_ms": 97.3,
+     "first_served_high": false,
+     "model_back_ms_after_the_first_prompt_was_sent": 992.2,
+     "daemon_load_ms": 963.0
+    }
+   ]
+  },
   "a_daemon_that_lost_metals_compiler": {
    "what": "the first daemon started for the as-built run answered every query with a Metal error (its compiler service unreachable) while it held the model and answered ready(): 6 queries of 6 failed over about two minutes, every prompt was served lean, none raised, no breaker trip, and nothing restarted the process. The run was stopped; the daemon left by itself once its server was gone. A probe of Metal from the same shell, in the foreground and detached as the daemon is, compiled a kernel both times, and no daemon started afterwards failed. This change's daemon leaves after three failed passes in a row; that rule was written after this was seen and has a test with a fake, not a real-weights run.",
    "queries_failed": 6,
@@ -1266,15 +1455,14 @@
   "A high/ build embeds the corpus's digest sections through the big model: 2,879 of the 6,657 document rows of corpus-c's build, about 8 of its 42 minutes (its second pass took 830 s where its neighbours took 312 to 319 s), into a sub-index under high/ that recall does not read."
  ],
  "tests": {
-  "new": "tests/test_embed_daemon_lifetime.py: 17, each seen failing before the code it holds (14 on main; 2 before the failed-passes rule; 1 before the per-model clock)",
+  "new": "tests/test_embed_daemon_lifetime.py: 18, each seen failing before the code it holds (14 on main; 2 before the failed-passes rule; 1 before the per-model clock; 1 before the explicit recall's retry)",
   "changed_with_the_rule_they_held": "three tests of tests/test_embed_daemon.py and two fixtures (the idle exit became the grace; a warm rerank is loaded before it is asked for)",
-  "ran": "35 test files the change reaches: 754 passed, 3 skipped (named in the pull request)"
+  "ran": "35 test files the change reaches (named in the pull request): 755 passed, 3 skipped, with a short temp path as Linux CI has"
  },
  "not_run": [
-  "The 1,800 s window as shipped: the 8 s window runs the same code.",
-  "A quiet machine: every timing was taken beside the owner's live sessions (load average 2 to 16).",
+  "A quiet machine: every timing was taken beside the owner's live sessions (load average 2 to 16 in the timed runs, 62 at the end of the 1,800 s one).",
   "The full test suite.",
-  "The failed-passes rule and the busy refusal for a model dropped between ready() and the query, on real weights: tests with fakes cover both.",
+  "The failed-passes rule, the busy refusal for a model dropped between ready() and the query, and the explicit recall's retry, on real weights: tests with fakes cover the three.",
   "A warm prompt with HIPPO_RERANK=1 after a drop, on real weights.",
   "The 8B on corpus-c, and an 8B server's footprint on a large corpus.",
   "Byte-identity and QUA-6 through the daemon were not taken again: the embedding path is unchanged (planning/HCR-7.evidence.2026-11-27.json)."

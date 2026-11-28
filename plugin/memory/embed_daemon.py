@@ -22,7 +22,8 @@ before.
     warm server on the high profile is alive (``recall_warm.server_states``: a heartbeat
     with a ``high`` record and a live pid). ``HIPPO_EMBED_DAEMON_GRACE_S`` (60) after the
     last of them is gone, with nothing in flight, it unlinks its socket and exits. A caller
-    with no heartbeat (a bench, the CLI) keeps it for that grace after each request.
+    with no heartbeat (a bench, the CLI) keeps it for that grace after each request, and
+    an explicit recall that finds it gone brings it back and asks again.
   - **An idle model is dropped; the process stays.** A model nobody asked to load, embed or
     rerank with for ``HIPPO_EMBED_DAEMON_IDLE_S`` seconds (default 1,800) is released and
     MLX's buffers handed back; with none left the daemon keeps listening at about 0.2 GB
@@ -443,12 +444,24 @@ class DaemonReranker:
             timeout = min(timeout, mark.deadline - time.monotonic())
             if timeout <= 0:
                 raise RerankUnavailable("no time left in this prompt's budget for the embed daemon")
+        req = {"op": "rerank", "model": self.model_id, "wait_s": wait,
+               "query": str(query), "docs": [str(d) for d in docs]}
         try:
-            hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id, "wait_s": wait,
-                                         "query": str(query), "docs": [str(d) for d in docs]}, timeout)
+            hdr, _ = request(self.path, req, timeout)
         except (OSError, ValueError) as exc:
             self.alive = False
-            raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc
+            if not explicit_surface():
+                raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc
+            # An explicit surface (a 15 s bound) may load, so it brings the daemon back and
+            # asks once more. With no warm server on high (warm recall off, the CLI) the
+            # daemon leaves a grace after each request; without this every recall that came
+            # later than the grace lost its rerank.
+            try:
+                self.revive()
+                hdr, _ = request(self.path, req, timeout)
+            except (OSError, ValueError, RuntimeError) as again:
+                self.alive = False
+                raise RerankUnavailable(f"the shared embed daemon is gone ({again})") from again
         if not hdr.get("ok"):
             raise RerankUnavailable(str(hdr.get("error") or "rerank failed"))
         return [float(x) for x in hdr.get("scores") or []]

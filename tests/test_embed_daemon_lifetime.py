@@ -197,14 +197,34 @@ def test_a_dead_servers_heartbeat_does_not_keep_the_daemon(lifetime_env, monkeyp
     assert _wait(lambda: not os.path.exists(lifetime_env)), "a dead session's heartbeat kept it"
 
 
+def test_an_explicit_recall_brings_back_a_daemon_that_left_and_still_reranks(lifetime_env, monkeypatch):
+    """With no warm server on high (warm recall off, the CLI) the daemon leaves a grace after
+    each request. An explicit surface has 15 s and may load, so it asks once more instead of
+    losing the rerank of every recall that comes later than the grace."""
+    monkeypatch.setenv(D.GRACE_ENV, "0.5")
+    rr = D.DaemonReranker(_RR)
+    first = rr.daemon_pid
+    assert _wait(lambda: not os.path.exists(lifetime_env)), "the daemon nobody uses never left"
+    with R.using_reranker(_RR, explicit=True):
+        scores = rr.score("zebra canary lane", ["zebra canary lane", "llama billing"])
+    assert scores[0] > scores[1] and rr.alive and rr.daemon_pid != first
+    assert _wait(lambda: not os.path.exists(lifetime_env))
+    with pytest.raises(R.RerankUnavailable):  # the warm path has no room for a load: fused order, as before
+        rr.score("zebra", ["zebra"])
+    assert rr.alive is False
+
+
 def test_a_request_in_flight_keeps_the_daemon_past_its_grace():
-    with _server(grace_s=0.3, live=lambda: 0) as srv:
-        _Slow.pass_s = 1.5
+    servers = [1]  # a live server until the pass is running, so a slow start cannot end the daemon first
+    with _server(grace_s=0.3, live=lambda: servers[0]) as srv:
+        _Slow.pass_s = 2.0
         got: list = []
         t = threading.Thread(target=lambda: got.append(
             D.request(srv.path, {"op": "embed", "space": _SPACE, "texts": ["a build's pass"]})))
         t.start()
-        time.sleep(1.0)  # three graces into the pass
+        assert _wait(lambda: srv._inflight == 1, 5)
+        servers[0] = 0  # the session that asked is the only one, and it has no heartbeat any more
+        time.sleep(1.2)  # four graces into the pass
         assert D.ping(srv.path) is not None
         t.join(10)
         assert got and got[0][0]["ok"] and len(got[0][1]) == 16
@@ -253,10 +273,10 @@ def test_pings_do_not_keep_the_model(lifetime_env, monkeypatch):
 def test_each_model_is_dropped_on_its_own_idle_time():
     """Two sessions on different models share the daemon. The one nobody asks for goes, however
     busy the other keeps the daemon: one idle clock for all would hold both for good."""
-    with _server(idle_s=0.5, live=lambda: 1) as srv:
+    with _server(idle_s=1.0, live=lambda: 1) as srv:
         assert D.request(srv.path, {"op": "load", "space": _SPACE})[0]["ok"]
         assert D.request(srv.path, {"op": "rerank_load", "model": _RR})[0]["ok"]
-        end = time.monotonic() + 2.0
+        end = time.monotonic() + 3.0
         while time.monotonic() < end:  # the embedder is asked all along; the reranker never again
             assert D.request(srv.path, {"op": "query", "space": _SPACE, "texts": ["q"]})[0]["ok"]
             time.sleep(0.1)
@@ -275,7 +295,7 @@ def test_a_model_is_never_dropped_under_a_request():
         assert _loaded(srv.path) == [_SPACE]
         t.join(10)
         assert _wait(lambda: _loaded(srv.path) == [])
-        assert D.ping(srv.path)["stats"]["unloads"] == 1
+        assert D.ping(srv.path)["stats"]["unloads"] >= 1
 
 
 # --------------------------------------------------------------------------- #

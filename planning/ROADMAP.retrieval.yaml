@@ -755,10 +755,12 @@ workstream:
           question and the call is refused at once (busy: no wait, no hold)
           while the load starts behind it. A daemon whose model raised on
           three passes in a row leaves, so the next call starts a fresh one.
-          Doctor's line says when the daemon dropped its model. The Server
+          An explicit recall that finds the daemon gone brings it back and
+          asks again (it has 15 s and may load). Doctor's line says when the
+          daemon dropped its model. The Server
           class moved to embed_daemon_server.py at the module-size cap
           (embed_daemon.Server still resolves; the socket's code hash covers
-          both files). Tests: tests/test_embed_daemon_lifetime.py (17, each
+          both files). Tests: tests/test_embed_daemon_lifetime.py (18, each
           failing first); three tests of tests/test_embed_daemon.py changed
           with the rule they held (the idle exit became the grace; a warm
           rerank is loaded before it is asked for), as did the two fixtures
@@ -837,8 +839,11 @@ workstream:
           later. As built: the first prompt after the model was dropped lean
           20 of 20 [0.84, 1] in 48 ms [44, 69], none raised, no trip, the
           model back 0.49 s [0.45, 0.54] after it; the idle daemon 0.19 GB
-          (199 MB [194, 203]); it left 60.1 s after its server closed (one
-          run). Memory through a whole build, 4B, corpus-c (1,070 memories,
+          (199 MB [194, 203]); it left 60.1 s after its server closed. The
+          window as shipped, once: dropped after 1,800.2 s, the daemon at
+          0.15 GB, the next prompt lean in 97 ms, the model back 0.99 s
+          after it, and the daemon gone 60.0 s after its server. Memory
+          through a whole build, 4B, corpus-c (1,070 memories,
           6,657 rows with its digest sections, 42 minutes): the daemon 4.32
           GB before, 6.01 GB median while building (p95 6.28, highest sample
           6.40, the kernel's peak 6.49), 5.14 GB after; on hippo (108
@@ -883,7 +888,7 @@ workstream:
           because the daemon's pass-time estimate is deliberately quick to
           recover. (The port merged as #264 and shipped in v1.50.0; before
           it, a slow daemon could hold a served call past the breaker's
-          budget.) Four more from building the lifetime, none of them in the
+          budget.) Five more from building the lifetime, none of them in the
           ruling's words: (a) a daemon whose model raised on three passes in
           a row exits. Seen while measuring: one daemon process lost Metal's
           compiler service and failed six queries of six over two minutes
@@ -897,7 +902,13 @@ workstream:
           a day is not a live server; that is the age recall_warm's sweep
           deletes at, and it bounds how long a dead session's reused pid can
           keep a 0.2 GB process. (d) The grace is 60 s, read from
-          HIPPO_EMBED_DAEMON_GRACE_S, which no user doc names. (5) NOT fixed
+          HIPPO_EMBED_DAEMON_GRACE_S, which no user doc names. (e) An
+          explicit recall that finds the daemon gone revives it and asks
+          once more, where it kept the fused order for that call. Without a
+          warm server on high (warm recall off, the CLI) the daemon now
+          leaves 60 s after each request, so every recall later than that
+          would have lost its rerank; under EMB-1's rule that happened once
+          per 15 idle minutes. (5) NOT fixed
           here: a warm server on high keeps every index it has loaded.
           recall_warm_high.fresh memoizes on the identity of the (lean, high)
           pair and holds both objects, up to 65 pairs, and refresh_tier loads
