@@ -30,6 +30,11 @@ Built by ``build_index``/``refresh_index`` in the same pass, after the main mani
 place, incrementally by content hash and inside what is left of the same offline budget:
 the main index stays dense and usable while sections catch up, and an incomplete
 sub-index is simply not fused yet. Never raises into a build.
+
+Lean's space only. The high profile's twin (``<index>/high``, built inside
+``embed_mlx.using_space``) gets no sub-index: recall reads sections from the lean index dir
+and skips them on a high call (``recall_sections``: ``sec.model != idx.model``), so rows
+embedded for one would be read by nothing. Its main manifest still carries ``sections``.
 """
 
 from __future__ import annotations
@@ -393,8 +398,14 @@ def write_sections(
     """Bring the sub-index in line with ``plan``: remove it when there is none, no-op when
     it is current and complete, else reuse every unchanged row by hash and embed the rest
     (offline: in slices, stopping at ``deadline``). Returns the sub-manifest, or None.
-    Never raises: a failed write leaves the prior sub-index as it was."""
+    A build in a high space (the ``high/`` twin) is the no-plan case: nothing is embedded,
+    and a sub-index an earlier build left there (lean's model named over the big model's
+    rows) is removed. Never raises: a failed write leaves the prior sub-index as it was."""
     try:
+        if plan is not None:
+            from .embed_mlx import active_space
+
+            plan = None if active_space() else plan
         if plan is None:
             remove_sections(index_dir)
             return None
