@@ -16,7 +16,8 @@
 # and made it the default before an evidence file existed; HCR-7's fallback, bounded wait
 # and one-request builds were then ported onto it, with the evidence file. One acceptance
 # stamp does not hold; the owner ruled the same day that the daemon stays the default
-# (ninth ruling). Two calls stay open under HCR-7's open_for_owner.
+# (ninth ruling) and that the in-process switch comes out of the user docs (tenth). The
+# idle exit stays open under HCR-7's open_for_owner.
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -186,6 +187,15 @@ meta:
         holds, 8.3 to 8.5 GB in all against 41), the owner ruled that it
         stays the default. Not ruled: the in-process switch named in the
         user docs, and the 900 s idle exit in place of heartbeat reaping.
+    - date: 2026-11-27
+      decisions: >-
+        Tenth ruling, on HCR-7's open call (2) ("Take it out"). The sixth
+        ruling's F2 keeps the in-process embedder an unadvertised knob; pull
+        request 260 named HIPPO_EMBED_DAEMON=0 in README.md,
+        plugin/memory/README.md and STABILITY.md. It comes out of those
+        three. The knob keeps working, and bench/README.md still names it,
+        because the benches are what it is for. Not ruled: the 900 s idle
+        exit in place of heartbeat reaping.
 
 workstream:
   - id: HCR
@@ -766,7 +776,7 @@ workstream:
           classes, the scoring function and every recall, ranking and index
           file are the same bytes on the branch as where they ran.
         open_for_owner: >-
-          2026-11-27: (1) is RULED, (2) and (3) are OPEN, (4) lists the
+          2026-11-27: (1) and (2) are RULED, (3) is OPEN, (4) lists the
           builder's calls for the owner to overturn.
           (1) The default: RULED 2026-11-27, ninth owner ruling ("Keep it
           default"): the daemon stays high's default path with the 0.2 GB
@@ -780,7 +790,9 @@ workstream:
           41). Read as written, the default goes back off; read as an
           estimate, it stands. (2) The sixth ruling's F2 said the in-process
           embedder stays an UNADVERTISED knob; main's README, engine README
-          and STABILITY name HIPPO_EMBED_DAEMON=0. Left as merged. (3) The
+          and STABILITY named HIPPO_EMBED_DAEMON=0. RULED 2026-11-27, tenth
+          owner ruling ("Take it out"): taken out of those three; the knob
+          works as before and bench/README.md keeps it for the benches. (3) The
           daemon leaves after 900 s idle, not when no warm heartbeat remains:
           it outlives its sessions by up to 15 minutes and leaves under live
           quiet ones (the next prompt is lean while it reloads, about 2.5 s).
