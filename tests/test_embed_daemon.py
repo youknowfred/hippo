@@ -32,7 +32,7 @@ from memory import rerank_mlx as R
 
 from . import embed_daemon_fake as fake
 from .test_embed_mlx import (  # noqa: F401  (fixtures and the warm-call helpers)
-    _FakeLean, _MEMS, _PROMPT, _SPACE, _fresh_warm_state, _heartbeat, _serve_warm, _wait_fresh, project,
+    _FakeLean, _PROMPT, _SPACE, _fresh_warm_state, _heartbeat, _serve_warm, _wait_fresh, project,
 )
 
 _LAUNCHER = os.path.abspath(fake.__file__)
@@ -56,6 +56,7 @@ def daemon_env(tmp_path, monkeypatch):
     data = str(tmp_path / "data")  # the `project` fixture's too, which makes it when it is used
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
     monkeypatch.setenv(X.ENV, "1")
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)  # CI's hermetic lane exports it
     monkeypatch.setattr(E, "unavailable_reason", lambda model: None)
     monkeypatch.setattr(R, "unavailable_reason", lambda model: None)
     for allow in (True, False):

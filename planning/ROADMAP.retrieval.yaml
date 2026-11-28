@@ -12,6 +12,8 @@
 # 2026-11-26: HCR-7 (one shared embedder per machine) is proposed and unbuilt.
 # 2026-11-27: HCR-8 (the held-out eval) and HCR-9 (whole-memory rows for the 4B, its
 # calibration re-run, the MMR re-cut rescaled) are done; HCR-9 ships in v1.49.0.
+# 2026-11-27: HCR-7 is built and measured. It ships behind a knob, off by default: one
+# stamp of its acceptance did not hold (see its open_for_owner).
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -542,7 +544,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: proposed        # 2026-11-26: added on the owner's word ("Yes, add HCR-7"); its three open calls ruled the same day (sixth ruling); unbuilt
+        status: built           # 2026-11-27: built and measured; behind HIPPO_EMBED_DAEMON=1, OFF by default (acceptance stamp 1 missed; the default is the owner's call, open_for_owner)
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -623,9 +625,106 @@ workstream:
           and a build's peak (5.2 GB active on a 1,024-token slice) is paid by
           every server that builds until the daemon owns builds. The owner's
           machine went back to lean until the cap ships.
+        as_built: >-
+          2026-11-27, on main at v1.49.1. embed_daemon.py is the process
+          (python -m memory.embed_daemon --space <id>): an exclusive flock on
+          <key>.lock taken before anything loads and held for life; a unix
+          socket <key>.sock, mode 0600 in a 0700 directory under
+          CLAUDE_PLUGIN_DATA/embedd, where the key is sha1 of space, pinned
+          weights revision, plugin version and data dir (a path too long for
+          sockaddr_un moves the socket alone to a 0700 owner-checked dir under
+          the temp dir); one request per connection, a length-prefixed JSON
+          header and raw float32. It loads embed_mlx.BACKEND and
+          rerank_mlx.BACKEND itself, so every forward pass still runs on the
+          one mlx_executor thread in 1,024-token slices. It exits 60 s after
+          the last live warm heartbeat on high with nothing in flight, and
+          drops its models after 30 min without a request. embed_remote.py is
+          the client: embed_mlx.high_embedder and rerank_mlx.reranker hand out
+          RemoteEmbedder / RemoteReranker when the daemon is on and the seams
+          hold their in-process defaults, so build_index and recall are
+          unchanged. A build sends its whole pass in one request, so the
+          daemon cuts the same slices. recall_warm_high's loader thread
+          ensures the daemon (starts are spaced 5 s, doubling, per process);
+          _plan asks it "loaded?" last (150 ms) and serves lean on any other
+          answer. Lean on a fault, exactly: recall_warm._serve_warm gives the
+          high attempt a collecting defer and an embed_remote.attempt mark; a
+          query embed the daemon does not answer in 0.75 s (or a dropped
+          connection) marks it, the attempt and the telemetry it queued are
+          discarded, and the prompt is served again with no plan. The time the
+          daemon cost is not charged to the breaker. Three things the design
+          did not have: (a) queries run ONE per forward pass, because a
+          batched pass is not byte-identical (below), with coalescing left as
+          a switch, HIPPO_EMBED_DAEMON_BATCH=1; (b) the daemon refuses at once
+          a query it cannot finish inside the caller's wait (queries ahead
+          times the recent pass time), so a burst serves the rest lean
+          immediately; (c) after a wait paid for nothing the server holds high
+          off for 4 s, doubling while it repeats, reset by a prompt served
+          high. Off by default: HIPPO_EMBED_DAEMON=1 or "embed_daemon": true
+          in model.json turns it on, HIPPO_EMBED_DAEMON=0 forces in-process
+          (bench/__init__.py sets it), and with it off nothing above runs.
+          Doctor's retrieval-profile line names the daemon's state when it is
+          on. Tests: tests/test_embed_daemon.py (37, MLX faked, daemons run
+          both on a thread and as real processes through the SPAWN seam).
+        ab_result: >-
+          planning/HCR-7.evidence.2026-11-27.json (bench/embed_daemon.py and
+          bench/space_calibration.py, real models, scratch copies, the
+          owner's own sessions running beside it; load average 5.6 to 6.3 for
+          the timed server run). (1) One copy: ten real MCP servers on high
+          measured 0.37 to 0.39 GB each (phys_footprint), the daemon 4.69 GB,
+          all eleven 8.5 GB where ten in-process servers held 41 GB; no
+          server maps an MLX library. The stamp "each server under 0.2 GB"
+          did NOT hold: ten lean warm servers with no daemon measured 0.29 to
+          0.31 GB, so no warm server can meet it. (2) Bytes: 228 of 228
+          queries byte-identical to the in-process embedder one at a time
+          [0.983, 1], 228 of 228 with ten arriving at once, 567 of 567 index
+          rows built through the daemon [0.993, 1]; a twin rebuilt in-process
+          today equals the v1.49.0 twin, 999 of 999 rows. A batched pass is
+          not identical (18 of 228; raw components move by up to 1.4e-4 on a
+          norm of about 128, cosine 0.9999998) and a batch changes bits even
+          without padding; ten at once waited a median 1.15 to 1.5 s coalesced
+          against 0.5 to 0.9 s one per pass (at load over 100), so it is off.
+          (3) QUA-6: every rank equal to the in-process arm on 228 rows, both
+          modes (golden 18/18, packs 32/32, hippo 89/98, corpus-b 79/80; hook
+          18, 30, 76, 10), and equal to the v1.49.0 release run. (4) Faults,
+          30 prompts each, all served lean, none raised [0, 0.11], no breaker
+          trip: daemon absent then starting, slowest 173 ms; slow (six callers
+          flooding it with long documents), p95 838 ms [827, 840]; killed
+          mid-call (SIGKILL with the prompt's query queued), slowest 303 ms.
+          (5) Burst: 300 prompts, ten at the same instant thirty times: none
+          over SERVE_BUDGET_MS [0, 0.013], median 117 ms [91, 164], p95 809 ms
+          [690, 818], slowest 926 ms; 123 served high [0.36, 0.47], the rest
+          lean. (6) One daemon from two simultaneous starts, 20 of 20 [0.84,
+          1]; one from ten servers' simultaneous first prompts. (7) The F3
+          arm, 228 on-topic rows of four corpora, in-process, each space's
+          committed thresholds. In hook mode the 8B with the warm reranker
+          finds 135 against 134 for the 4B as shipped (+0.004 [-0.022,
+          +0.031]) at MRR 0.491 against 0.476 (+0.015 [-0.022, +0.054]): not
+          resolved. The 8B alone: 135, MRR 0.469. The 4B with the reranker:
+          137, MRR 0.485 (+0.009 [-0.026, +0.045]). In explicit mode the 4B's
+          whole rows lead the 8B, 218 against 213, MRR +0.033 [+0.006,
+          +0.061]. Nothing in it re-reads "Keep the 4B", and no default
+          changed. (8) No internet socket open in the daemon, one unix socket
+          at 0600 under the data dir, nothing installed, and it exited by
+          itself 61 s after the last server.
         open_for_owner: >-
-          FULLY RULED 2026-11-26 (sixth owner ruling, "as recommended on all
-          three"). (1) The daemon fits the no-server posture on four
+          ONE CALL OPEN, 2026-11-27: the default. The rule this item was built
+          under: the daemon becomes high's default path only if every
+          acceptance point holds. Everything held except one stamp of point 1:
+          a warm server holds 0.37 to 0.39 GB with the daemon, not "under 0.2
+          GB". That figure left out what a warm server holds on every profile
+          (the interpreter, numpy, onnxruntime with bge-small, the indexes:
+          0.29 to 0.31 GB on lean); what the item is for, one copy instead of
+          ten, holds (8.5 GB against 41). So it ships off, behind
+          HIPPO_EMBED_DAEMON=1 or "embed_daemon": true in model.json. To make
+          it high's default: embed_remote.DEFAULT_ON = True, and README's cost
+          paragraph and the engine README then say so. Three builder's calls
+          for the owner to overturn: the 30-minute idle window before the
+          models are dropped (the first prompt after it is served lean while
+          the reload takes about a second); the 0.75 s wait for a query vector
+          (a slice of a build is about 0.76 s; longer serves more prompts high
+          during a build and makes a fault's prompt slower); coalescing off.
+          The sixth ruling's three calls, as ruled 2026-11-26 ("as recommended
+          on all three"): (1) The daemon fits the no-server posture on four
           conditions, each binding on the build: hippo spawns and reaps it
           (lazy spawn; no install step, no launchd entry); a 0600 unix socket,
           no port; recall never depends on it; high only, and doctor names its

@@ -603,12 +603,22 @@ def servers(args) -> int:
         _log(f"burst: {json.dumps(doc['burst'])}")
 
         # ---- the three faults -------------------------------------------------------- #
-        def wait_loaded(timeout=120.0):
+        restarts = {"by_the_servers": 0, "by_this_bench": 0}
+
+        def wait_loaded(timeout=120.0, own_s=15.0):
             """The daemon is back and holds the model. The servers do that themselves: the one
-            whose prompt hit the fault woke its loader thread, which restarts the daemon."""
-            end = time.monotonic() + timeout
-            while time.monotonic() < end:
-                if (X.hello(SPACE, timeout=1.0) or {}).get("state") == "loaded":
+            whose prompt hit the fault woke its loader thread, which restarts the daemon. This
+            bench kills it dozens of times in a few minutes, which is what the servers' start
+            backoff (5 s, doubling) exists to slow down; after ``own_s`` the bench starts it."""
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < timeout:
+                info = X.hello(SPACE, timeout=1.0)
+                if (info or {}).get("state") == "loaded":
+                    return True
+                if info is None and time.monotonic() - t0 > own_s:
+                    X._reset_for_tests()
+                    X.ensure(SPACE, load=True)
+                    restarts["by_this_bench"] += 1
                     return True
                 time.sleep(0.2)
             return False
@@ -661,13 +671,16 @@ def servers(args) -> int:
                 t.join()
                 stop.set()
                 killed.extend(box)
+                before_own = restarts["by_this_bench"]
                 assert wait_loaded(), "the daemon did not come back"
+                restarts["by_the_servers"] += restarts["by_this_bench"] == before_own
             settle()
         doc["fault_killed_mid_call"] = dict(
             _served(killed, W.SERVE_BUDGET_MS),
             what="a prompt's query is waiting in the daemon when the daemon is killed (SIGKILL)")
         doc["fault_killed_mid_call"]["faults_recorded_by_servers"] = sum(
             int((s.heartbeat().get("high") or {}).get("faults") or 0) for s in fleet)
+        doc["fault_killed_mid_call"]["daemon_restarted"] = restarts
         _log(f"killed: {json.dumps(doc['fault_killed_mid_call'])}")
 
         # ---- doctor, and what is left ------------------------------------------------ #
@@ -688,8 +701,8 @@ def servers(args) -> int:
     doc["reaped_itself"] = {"daemons_left": len(_daemon_pids(data)),
                             "seconds_after_the_last_server_exited": round(time.monotonic() - t0, 1)}
     time.sleep(5.0)
-    left = subprocess.run("ps -Ao pid,ppid,etime,stat,command | grep '[m]emory.embed_daemon'", shell=True,
-                          capture_output=True, text=True).stdout.strip().splitlines()
+    left = subprocess.run("ps -Ao pid,ppid,etime,stat,command | grep -i 'python[^ ]* -m [m]emory.embed_daemon'",
+                          shell=True, capture_output=True, text=True).stdout.strip().splitlines()
     doc["reaped_itself"]["embed_daemon_processes_on_the_machine_5s_later"] = len(left)
     for line in left:
         _log("still running: " + line[:160])
