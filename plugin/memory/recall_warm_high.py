@@ -51,6 +51,11 @@ _MAX_PASSES = 8  # passes that may chase a moving lean index once every row is e
 # One unbounded pass over a 1,070-memory corpus took ~36 minutes with whole-memory rows and
 # kept nothing until its last row.
 _PASS_ROWS = 256
+# HCR-7: after a served call waited on the embed daemon for nothing (a timeout, a dropped
+# connection), how long this server serves lean without asking: this long the first time,
+# twice as long each time it happens again, up to the cap; a prompt served high resets it.
+FAULT_HOLD_S = 4.0
+FAULT_HOLD_MAX_S = 300.0
 
 
 def high_index_dir(index_dir: str) -> str:
@@ -73,6 +78,11 @@ class _State:
         self.wake = threading.Event()
         self.lock = threading.Lock()
         self.fresh_memo: Dict[Tuple[int, int], tuple] = {}
+        self.hold_until = 0.0  # HCR-7, monotonic: no high attempt before this (a daemon fault)
+        self.hold_s = 0.0  # the last hold; the next one doubles it
+        self.faults = 0
+        self.busy = 0
+        self.fault = ""
 
 
 _ST = _State()
@@ -156,6 +166,8 @@ def status() -> Dict:
     }
     if _ST.daemon_pid is not None:
         out["daemon_pid"] = _ST.daemon_pid
+    if _ST.faults or _ST.busy:  # HCR-7: prompts served lean because the daemon did not answer
+        out["faults"], out["busy"], out["fault"] = _ST.faults, _ST.busy, _ST.fault
     if _ST.rerank is not None:
         from .rerank_mlx import status as rerank_status
 
@@ -260,6 +272,29 @@ def _run(space: str) -> None:
                 pass  # the next pass retries; serving stays lean meanwhile
         _ST.wake.wait(REFRESH_EVERY_S)
         _ST.wake.clear()
+
+
+def note_fault(reason: str, busy: bool = False) -> None:
+    """HCR-7: a served call's query embed was not answered, and that prompt was served lean.
+    ``busy`` (the daemon refused at once: too many queries ahead) cost no wait, so nothing
+    is held. Anything else waited: hold high off, longer each time in a row, and have the
+    ``hippo-high`` thread bring back a daemon that is gone."""
+    _ST.fault = reason
+    _ST.engaged = False
+    if busy:
+        _ST.busy += 1
+        return
+    _ST.faults += 1
+    _ST.hold_s = min(FAULT_HOLD_MAX_S, max(FAULT_HOLD_S, _ST.hold_s * 2))
+    _ST.hold_until = time.monotonic() + _ST.hold_s
+    _ST.revive = True
+    _ST.wake.set()
+
+
+def note_served() -> None:
+    """A served call whose high attempt went through: the next fault's hold starts short."""
+    if _ST.engaged:
+        _ST.hold_s = 0.0
 
 
 def _note_loaded(emb) -> None:
@@ -367,10 +402,16 @@ def _catch_up(memory_dir: str, index_dir: str, hdir: str, space: str) -> bool:
 
 
 @contextmanager
-def serving(memory_dir, lean_load) -> Iterator[None]:
+def serving(memory_dir, lean_load, *, lean_only: bool = False) -> Iterator[None]:
     """Wrap one served call: on high, with the model loaded and every tier's high index
     fresh, each tier's index resolves to its high twin and the query embeds in the high
-    space. Otherwise this is a no-op and the call serves lean, exactly as before."""
+    space. Otherwise this is a no-op and the call serves lean, exactly as before.
+    ``lean_only`` (HCR-7: the re-run after a daemon fault) is that no-op by request: no plan,
+    no reranker, nothing that could wait on the daemon again."""
+    if lean_only:
+        _ST.engaged = False
+        yield
+        return
     plan: Optional[Dict[str, object]] = None
     try:
         kick(memory_dir)
@@ -421,6 +462,8 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
     space = _ST.space
     if _ST.status != "ready" or not space or loaded(space) is None or not _ST.tiers:
         return None
+    if time.monotonic() < _ST.hold_until:
+        return None  # HCR-7: a daemon fault a moment ago; lean until the hold is over
     plan: Dict[str, object] = {}
     for _memory_dir, index_dir in _ST.tiers:
         lean = lean_load(index_dir)
@@ -435,7 +478,17 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
             _ST.wake.set()  # lean moved on: catch the twin up now
             return None
         plan[index_dir] = high
-    return plan or None
+    if not plan:
+        return None
+    # HCR-7: asked last, once everything else says high would serve. A daemon that went
+    # since the last call (its idle exit, a crash) is found here, before the attempt, so
+    # this prompt is lean rather than BM25 over the high index, and the thread revives it.
+    ready = getattr(loaded(space), "ready", None)
+    if ready is not None and not ready():
+        _ST.revive = True
+        _ST.wake.set()
+        return None
+    return plan
 
 
 def _reset_for_tests() -> None:
@@ -477,6 +530,9 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
     if h.get("resident_bytes"):
         bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident"
                     + (f" in the shared embed daemon (pid {h['daemon_pid']})" if h.get("daemon_pid") else ""))
+    if h.get("faults") or h.get("busy"):
+        bits.append(f"{(h.get('faults') or 0) + (h.get('busy') or 0)} prompt(s) served lean because the "
+                    f"embed daemon did not answer (last: {h.get('fault')})")
     rr = h.get("rerank") if isinstance(h.get("rerank"), dict) else {}
     if rr.get("model"):
         bits.append(f"reranker {rr['model']} {rr.get('status') or 'idle'}"

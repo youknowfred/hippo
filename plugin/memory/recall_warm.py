@@ -60,6 +60,9 @@ CLAIM_WAIT_S = 1.0  # how long a fit server waits for the command hook's claim
 CLAIM_POLL_S = 0.003
 SERVE_BUDGET_MS = 1500.0  # one served call over this trips the session's breaker
 COLD_BUDGET_MS = 4000.0  # the process's first served call also loads the embedding model
+# HCR-7: what a served call keeps back from the high profile's daemon waits, for the lean
+# re-run that follows a daemon fault and for writing the answer.
+HIGH_RESERVE_MS = 500.0
 FAIL_TRIP = 2  # served calls that raised before the breaker trips
 GIVEUP_TRIP = 2  # consecutive waits the command hook never answered before it trips
 SWEEP_EVERY_S = 3600.0
@@ -525,35 +528,62 @@ def _failed(d: str, sid: str, sess: _Session, project: str) -> str:
 
 
 def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_ref: float) -> str:
+    from .embed_daemon import attempt
     from .recall_hook import hook_envelope, run_recall
-    from .recall_warm_high import serving
+    from .recall_warm_high import note_fault, note_served, serving
 
     _publish(d, sid, sess, state="serving", accept=True)
     prompt = args.get("prompt")
     raw_query = prompt.strip() if isinstance(prompt, str) else ""
-    try:
+    budget = SERVE_BUDGET_MS if _STATE["served"] else COLD_BUDGET_MS
+    held: List[Callable[[], None]] = []  # this call's telemetry, queued once it has an answer
+
+    def _recall(lean_only: bool) -> str:
         # HCR-2: on the high profile, the big model's index once it has caught up; else lean.
-        with read_only_index(), _launch_dir(project), serving(lambda: _corpus_dirs(project)[0], _CACHE.load):
-            out = run_recall(
+        with read_only_index(), _launch_dir(project), serving(
+                lambda: _corpus_dirs(project)[0], _CACHE.load, lean_only=lean_only):
+            return run_recall(
                 raw_query,
                 session_id=sid,
                 hook=True,
                 path="warm",
                 wall_ms=lambda: (time.time() - t_ref) * 1000.0,
-                defer=defer,
+                defer=held.append,
             )
+
+    daemon_ms = 0.0
+    try:
+        # HCR-7: the high profile's model is in the shared embed daemon. Its waits end
+        # HIGH_RESERVE_MS before this call's budget does, and a query embed it did not answer
+        # (gone, slow, busy, killed mid-call) marks the attempt. Then the attempt is thrown
+        # away whole, with the telemetry it queued, and the prompt is served again with no
+        # plan: lean, exactly. Without the mark a fault served BM25 over the high index.
+        t_try = time.time()
+        with attempt((budget - (t_try - t_ref) * 1000.0 - HIGH_RESERVE_MS) / 1000.0) as tried:
+            out = _recall(False)
+        if tried.fault:
+            daemon_ms = (time.time() - t_try) * 1000.0
+            held.clear()
+            note_fault(tried.fault, tried.busy)
+            out = _recall(True)
+        else:
+            note_served()
     except Exception:
         sess.fails += 1
         if sess.fails >= FAIL_TRIP:
             sess.tripped = f"{sess.fails} served recalls failed"
         return _failed(d, sid, sess, project)
+    for fn in held:
+        defer(fn)
     elapsed = (time.time() - t_ref) * 1000.0
-    budget = SERVE_BUDGET_MS if _STATE["served"] else COLD_BUDGET_MS
     _STATE["served"] = True
     sess.served += 1
     sess.last_ms = elapsed
     sess.last_path = "warm"
-    if elapsed > budget:
+    # The breaker judges this server's own serving. Time lost to a daemon fault is bounded
+    # above (embed_daemon.QUERY_WAIT_S; a busy daemon refuses at once) and stopped by
+    # note_fault's hold, and is not a reason to send the rest of the session to the spawned hook.
+    if elapsed - daemon_ms > budget:
         sess.tripped = f"a served recall took {elapsed:.0f} ms (budget {budget:.0f} ms)"
     sess.unfit = "" if sess.tripped else _unfit(project)  # published for the next prompt
     _publish(d, sid, sess, state="idle", accept=_accepts(sess))
