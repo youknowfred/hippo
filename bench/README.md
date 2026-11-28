@@ -121,6 +121,20 @@ OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon vectors-
 OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon servers \
   --project SCRATCH_PROJECT --data SCRATCH_PLUGIN_DATA --queries HARD_SET.yaml \
   [--servers 10 --rounds 30] --out PRIVATE_DIR/servers.json
+
+# HCR-7, the daemon's lifetime and what it holds (planning/HCR-7.lifetime.evidence.*.json):
+# the first prompt after the daemon dropped its idle model and the way back to high, then its
+# own leave once the server is gone; the daemon's and the building server's phys_footprint
+# through a high/ build; and one daemon holding two models for sessions on different ones.
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon lifetime \
+  --project SCRATCH_PROJECT --data SCRATCH_PLUGIN_DATA --queries HARD_SET.yaml \
+  [--trials 20 --idle-s 8] --out PRIVATE_DIR/lifetime.json
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon build-memory \
+  --project SCRATCH_PROJECT_WITHOUT_A_TWIN --data SCRATCH_PLUGIN_DATA \
+  [--model Qwen/Qwen3-Embedding-8B] --out PRIVATE_DIR/build-memory.json
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon two-models \
+  --project-a SCRATCH_4B_PROJECT --project-b SCRATCH_8B_PROJECT --data SCRATCH_PLUGIN_DATA \
+  --queries HARD_SET.yaml --out PRIVATE_DIR/two-models.json
 ```
 
 Every bench loads its models in its own process (`bench/__init__.py` sets
