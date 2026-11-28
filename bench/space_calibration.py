@@ -6,7 +6,7 @@
         [--heldout <private questions.jsonl> --gold <private gold.json>] \\
         [--replay hippo=<project>/.hippo/telemetry] \\
         --floors 0.38,0.42 --gates table,off,0.60/0.60 --counts table,off --bands table \\
-        --out <private.json>
+        [--rerank] --out <private.json>
 
 HCR-3's method (RET-1's recipe for the floor, HOT-2's for the gate, HOT-8's for the count
 rule, HOT-10's band check), kept as a tool so a space whose rows change can be re-run. One
@@ -89,6 +89,9 @@ def main(argv=None) -> int:
     ap.add_argument("--bands", default="table")
     ap.add_argument("--build-only", action="store_true")
     ap.add_argument("--no-hook", action="store_true", help="explicit mode only (a floor sweep)")
+    ap.add_argument("--rerank", action="store_true",
+                    help="HCR-7's F3 arm: every recall reranks with the warm reranker (Qwen3-Reranker-0.6B), "
+                         "as a warm server on high does with HIPPO_RERANK on")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
@@ -109,8 +112,13 @@ def main(argv=None) -> int:
               "HIPPO_HIGH_EMBED_MODEL", "HIPPO_HIGH_EMBED_DIM", "HIPPO_GRAPH_SEEDS", "HIPPO_RERANK"):
         os.environ.pop(v, None)
 
+    if args.rerank:
+        os.environ["HIPPO_RERANK"] = "1"
+        os.environ.setdefault("HIPPO_RERANK_TIMEOUT", "60")  # a slow scoring must not fall back unseen
+
     from memory import build_index_dense as BD
     from memory import embed_mlx as E
+    from memory import rerank_mlx as RK
     from memory import eval_floor as F
     from memory import recall as R
     from memory import recall_abstain as A
@@ -134,6 +142,10 @@ def main(argv=None) -> int:
         if why:
             print(f"{space} is not servable here: {why}", file=sys.stderr)
             return 1
+    if args.rerank:
+        if args.mlx_cache:
+            E.cache_dir = lambda: os.path.abspath(os.path.expanduser(args.mlx_cache))
+        RK.reranker(RK.WARM_MODEL)  # the warm path scores only once it is loaded
 
     # one embed per (space, query): the grid re-asks the same queries
     orig_eq, qcache = RR.embed_query, {}
@@ -212,6 +224,8 @@ def main(argv=None) -> int:
             st = ExitStack()
             if not lean_arm:
                 st.enter_context(E.using_space(space))
+            if args.rerank:
+                st.enter_context(RK.using_reranker(RK.WARM_MODEL))
             return st
 
         def explicit(self, q):
@@ -243,6 +257,7 @@ def main(argv=None) -> int:
 
     arms: dict = {}
     doc: dict = {"space": space, "rows": args.rows, "k": K, "corpora": {},
+                 "rerank": RK.WARM_MODEL if args.rerank else None,
                  "mmr_lambda": os.environ.get("HIPPO_MMR_LAMBDA") or "default",
                  "mmr_mode": os.environ.get("HIPPO_MMR") or "default",
                  "extra_probes": {k_: len(v) for k_, v in extra.items() if isinstance(v, list)}}
@@ -334,29 +349,31 @@ def main(argv=None) -> int:
                 f"|band={RR._dense_floor_band()}")
 
     def explicit_eval(arm, rows, pr):
-        hits, rr_, by_cat = [], 0.0, {}
+        hits, rr_, by_cat, ranks = [], 0.0, {}, []
         for i, row in enumerate(rows):
             got = [h["name"] for h in arm.explicit(row["query"]) if h.get("corpus") != R._RULES_SOURCE]
             pos = [got.index(e) for e in row["expected"] if e in got]
             cat = row.get("category") or _DEFAULT_CATEGORY
             by_cat.setdefault(cat, [0, 0])[1] += 1
+            ranks.append(min(pos) + 1 if pos else 0)
             if pos:
                 hits.append(i)
                 rr_ += 1.0 / (min(pos) + 1)
                 by_cat[cat][0] += 1
         ab = {kind: sum(1 for q in v if not arm.explicit(q)) for kind, v in pr.items()}
-        return {"hits": hits, "n": len(rows), "mrr": round(rr_ / max(1, len(rows)), 4),
+        return {"hits": hits, "ranks": ranks, "n": len(rows), "mrr": round(rr_ / max(1, len(rows)), 4),
                 "by_category": {c_: f"{h}/{n}" for c_, (h, n) in by_cat.items()},
                 "abstained": {kind: f"{ab[kind]}/{len(v)}" for kind, v in pr.items()}}
 
     def hook_eval(arm, rows, pr):
         """A hit = the expected memory is on a rendered pointer line."""
-        hits, rr_, served, inj = [], 0.0, [], 0
+        hits, rr_, served, inj, ranks = [], 0.0, [], 0, []
         for i, row in enumerate(rows):
             res, shown = arm.hook(row["query"])
             live = [r for r in res if not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))]
             order = [r["name"] for r in res if r["name"] in shown]
             pos = [order.index(e) for e in row["expected"] if e in order]
+            ranks.append(min(pos) + 1 if pos else 0)
             if pos:
                 hits.append(i)
                 rr_ += 1.0 / (min(pos) + 1)
@@ -375,8 +392,8 @@ def main(argv=None) -> int:
                                        and not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))]))
             ab[kind] = f"{z}/{len(v)}"
         srt = sorted(served)
-        return {"hits": hits, "n": len(rows), "mrr": round(rr_ / max(1, len(rows)), 4), "abstained": ab,
-                "injecting_prompts": inj,
+        return {"hits": hits, "ranks": ranks, "n": len(rows), "mrr": round(rr_ / max(1, len(rows)), 4),
+                "abstained": ab, "injecting_prompts": inj,
                 "served_rows": {"median": srt[len(srt) // 2] if srt else None,
                                 "mean": round(sum(srt) / max(1, len(srt)), 2)},
                 "leaked_probes": len(leaked), "leaked_probe_rows": sum(leaked)}

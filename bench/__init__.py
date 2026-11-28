@@ -4,3 +4,10 @@ Not shipped with the plugin (the plugin is the ``plugin/`` directory only, and n
 ``plugin/`` imports this package). Run a tool from the repository root with the engine on the
 path, e.g. ``PYTHONPATH=plugin python -m bench.dream_eval --help``.
 """
+
+import os
+
+# HCR-7: a bench measures the models in its own process (load time, resident memory, the
+# in-process arm every evidence file so far was read on), whatever the machine's own
+# embed_daemon setting is. A bench that wants the daemon says so itself.
+os.environ.setdefault("HIPPO_EMBED_DAEMON", "0")

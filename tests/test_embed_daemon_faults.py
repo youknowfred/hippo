@@ -368,3 +368,16 @@ def test_a_fault_holds_high_off_a_little_then_longer_and_a_served_prompt_resets_
     H.note_fault("timed out")
     assert H._ST.hold_s == H.FAULT_HOLD_S  # short again after a prompt that went through
     H._reset_for_tests()
+
+
+def test_the_benches_keep_their_models_in_process():
+    """Every evidence file before HCR-7 was read on the in-process embedder; a bench says so
+    itself when it wants the daemon."""
+    import subprocess
+    import sys
+
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(D.__file__))))
+    env = {k: v for k, v in os.environ.items() if k != D.ENABLE_ENV}
+    out = subprocess.run([sys.executable, "-c", "import os, bench; print(os.environ['HIPPO_EMBED_DAEMON'])"],
+                         env=env, capture_output=True, text=True, cwd=repo)
+    assert out.stdout.strip() == "0", out.stderr
