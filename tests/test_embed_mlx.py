@@ -737,3 +737,66 @@ def test_an_empty_tier_does_not_keep_high_from_serving(fakes, project, monkeypat
     # and the loop builds nothing for it: no twin directory, no passes
     assert H.refresh_tier(empty, empty_idx, _SPACE) is True
     assert not os.path.exists(os.path.join(H.high_index_dir(empty_idx), "manifest.json"))
+
+
+# --------------------------------------------------------------------------- #
+# EMB-1: the model served by the shared daemon, and the daemon going away
+# --------------------------------------------------------------------------- #
+def test_a_warm_server_serves_high_through_the_shared_daemon_and_survives_its_loss(
+        fakes, project, monkeypatch):
+    import signal
+    import tempfile
+
+    from memory import embed_daemon as D
+
+    data = tempfile.mkdtemp(prefix="hd")  # a short dir: the socket's main path
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    monkeypatch.delenv(D.ENABLE_ENV, raising=False)
+    monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
+    monkeypatch.setattr(E, "BACKEND", E._default_backend)
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    try:
+        B.build_index(project["md"], project["idx"])
+        _serve_warm("s1", "p1")
+        _wait_fresh({"idx": project["idx"], "high": project["high"]})
+        _serve_warm("s2", "p2")
+        hb = _heartbeat("s2")["high"]
+        first = hb["daemon_pid"]
+        assert hb["engaged"] is True and first != os.getpid() and hb["resident_bytes"] == 1234
+
+        os.kill(first, signal.SIGKILL)  # the daemon goes (an idle exit looks the same)
+        end = time.time() + 5
+        while D.ping() is not None and time.time() < end:
+            time.sleep(0.02)
+        assert "zebra_deploy_runbook" in _serve_warm("s3", "p3")  # found it gone: one prompt
+        assert "zebra_deploy_runbook" in _serve_warm("s4", "p4")  # lean, and asks for a revive
+        assert _heartbeat("s4")["high"]["engaged"] is False
+        end = time.time() + 15
+        while time.time() < end and not (H.status().get("status") == "ready"
+                                          and H.status().get("daemon_pid") not in (None, first)):
+            time.sleep(0.02)
+        assert "zebra_deploy_runbook" in _serve_warm("s5", "p5")
+        hb = _heartbeat("s5")["high"]
+        assert hb["engaged"] is True and hb["daemon_pid"] != first
+    finally:
+        info = D.ping()
+        if info:
+            os.kill(info["pid"], signal.SIGKILL)
+        import shutil
+
+        shutil.rmtree(data, ignore_errors=True)
+
+
+def test_a_twin_is_never_rebuilt_while_its_shared_daemon_is_gone(fakes, project):
+    """EMB-1: every embed would fail and the build would write the twin back without its
+    rows; the catch-up waits for a served call to revive the daemon instead."""
+    B.build_index(project["md"], project["idx"])
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    _write_mem(project["md"], "quokka_pager_rota", "Quokka pager rota.")
+    time.sleep(0.01)
+    B.build_index(project["md"], project["idx"])
+    before = open(os.path.join(project["high"], B._MANIFEST_NAME), "rb").read()
+    E._LOADED[_SPACE].alive = False
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
+    assert open(os.path.join(project["high"], B._MANIFEST_NAME), "rb").read() == before
+    assert E.loaded(_SPACE) is None

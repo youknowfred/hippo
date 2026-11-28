@@ -300,9 +300,11 @@ still catching up after the corpus changed, and warm recall being off. A rerank 
 time limit keeps the order it was given. None of these raises or blocks a prompt, recall never
 downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
 
-**Cost.** No money and no network once the weights are on disk. Memory is the cost: each session's
-warm server holds its own copy of the embedder (4.1 GB of unified memory, measured), plus the
-warm reranker (0.6 GB) only if you turn it on with `HIPPO_RERANK=1`. A process that serves
+**Cost.** No money and no network once the weights are on disk. Memory is the cost: one copy of
+the embedder (4.1 GB of unified memory, measured) in a daemon every session's warm server shares,
+which exits after 15 idle minutes (`HIPPO_EMBED_DAEMON_IDLE_S`; `HIPPO_EMBED_DAEMON=0` loads a copy
+per session instead), plus the warm reranker (0.6 GB per session) only if you turn it on with
+`HIPPO_RERANK=1`. A process that serves
 `/hippo:recall` or the MCP `recall` tool loads the same reranker the first time one is asked.
 The embedder loads in about 2 seconds from a warm disk cache (about 5 seconds for the first load
 after a reboot) and the reranker in under half a second. While a warm server builds or
