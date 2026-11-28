@@ -152,10 +152,18 @@ releases:
       - "Each session's warm server still loads its own copy of the embedder (HCR-7, proposed)"
   - version: v1.49.1
     theme: "Past the empty tier (one fix: on high, the warm server's plan waited for the twin of an empty private tier, which cannot exist, so every project whose `.claude/memory.local` is empty was served lean on every prompt, in v1.48.0 and v1.49.0). No ROADMAP.v2 item"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "No bench drives the warm server's own plan end to end with real models: every high number so far handed recall the high index directly, which is how this went unseen for two releases"
+  - version: v1.50.0
+    theme: "One embedder per machine (HCR-7 of ROADMAP.retrieval.yaml, built as EMB-1 #260, EMB-2 #261 and the HCR-7 port #264: on high, one shared daemon per user holds the embedder and the warm reranker for every session's warm server; any daemon fault serves that prompt lean with no breaker trip; vectors byte-identical to in-process). No ROADMAP.v2 item"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "One acceptance stamp misses: a warm server holds 0.32 to 0.39 GB with the daemon, not under 0.2 GB (a lean warm server holds 0.29 to 0.31 GB); the owner kept the default (ninth ruling of ROADMAP.retrieval.yaml)"
+      - "The daemon leaves after 900 s idle, not when no warm heartbeat remains: not ruled (HCR-7 open_for_owner (3))"
+      - "Not measured: the shipped 900 s idle exit, a build's peak memory in the daemon, the largest private corpus, a quiet machine"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned

@@ -7,6 +7,49 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.50.0 — 2026-11-27 — "One embedder per machine"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**.
+Nothing re-indexes.
+
+**Operator action: none required.** Restart open sessions to load it. It matters only on the
+`high` profile.
+
+**Changed**
+- **On `high`, the embedder and the warm reranker load once per machine, not once per session.**
+  Each session's warm server used to load its own copy of Qwen3-Embedding-4B (4.1 GB of unified
+  memory; MLX copies the weights, so nothing was shared). Ten sessions held 41 GB, and on
+  2026-11-26 an index build ran a 128 GB Mac out of memory. Now one background process per user
+  holds the models and every warm server asks it for vectors and scores. hippo starts it the first
+  time a warm server needs it: there is no install step and no launchd entry. It listens on a
+  private Unix socket (mode 0600 in a 0700 directory under the plugin's data directory) and opens
+  no port, and it exits after 15 minutes without a request (`HIPPO_EMBED_DAEMON_IDLE_S`). Measured
+  with ten real warm servers: one copy of the model, each server 0.32 to 0.39 GB, the daemon 4.70 GB,
+  about 8.5 GB in all.
+- **Recall never depends on it.** A prompt is served `lean` when the daemon is not running, still
+  loading, too busy to answer in time, or gone in the middle of the call; the session carries on,
+  and the daemon is brought back for the next prompt. A served prompt waits at most 0.75 s for its
+  query vector, a daemon that cannot answer in time says so at once, and time lost to the daemon is
+  not charged to the session's warm-recall breaker. Measured: 30 prompts each with the daemon
+  absent, slow and killed mid-call, all served `lean`, none raised, no breaker trip; 300 prompts
+  fired ten at a time, none over the 1.5 s budget, slowest 1.15 s.
+- **The same vectors as before.** A query and an index row embedded through the daemon are the same
+  bytes the in-process embedder produced (228 of 228 queries, 567 of 567 rows), so every
+  calibration carries over and no index is rebuilt; the reranker's scores through the daemon are
+  identical too (180 of 180 pairs). Recall's hard-set results are unchanged on four corpora.
+- `/hippo:doctor`'s retrieval-profile line names the daemon and asks it for its state.
+
+**Not changed:** the spawned recall hook, the `lean` and `floor` profiles, and the 4B as `high`'s
+default (the 8B with the warm reranker, read in hook mode: 135 of 228 against the 4B's 134, not
+resolved).
+
+The evidence: `planning/HCR-7.evidence.2026-11-27.json` and its independent re-check,
+`planning/HCR-7.verification.evidence.2026-11-27.json`. Seven of the roadmap's eight acceptance
+points hold; one stamp misses, "each warm server under 0.2 GB", because a warm server on `lean`
+with no daemon already holds 0.29 to 0.31 GB. The owner kept the daemon as `high`'s default path
+with that miss on record. Built as EMB-1 (#260), EMB-2 (#261) and HCR-7 (#264).
+
 ## v1.49.1 — 2026-11-27 — "Past the empty tier"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

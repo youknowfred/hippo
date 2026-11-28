@@ -577,7 +577,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: built           # 2026-11-27: EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling)
+        status: done            # 2026-11-27: ships in v1.50.0. EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling)
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -802,9 +802,9 @@ workstream:
           slower); the 4 s doubling hold after a wait paid for nothing; and in
           a sustained burst most prompts are served lean (106 of 300 high),
           because the daemon's pass-time estimate is deliberately quick to
-          recover. No release should be cut from main before this change
-          lands: as merged, a slow daemon can hold a served call past the
-          breaker's budget. The sixth ruling's three calls, as ruled
+          recover. (The port merged as #264 and shipped in v1.50.0; before
+          it, a slow daemon could hold a served call past the breaker's
+          budget.) The sixth ruling's three calls, as ruled
           2026-11-26 ("as recommended on all three"): (1) The daemon fits the
           no-server posture on four
           conditions, each binding on the build: hippo spawns and reaps it
