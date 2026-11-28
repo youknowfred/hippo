@@ -401,9 +401,18 @@ class DaemonReranker:
         from .rerank_mlx import RerankUnavailable, explicit_surface
 
         wait = _EXPLICIT_WAIT_S if explicit_surface() else 0.0
+        timeout = _QUERY_S
+        mark = _ATTEMPT.get()
+        if mark is not None:
+            # HCR-7: a served prompt's daemon waits all end with its attempt. The query embed
+            # may have used most of it; without this a slow scoring added its own 0.8 s bound
+            # on top (0.75 + 0.8 s is past the 1.5 s budget, and a trip is permanent).
+            timeout = min(timeout, mark.deadline - time.monotonic())
+            if timeout <= 0:
+                raise RerankUnavailable("no time left in this prompt's budget for the embed daemon")
         try:
             hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id, "wait_s": wait,
-                                         "query": str(query), "docs": [str(d) for d in docs]}, _QUERY_S)
+                                         "query": str(query), "docs": [str(d) for d in docs]}, timeout)
         except (OSError, ValueError) as exc:
             self.alive = False
             raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc

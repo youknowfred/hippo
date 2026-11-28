@@ -653,6 +653,7 @@ def servers(args) -> int:
 
         meaning, note = doctor_meaning("dense lean", "high")
         doc["doctor_line"] = {"names_the_daemon": "in the shared embed daemon (pid" in meaning,
+                              "the_daemons_own_word_on_its_state": "embed daemon running (pid" in meaning,
                               "note": note, "text": re.sub(r"pid \d+", "pid N", meaning)}
         doc["every_server_still_accepting"] = sum(1 for s in fleet if s.heartbeat().get("accept") is not False
                                                   and not s.heartbeat().get("tripped"))

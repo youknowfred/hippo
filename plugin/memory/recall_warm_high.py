@@ -502,6 +502,28 @@ def _reset_for_tests() -> None:
     _reset_rerank()
 
 
+def _daemon_state() -> str:
+    """HCR-7 (the owner's fourth condition: doctor names the daemon's state). One clause from
+    the daemon itself, asked on its socket: not running, running with nothing loaded, or what
+    it holds. Never starts one. "" when this process's high models do not come from the daemon
+    (a backend put in ``embed_mlx.BACKEND``, or the daemon turned off)."""
+    try:
+        from . import embed_daemon as D
+        from . import embed_mlx as E
+
+        if E.BACKEND is not E._default_backend or not D.enabled():
+            return ""
+        info = D.ping(timeout=0.5)
+    except Exception:
+        return ""
+    if info is None:
+        return "embed daemon not running (the next warm prompt on high is served lean and starts it)"
+    held = list(info.get("loaded") or []) + list(info.get("rerankers") or [])
+    if not held:
+        return f"embed daemon running (pid {info.get('pid')}), no model loaded yet"
+    return f"embed daemon running (pid {info.get('pid')}), holding {', '.join(held)}: the one copy on this machine"
+
+
 def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
     """Doctor's retrieval-profile line for this machine: ``(meaning, degrade note)``. The
     note is non-empty when high is selected but recall is (or will be) serving lean."""
@@ -514,6 +536,10 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
     if why:
         return f"{lean}; high model {space} is not servable here", f"High degrades to lean: {why}."
     meaning = f"dense {space} via MLX in the warm server (the spawned hook serves lean: {lean})"
+    daemon = _daemon_state()  # HCR-7: where the model is, and the daemon's own word on its state
+    if daemon:
+        meaning = (f"dense {space} via MLX in the shared embed daemon, for every warm server "
+                   f"(the spawned hook serves lean: {lean}); {daemon}")
     from .recall_warm import server_states
 
     live = [r["high"] for r in server_states() if r.get("alive") and isinstance(r.get("high"), dict)]

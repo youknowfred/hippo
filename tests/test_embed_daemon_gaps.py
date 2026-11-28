@@ -258,3 +258,42 @@ def test_a_queued_query_past_its_deadline_is_dropped_unrun(high):
         assert hdr.get("ok") is False and hdr.get("reason") in ("busy", "expired")
         assert _Model.made[0].queries == ["the pass that is running"]
 
+
+
+# --------------------------------------------------------------------------- #
+# Added with the port: the reranker's wait, and doctor's line
+# --------------------------------------------------------------------------- #
+def test_a_served_prompts_rerank_never_waits_past_the_prompts_own_budget(high, monkeypatch):
+    """The query embed and the rerank share one deadline. Each had its own bound before
+    (0.75 s and 0.8 s), which together are past the 1.5 s serve budget."""
+    from memory import rerank_mlx as R
+
+    asked: list = []
+    real = D.request
+    monkeypatch.setattr(D, "request", lambda path, req, timeout=0.0: asked.append((req["op"], timeout)) or real(path, req, timeout))
+    with _daemon(), D.attempt(0.3) as tried:
+        rr = object.__new__(D.DaemonReranker)
+        rr.model_id, rr.path, rr.alive = R.WARM_MODEL, D.socket_path(), True
+        with pytest.raises(R.RerankUnavailable):  # this daemon has no reranker: it says so at once
+            rr.score("zebra", ["zebra lane"])
+        assert asked[-1][0] == "rerank" and 0 < asked[-1][1] <= 0.3
+        tried.deadline = time.monotonic() - 1.0  # the embed used the whole budget
+        with pytest.raises(R.RerankUnavailable, match="no time left"):
+            rr.score("zebra", ["zebra lane"])
+        assert len(asked) == 1  # nothing was sent
+    with _daemon():  # outside a served prompt the bound is the seam's own, as before
+        with pytest.raises(R.RerankUnavailable):
+            rr.score("zebra", ["zebra lane"])
+        assert asked[-1] == ("rerank", D._QUERY_S)
+
+
+def test_doctor_names_the_daemons_own_state(high):
+    assert "embed daemon not running" in H.doctor_meaning("dense x", "high")[0]
+    with _daemon():
+        meaning = H.doctor_meaning("dense x", "high")[0]
+        assert f"embed daemon running (pid {os.getpid()}), no model loaded yet" in meaning
+        _engage(high)
+        meaning, note = H.doctor_meaning("dense x", "high")
+        assert note == "" and "in the shared embed daemon, for every warm server" in meaning
+        assert f"embed daemon running (pid {os.getpid()}), holding {_SPACE}: the one copy" in meaning
+        assert "serving high" in meaning
