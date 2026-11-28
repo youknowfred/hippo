@@ -28,8 +28,9 @@ before.
   - **The reranker too** (EMB-2). The warm Qwen3-Reranker (``rerank_mlx``) loads here once,
     not in every server that served an explicit ``recall`` or ran with ``HIPPO_RERANK`` on.
     HCR-4's rule that a reranker still scoring an earlier call answers "busy" at once (the
-    seam keeps the fused order) now holds across sessions: the daemon never queues a second
-    scoring behind one a caller may already have abandoned.
+    seam keeps the fused order) now holds across sessions on the warm path, whose 0.8 s bound
+    has no room to wait: the daemon never queues a scoring behind one a caller may already
+    have abandoned. An explicit surface (a 15 s bound) waits up to 5 s for its turn instead.
   - ``HIPPO_EMBED_DAEMON=0`` keeps the in-process load of both.
 
 Wire format: one JSON request line; one JSON reply line, and after an ``embed``/``query``
@@ -59,6 +60,10 @@ _CONNECT_S = 2.0
 _QUERY_S = 120.0
 _DOC_S = 600.0
 _SPAWN_WAIT_S = 15.0
+# How long an explicit surface's scoring waits for another session's to finish. Its bound is
+# rerank_mlx.EXPLICIT_TIMEOUT_SECS (15 s) and a 30-doc scoring measured 0.55-0.8 s, so a wait
+# this long still lands inside it. The warm path never waits (its 0.8 s bound has no room).
+_EXPLICIT_WAIT_S = 5.0
 _SUN_PATH_MAX = 103  # macOS sockaddr_un.sun_path is 104 bytes with its NUL
 
 
@@ -294,10 +299,11 @@ class DaemonReranker:
         self.alive = True
 
     def score(self, query: str, docs: List[str]) -> List[float]:
-        from .rerank_mlx import RerankUnavailable
+        from .rerank_mlx import RerankUnavailable, explicit_surface
 
+        wait = _EXPLICIT_WAIT_S if explicit_surface() else 0.0
         try:
-            hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id,
+            hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id, "wait_s": wait,
                                          "query": str(query), "docs": [str(d) for d in docs]}, _QUERY_S)
         except (OSError, ValueError) as exc:
             self.alive = False
@@ -383,7 +389,11 @@ class Server:
                          "resident_bytes": getattr(rr, "resident_bytes", None)})
             return
         busy = self._scoring[model]
-        if not busy.acquire(blocking=False):
+        try:
+            wait = min(max(float(req.get("wait_s") or 0.0), 0.0), _EXPLICIT_WAIT_S)
+        except (TypeError, ValueError):
+            wait = 0.0
+        if not (busy.acquire(timeout=wait) if wait else busy.acquire(blocking=False)):
             raise _Unavailable(f"{model} is still scoring an earlier call", "busy")
         try:
             scores = [float(x) for x in rr.score(str(req.get("query") or ""),

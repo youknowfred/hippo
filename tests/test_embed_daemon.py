@@ -297,6 +297,17 @@ def test_a_reranker_still_scoring_answers_busy_to_another_session(tmp_path):
         assert hdr["ok"] is False and hdr["reason"] == "busy" and time.monotonic() - t0 < 0.3
         t.join()
         assert first[0][0] == {"ok": True, "scores": [1.0, 1.0]}
+
+        # An explicit surface (15 s bound) waits its turn instead of losing the rerank.
+        started.clear()
+        t = threading.Thread(target=lambda: D.request(path, req))
+        t.start()
+        assert started.wait(5)
+        with R.using_reranker(_RR, explicit=True):
+            rr = object.__new__(D.DaemonReranker)
+            rr.model_id, rr.path, rr.alive = _RR, path, True
+            assert rr.score("q", ["a", "b"]) == [1.0, 1.0]
+        t.join()
     finally:
         R.unavailable_reason = orig
         srv._idle = lambda: True
