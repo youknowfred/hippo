@@ -11,6 +11,13 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.50.0: on `high`, one copy of the models per machine
+
+**Nothing to run.** On `high`, restart open sessions. The first warm prompt starts one background
+process that holds the embedder (and the reranker, when it is used) for every session; until it
+has loaded, prompts are served `lean`, as during any model load. It leaves by itself after 15
+idle minutes and comes back on the next prompt. `/hippo:doctor`'s retrieval-profile line names it.
+
 ### v1.49.1: `high` is served on projects with an empty private tier
 
 **Nothing to run.** On `high`, restart open sessions. Before this fix a project whose
