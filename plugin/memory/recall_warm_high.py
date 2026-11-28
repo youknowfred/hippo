@@ -41,6 +41,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import weakref
 from contextlib import contextmanager
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -138,18 +139,27 @@ def _rows_done(li, space: str) -> int:
 
 def fresh(lean, high, space: str) -> bool:
     """``high`` serves in ``lean``'s place: dense-ready in ``space`` over the same entries
-    and body chunks, in the same order (memoized per loaded pair)."""
+    and body chunks, in the same order. Memoized per loaded pair for as long as both are
+    loaded, and no longer: the memo holds the two by weak reference. It used to hold the
+    objects themselves, up to 65 pairs, while this thread loads both afresh on every tick
+    and every build pass; on a 1,070-memory corpus that pinned 100 to 165 MB a tick
+    (measured 2026-11-27: a building server at 2.4 GB, 6.9 GB a minute after)."""
     if lean is None or high is None:
         return False
     key = (id(lean), id(high))
-    memo = _ST.fresh_memo.get(key)  # holds both objects, so their ids cannot be reused
-    if memo is not None and memo[0] is lean and memo[1] is high and memo[2] == space:
+    memo = _ST.fresh_memo.get(key)  # an id is reused only after its object died: checked below
+    if memo is not None and memo[0]() is lean and memo[1]() is high and memo[2] == space:
         return memo[3]
     hit = bool(high.dense_ready and high.dense is not None and high.model == space
                and _row_text_ok(high, space) and _same_rows(lean, high))
-    if len(_ST.fresh_memo) > 64:
-        _ST.fresh_memo.clear()
-    _ST.fresh_memo[key] = (lean, high, space, hit)
+    table = _ST.fresh_memo
+
+    def forget(_dead) -> None:
+        if table.get(key) is entry:
+            table.pop(key, None)
+
+    entry = (weakref.ref(lean, forget), weakref.ref(high, forget), space, hit)
+    table[key] = entry
     return hit
 
 

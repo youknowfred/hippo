@@ -364,6 +364,54 @@ def test_a_high_index_is_a_bound_sibling_the_lean_build_never_touches(fakes, pro
     assert H.fresh(B.load_index(project["idx"]), B.load_index(project["high"]), _SPACE)
 
 
+def _level_twin(project):
+    B.build_index(project["md"], project["idx"])
+    with E.using_space(_SPACE):
+        B.build_index(project["md"], project["high"], allow_download=False)
+
+
+def test_fresh_does_not_keep_the_indexes_it_was_asked_about(fakes, project):
+    """The hippo-high thread loads both indexes afresh on every tick and every pass. The memo
+    held each pair it was asked about, up to 65 of them: measured 2026-11-27 on a
+    1,070-memory corpus, 100 to 165 MB a tick, a building server at 2.4 GB and 6.9 GB after."""
+    import gc
+    import weakref
+
+    _level_twin(project)
+    seen = []
+    for _ in range(6):
+        lean, high = B.load_index(project["idx"]), B.load_index(project["high"])
+        assert H.fresh(lean, high, _SPACE)
+        seen += [weakref.ref(lean), weakref.ref(high)]
+        del lean, high
+    gc.collect()
+    assert [r() for r in seen] == [None] * 12, "fresh() still holds indexes nobody else does"
+
+
+def test_the_idle_refresh_of_a_level_twin_leaves_nothing_behind(fakes, project):
+    _level_twin(project)
+    for _ in range(10):  # ten 30 s ticks of a server nobody prompts
+        assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    import gc
+
+    gc.collect()
+    assert len(H._ST.fresh_memo) == 0
+
+
+def test_fresh_remembers_a_pair_that_is_still_loaded(fakes, project, monkeypatch):
+    """What the memo is for: a served prompt asks about the same two cached objects every
+    time, and the row-by-row comparison runs once for them."""
+    _level_twin(project)
+    lean, high = B.load_index(project["idx"]), B.load_index(project["high"])
+    compared = []
+    real = H._same_rows
+    monkeypatch.setattr(H, "_same_rows", lambda a, b: compared.append(1) or real(a, b))
+    assert all(H.fresh(lean, high, _SPACE) for _ in range(5)) and len(compared) == 1
+    assert not H.fresh(lean, high, f"{_SPACE}@1024") and H.fresh(lean, high, _SPACE)  # the space is part of it
+    again = B.load_index(project["high"])  # the twin was rewritten and loaded again: asked anew
+    assert H.fresh(lean, again, _SPACE) and len(compared) == 3
+
+
 def test_an_mrl_width_is_its_own_space(fakes, project, monkeypatch):
     monkeypatch.setenv(E.DIM_ENV, "64")
     space = E.resolve_high_space()
