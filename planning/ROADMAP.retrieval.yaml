@@ -816,7 +816,7 @@ workstream:
           not re-read on memory alone; the evidence run adds one arm, the 8B
           with the warm reranker in hook mode, and no default changes without
           that file.
-          FIXED 2026-11-27, the digest-section defect seen while measuring the
+          FIXED 2026-11-27 (#267), the digest-section defect seen while measuring the
           daemon's lifetime (item (6) of this list as #266 writes it): a high/
           build put the corpus's digest sections through the big model (2,879
           of a 1,070-memory corpus's 6,657 rows) into a sub-index under high/
