@@ -11,6 +11,14 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.50.1: the shared daemon drops an idle model instead of exiting
+
+**Nothing to run.** On `high`, restart open sessions. The daemon now stays while a session on
+`high` is open, drops a model unused for 30 minutes and keeps listening, and leaves a minute after
+the last session closes. **If you set `HIPPO_EMBED_DAEMON_IDLE_S`**, it now sets when a model is
+dropped (default 1,800 s), not when the process exits. A corpus with `fold_digests` builds its
+`high/` index faster, and old `sections.*` files under `high/` go at that index's next build.
+
 ### v1.50.0: on `high`, one copy of the models per machine
 
 **Nothing to run.** On `high`, restart open sessions. The first warm prompt starts one background

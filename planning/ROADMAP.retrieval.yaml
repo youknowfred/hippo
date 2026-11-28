@@ -602,7 +602,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: done            # 2026-11-27: ships in v1.50.0. EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling); the daemon's lifetime was ruled and rebuilt after the release (eleventh ruling)
+        status: done            # 2026-11-27: ships in v1.50.0. EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling); the daemon's lifetime was ruled and rebuilt after the release (eleventh ruling), shipping in v1.50.1
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -952,7 +952,7 @@ workstream:
           not re-read on memory alone; the evidence run adds one arm, the 8B
           with the warm reranker in hook mode, and no default changes without
           that file.
-          FIXED 2026-11-27 (#267), the digest-section defect seen while measuring the
+          FIXED 2026-11-27 (#267, ships in v1.50.1), the digest-section defect seen while measuring the
           daemon's lifetime (item (6) of this list as #266 writes it): a high/
           build put the corpus's digest sections through the big model (2,879
           of a 1,070-memory corpus's 6,657 rows) into a sub-index under high/
