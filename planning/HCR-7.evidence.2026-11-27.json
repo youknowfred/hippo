@@ -1497,8 +1497,10 @@
   "corpus-b's twin was not rebuilt through the daemon (its queries were compared; 567 index rows of three corpora were).",
   "The full test suite: the test files the change reaches ran instead (named in the pull request).",
   "A quiet machine: every timing was taken beside the owner's live sessions.",
-  "The warm reranker through the daemon on real weights (EMB-2's tests cover it with fakes; F3 was read in-process).",
-  "A build's peak memory inside the daemon was not sampled.",
-  "The daemon's shipped 900 s idle exit: the server run used a shorter one so the exit could be seen."
+  "The warm reranker through the daemon on real weights (EMB-2's tests cover it with fakes; F3 was read in-process)."
+ ],
+ "run_since": [
+  "A build's peak memory inside the daemon: sampled the same day through a whole build of corpus-c and of hippo (planning/HCR-7.lifetime.evidence.2026-11-27.json, build_memory). corpus-c is still in no recall arm.",
+  "The daemon's 900 s idle exit as shipped: two real 900 s trials, in the same file (before_the_change). The owner's eleventh ruling then replaced that rule."
  ]
 }

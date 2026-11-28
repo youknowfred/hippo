@@ -1047,8 +1047,10 @@ where a setting can live (environment, plugin option, `hippo.json`) and which wi
   model (default 512; `0` keeps no cache). Uncapped, an index build grew it by gigabytes.
 - `HIPPO_EMBED_DAEMON_IDLE_S` — seconds without a load, embed or rerank before the shared daemon
   (`embed_daemon`: the one process that holds the `high` embedder and the Qwen3 reranker, on a 0600
-  Unix socket under `${CLAUDE_PLUGIN_DATA}/embedd/`) exits and gives its memory back (default 900).
-  The next prompt that wants `high` is served `lean` and brings it back.
+  Unix socket under `${CLAUDE_PLUGIN_DATA}/embedd/`) drops its models and gives their memory back
+  (default 1800). The process stays, at about 0.2 GB, while any session's warm server on `high` is
+  alive, and exits a minute after the last one is gone. The next prompt that wants `high` is served
+  `lean` and brings the model back.
 - `HIPPO_RERANK=1` — rerank on the per-prompt path (fastembed's MiniLM on `lean`, the warm
   Qwen3-Reranker-0.6B on `high`). Off by default on every profile.
 - `HIPPO_RERANK_TIMEOUT` — seconds before a rerank gives up and the fused order stands.

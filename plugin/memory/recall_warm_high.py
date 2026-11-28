@@ -31,8 +31,9 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
 
 Each session's MCP server is its own process. EMB-1: the model itself lives in one shared
 daemon per user (``embed_daemon``); each server holds a client of it, so N sessions hold one
-copy of the weights. When the daemon goes (idle exit, crash) the client reads as not loaded,
-served calls go lean, and the next one asks this thread to bring it back.
+copy of the weights. When the daemon drops its idle model or goes (no warm server left, a
+crash) the client reads as not loaded, served calls go lean, and the next one asks this thread
+to bring it back.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import weakref
 from contextlib import contextmanager
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -137,18 +139,27 @@ def _rows_done(li, space: str) -> int:
 
 def fresh(lean, high, space: str) -> bool:
     """``high`` serves in ``lean``'s place: dense-ready in ``space`` over the same entries
-    and body chunks, in the same order (memoized per loaded pair)."""
+    and body chunks, in the same order. Memoized per loaded pair for as long as both are
+    loaded, and no longer: the memo holds the two by weak reference. It used to hold the
+    objects themselves, up to 65 pairs, while this thread loads both afresh on every tick
+    and every build pass; on a 1,070-memory corpus that pinned 100 to 165 MB a tick
+    (measured 2026-11-27: a building server at 2.4 GB, 6.9 GB a minute after)."""
     if lean is None or high is None:
         return False
     key = (id(lean), id(high))
-    memo = _ST.fresh_memo.get(key)  # holds both objects, so their ids cannot be reused
-    if memo is not None and memo[0] is lean and memo[1] is high and memo[2] == space:
+    memo = _ST.fresh_memo.get(key)  # an id is reused only after its object died: checked below
+    if memo is not None and memo[0]() is lean and memo[1]() is high and memo[2] == space:
         return memo[3]
     hit = bool(high.dense_ready and high.dense is not None and high.model == space
                and _row_text_ok(high, space) and _same_rows(lean, high))
-    if len(_ST.fresh_memo) > 64:
-        _ST.fresh_memo.clear()
-    _ST.fresh_memo[key] = (lean, high, space, hit)
+    table = _ST.fresh_memo
+
+    def forget(_dead) -> None:
+        if table.get(key) is entry:
+            table.pop(key, None)
+
+    entry = (weakref.ref(lean, forget), weakref.ref(high, forget), space, hit)
+    table[key] = entry
     return hit
 
 
@@ -312,7 +323,7 @@ def _revive(emb) -> None:
     revive = getattr(emb, "revive", None)
     if revive is None or getattr(emb, "alive", True):
         return
-    _ST.status, _ST.reason = "loading", "the shared embed daemon is restarting"
+    _ST.status, _ST.reason = "loading", "the shared embed daemon is bringing the model back"
     try:
         revive()
         _note_loaded(emb)
@@ -480,9 +491,9 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
         plan[index_dir] = high
     if not plan:
         return None
-    # HCR-7: asked last, once everything else says high would serve. A daemon that went
-    # since the last call (its idle exit, a crash) is found here, before the attempt, so
-    # this prompt is lean rather than BM25 over the high index, and the thread revives it.
+    # HCR-7: asked last, once everything else says high would serve. A daemon that dropped
+    # its idle model or went since the last call is found here, before the attempt, so this
+    # prompt is lean rather than BM25 over the high index, and the thread brings it back.
     ready = getattr(loaded(space), "ready", None)
     if ready is not None and not ready():
         _ST.revive = True
@@ -504,8 +515,8 @@ def _reset_for_tests() -> None:
 
 def _daemon_state() -> str:
     """HCR-7 (the owner's fourth condition: doctor names the daemon's state). One clause from
-    the daemon itself, asked on its socket: not running, running with nothing loaded, or what
-    it holds. Never starts one. "" when this process's high models do not come from the daemon
+    the daemon itself, asked on its socket: not running, running with nothing loaded yet,
+    running with its idle model dropped, or what it holds. Never starts one. "" when this process's high models do not come from the daemon
     (a backend put in ``embed_mlx.BACKEND``, or the daemon turned off)."""
     try:
         from . import embed_daemon as D
@@ -519,6 +530,9 @@ def _daemon_state() -> str:
     if info is None:
         return "embed daemon not running (the next warm prompt on high is served lean and starts it)"
     held = list(info.get("loaded") or []) + list(info.get("rerankers") or [])
+    if not held and (info.get("stats") or {}).get("unloads"):
+        return (f"embed daemon running (pid {info.get('pid')}), dropped its model after sitting unused "
+                "(the next warm prompt on high is served lean and reloads it)")
     if not held:
         return f"embed daemon running (pid {info.get('pid')}), no model loaded yet"
     return f"embed daemon running (pid {info.get('pid')}), holding {', '.join(held)}: the one copy on this machine"

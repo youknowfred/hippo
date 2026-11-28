@@ -18,6 +18,17 @@ and measures what the roadmap's acceptance names: one daemon from simultaneous s
 server's and the daemon's ``phys_footprint``, a burst of simultaneous prompts against
 ``SERVE_BUDGET_MS``, and the three daemon faults (absent, slow, killed mid-call).
 
+Three more read the daemon's lifetime and what it holds (HCR-7's eleventh ruling):
+
+    $PY -m bench.embed_daemon lifetime     --project P --data D --queries hard_set.yaml --out lifetime.json
+    $PY -m bench.embed_daemon build-memory --project P2 --data D [--model M] --out build.json
+    $PY -m bench.embed_daemon two-models   --project-a P --project-b P8 --data D --queries ... --out two.json
+
+``lifetime``: the first prompt after the daemon dropped its idle model, the way back to a
+prompt served high, and the daemon's own leave once its server is gone. ``build-memory``: the
+daemon's and the building server's ``phys_footprint``, sampled through a ``high/`` build.
+``two-models``: one daemon holding two models, for sessions on different ones.
+
 ``--work`` is ``bench.space_calibration``'s scratch layout (corpus copies under
 ``<work>/<tag>/<label>``, plugin data under ``<work>/plugin-data`` with the ``mlx`` and
 ``fastembed`` caches linked in). Outputs hold counts, timings and byte comparisons, no query
@@ -212,7 +223,8 @@ def vectors_local(args) -> int:
 
 
 def _stop_daemon(space: str = SPACE) -> None:
-    """Kill this plugin-data dir's daemon (it has no stop request: it leaves when idle)."""
+    """Kill this plugin-data dir's daemon (it has no stop request: it leaves by itself, a
+    grace after the last warm server on high)."""
     from memory import embed_daemon as D
 
     path = D.socket_path()
@@ -255,7 +267,7 @@ def vectors_daemon(args) -> int:
     import numpy as np
 
     os.environ["HIPPO_EMBED_DAEMON"] = "1"
-    os.environ["HIPPO_EMBED_DAEMON_IDLE_S"] = "600"  # no session here: stay for the run
+    os.environ["HIPPO_EMBED_DAEMON_GRACE_S"] = "600"  # no session here (no heartbeat): stay for the run
     _env_for(os.path.abspath(args.work))
     from memory import embed_daemon as D
     from memory import embed_mlx as E
@@ -356,15 +368,7 @@ class Server:
 
 def footprint_mb(pid: int):
     """``phys_footprint`` of a process in MB (macOS ``footprint``), or None."""
-    try:
-        out = subprocess.run(["footprint", str(pid)], capture_output=True, text=True, timeout=60).stdout
-    except Exception:
-        return None
-    m = re.search(r"phys_footprint:\s*([\d.]+)\s*(KB|MB|GB)", out) or re.search(
-        r"Footprint:\s*([\d.]+)\s*(KB|MB|GB)", out)
-    if not m:
-        return None
-    return round(float(m.group(1)) * {"KB": 1 / 1024, "MB": 1.0, "GB": 1024.0}[m.group(2)], 1)
+    return footprints(pid)[0]
 
 
 def _open_files(pid: int, *more: str) -> str:
@@ -423,14 +427,14 @@ def _served(results: list, budget_ms: float) -> dict:
     }
 
 
-def servers(args) -> int:
-    os.environ["HIPPO_EMBED_DAEMON"] = "1"
-    data, project = os.path.abspath(args.data), os.path.abspath(args.project)
+def _server_env(data: str, project: str, idle_s: float, model: str = "") -> dict:
+    """The environment of one real MCP server on high against scratch dirs; this process
+    takes the same data dir, so ``embed_daemon.socket_path`` here is the servers' socket."""
     env = dict(os.environ)
     env.update({
         "CLAUDE_PLUGIN_DATA": data, "CLAUDE_PROJECT_DIR": project, "HIPPO_RETRIEVAL_PROFILE": "high",
         "CLAUDE_CONFIG_DIR": os.path.join(data, "claude-config"), "HIPPO_EMBED_DAEMON": "1",
-        "HIPPO_EMBED_DAEMON_IDLE_S": str(args.idle_s),
+        "HIPPO_EMBED_DAEMON_IDLE_S": str(idle_s),
         "HIPPO_USER_MEMORY_DIR": os.path.join(data, "no-user-tier"),
         "HIPPO_LOCAL_MEMORY_DIR": os.path.join(data, "no-private-tier"),
         "HIPPO_TRUST_ALL": "1", "HIPPO_TRUST_FILE": os.path.join(data, "trust.json"), "HF_HUB_OFFLINE": "1",
@@ -439,8 +443,18 @@ def servers(args) -> int:
     for v in ("HIPPO_DENSE_FLOOR", "HIPPO_DISABLE", "HIPPO_DISABLE_DENSE", "HIPPO_HIGH_EMBED_MODEL",
               "HIPPO_HIGH_EMBED_DIM", "HIPPO_RERANK", "HIPPO_GRAPH_SEEDS", "HIPPO_MMR_LAMBDA"):
         env.pop(v, None)
+        os.environ.pop(v, None)
+    if model:
+        env["HIPPO_HIGH_EMBED_MODEL"] = os.environ["HIPPO_HIGH_EMBED_MODEL"] = model
     os.environ.update({k: env[k] for k in ("CLAUDE_PLUGIN_DATA", "CLAUDE_PROJECT_DIR", "HIPPO_RETRIEVAL_PROFILE",
                                            "HIPPO_EMBED_DAEMON_IDLE_S")})
+    return env
+
+
+def servers(args) -> int:
+    os.environ["HIPPO_EMBED_DAEMON"] = "1"
+    data, project = os.path.abspath(args.data), os.path.abspath(args.project)
+    env = _server_env(data, project, args.idle_s)
     from memory import embed_daemon as D
     from memory import recall_warm as W
     from memory.eval_metrics import load_hard_set
@@ -660,9 +674,9 @@ def servers(args) -> int:
     finally:
         for s in fleet:
             s.close()
-    # every server gone: the daemon leaves by itself when idle (nobody stops it)
+    # every server gone: the daemon leaves by itself, a grace (60 s) later (nobody stops it)
     t0 = time.monotonic()
-    while time.monotonic() - t0 < args.idle_s + 120 and _daemon_pids(data):
+    while time.monotonic() - t0 < args.idle_s + 180 and _daemon_pids(data):
         time.sleep(1.0)
     doc["reaped_itself"] = {"daemons_left": len(_daemon_pids(data)),
                             "seconds_after_the_last_server_exited": round(time.monotonic() - t0, 1)}
@@ -672,6 +686,398 @@ def servers(args) -> int:
         if "hippo" in ln.lower())
     doc["load_average_at_end"] = os.getloadavg()[0]
     doc["seconds"] = round(time.monotonic() - _T0)
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1)
+    _log(f"wrote {args.out}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# lifetime: what a prompt meets after the daemon went quiet
+# --------------------------------------------------------------------------- #
+def lifetime(args) -> int:
+    """One real MCP server on high and the daemon it shares. Each trial: the server serves
+    high, nothing asks the daemon for ``--idle-s``, and then the first prompt is timed, and
+    the way back to a prompt served high. ``--expect drop`` (the daemon as shipped): it is
+    still there and holds no model. ``--expect exit`` is EMB-1's rule, which HCR-7's
+    eleventh ruling replaced (its process left after the idle window); it is kept to read
+    that code again. Last, the server closes and the daemon's own leave is timed."""
+    os.environ["HIPPO_EMBED_DAEMON"] = "1"
+    data, project = os.path.abspath(args.data), os.path.abspath(args.project)
+    env = _server_env(data, project, args.idle_s, args.model)
+    for kv in args.env:
+        k, v = kv.split("=", 1)
+        env[k] = os.environ[k] = v
+    from memory import embed_daemon as D
+    from memory import embed_mlx as E
+    from memory import recall_warm as W
+    from memory.eval_metrics import load_hard_set
+
+    doc_grace = float(env.get(D.GRACE_ENV) or D.DEFAULT_GRACE_S)
+    space = E.resolve_high_space()
+    path = D.socket_path()
+    queries = [r["query"] for r in load_hard_set(args.queries) if r.get("query")]
+    rng = random.Random(13)
+    doc: dict = {"space": space, "expect": args.expect, "idle_s": args.idle_s, "trials": args.trials,
+                 "grace_s": doc_grace, "serve_budget_ms": W.SERVE_BUDGET_MS,
+                 "load_average_at_start": os.getloadavg()[0]}
+    if not args.keep_daemon:
+        _stop_daemon()
+    for stale in glob.glob(os.path.join(data, "warm", "*")):
+        os.unlink(stale)
+
+    def info():
+        return D.ping(path, timeout=1.0)
+
+    def holds_model() -> bool:
+        return space in ((info() or {}).get("loaded") or [])
+
+    srv = Server(0, project, data, env)
+    rows: list = []
+    try:
+        end = time.monotonic() + 900
+        while time.monotonic() < end:
+            if (srv.prompt(rng.choice(queries))["hb"].get("high") or {}).get("engaged"):
+                break
+            time.sleep(1.0)
+        else:
+            raise SystemExit("the server never served high")
+        for trial in range(args.trials):
+            warm = [srv.prompt(rng.choice(queries)) for _ in range(3)]
+            assert all((r["hb"].get("high") or {}).get("engaged") for r in warm), "not on high before the wait"
+            daemon_pid = (info() or {}).get("pid")
+            loaded_mb = footprint_mb(daemon_pid) if daemon_pid else None
+            t_quiet = time.monotonic()
+            # ---- nothing asks the daemon (a ping is not activity) ---------------------- #
+            while time.monotonic() - t_quiet < args.idle_s + 120:
+                got = info()
+                if args.expect == "exit" and got is None and not _daemon_pids(data):
+                    break
+                if args.expect == "drop" and got is not None and not got.get("loaded"):
+                    break
+                time.sleep(0.25 if args.idle_s < 120 else 2.0)
+            else:
+                raise SystemExit(f"the daemon did not {args.expect} within {args.idle_s + 120:.0f} s")
+            quiet_s = time.monotonic() - t_quiet
+            time.sleep(args.settle_s)
+            pids = [int((info() or {}).get("pid") or 0)] if args.expect == "drop" else _daemon_pids(data)
+            rec = {"quiet_s_until_the_" + args.expect: round(quiet_s, 1), "daemon_mb_holding_the_model": loaded_mb,
+                   "daemon_mb_after": footprint_mb(pids[0]) if pids else 0.0, "daemon_processes_after": len(pids)}
+            # ---- the first prompt after ------------------------------------------------ #
+            t1 = time.monotonic()
+            first = srv.prompt(rng.choice(queries))
+            hb = first["hb"]
+            rec.update({"first_wall_ms": round(first["wall_ms"], 1), "first_server_ms": hb.get("last_ms"),
+                        "first_served_high": bool((hb.get("high") or {}).get("engaged")),
+                        "first_raised": first["raised"], "first_tripped": bool(hb.get("tripped")),
+                        "first_answered_with_a_block": first["injected"]})
+            # ---- the way back ---------------------------------------------------------- #
+            while time.monotonic() - t1 < 300 and not holds_model():
+                time.sleep(0.01)
+            rec["model_back_ms_after_the_first_prompt_was_sent"] = round((time.monotonic() - t1) * 1000.0, 1)
+            lean_again = 0
+            while time.monotonic() - t1 < 300:
+                t2 = time.monotonic()
+                nxt = srv.prompt(rng.choice(queries))
+                if (nxt["hb"].get("high") or {}).get("engaged"):
+                    rec["first_high_prompt_sent_ms_after_the_first"] = round((t2 - t1) * 1000.0, 1)
+                    rec["first_high_wall_ms"] = round(nxt["wall_ms"], 1)
+                    rec["first_high_server_ms"] = nxt["hb"].get("last_ms")
+                    rec["daemon_load_ms"] = (nxt["hb"].get("high") or {}).get("load_ms")
+                    break
+                lean_again += 1
+                time.sleep(0.02)
+            rec["prompts_served_lean_between"] = lean_again
+            rec["tripped_after"] = bool(srv.heartbeat().get("tripped"))
+            rec["faults_so_far"] = int((srv.heartbeat().get("high") or {}).get("faults") or 0)
+            rows.append(rec)
+            _log(f"trial {trial + 1}/{args.trials}: {json.dumps(rec)}")
+    finally:
+        srv.close()
+    if not args.keep_daemon:  # the last warm server on high is gone: the daemon leaves by itself
+        t_closed, left = time.monotonic(), None
+        while time.monotonic() - t_closed < doc_grace + 120:
+            if info() is None:
+                left = round(time.monotonic() - t_closed, 1)
+                break
+            time.sleep(0.5)
+        doc["daemon_left_s_after_the_last_server_closed"] = left
+        _log(f"the daemon left {left} s after the server closed")
+    n = len(rows)
+
+    def count(key):
+        k = sum(1 for r in rows if r.get(key))
+        return {"k": k, "n": n, "ci95": wilson(k, n)}
+
+    def col(key):
+        return [r[key] for r in rows if r.get(key) is not None]
+
+    doc.update({
+        "first_prompt_served_lean": {"k": n - count("first_served_high")["k"], "n": n,
+                                     "ci95": wilson(n - count("first_served_high")["k"], n)},
+        "first_prompt_raised": count("first_raised"), "breaker_tripped": count("tripped_after"),
+        "first_prompt_answered_with_a_block": count("first_answered_with_a_block"),
+        "first_prompt_wall_ms": summary(col("first_wall_ms")),
+        "first_prompt_server_ms": summary(col("first_server_ms")),
+        "model_back_ms_after_the_first_prompt_was_sent": summary(col("model_back_ms_after_the_first_prompt_was_sent")),
+        "first_high_prompt_sent_ms_after_the_first": summary(col("first_high_prompt_sent_ms_after_the_first")),
+        "first_high_prompt_server_ms": summary(col("first_high_server_ms")),
+        "daemon_load_ms": summary(col("daemon_load_ms")),
+        "quiet_s_until_the_" + args.expect: summary(col("quiet_s_until_the_" + args.expect), "s"),
+        "daemon_mb_holding_the_model": summary(col("daemon_mb_holding_the_model"), "MB"),
+        "daemon_mb_after": summary(col("daemon_mb_after"), "MB"),
+        "trials_rows": rows, "load_average_at_end": os.getloadavg()[0], "seconds": round(time.monotonic() - _T0),
+    })
+    if not args.keep_daemon:
+        _stop_daemon()
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1)
+    _log(f"wrote {args.out}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# build-memory: who holds what while a warm server builds its high/ twin
+# --------------------------------------------------------------------------- #
+def footprints(pid: int) -> tuple:
+    """(``phys_footprint``, ``phys_footprint_peak``) of a process in MB, None where unread.
+    The peak is the kernel's own high-water mark for the process, so a spike between two
+    samples is still seen."""
+    try:  # in bytes: the default format rounds anything over 10 GB to a whole gigabyte
+        out = subprocess.run(["footprint", "-f", "bytes", str(pid)], capture_output=True, text=True, timeout=60).stdout
+    except Exception:
+        return None, None
+
+    def mb(label):
+        m = re.search(label + r":\s*(\d+)\s*B\b", out)
+        return round(int(m.group(1)) / 2**20, 1) if m else None
+
+    return mb("phys_footprint"), mb("phys_footprint_peak")
+
+
+def _rows_embedded(hdir: str, memo: dict) -> tuple:
+    """(rows that hold a vector, rows in all) of the twin at ``hdir``, read from its manifest
+    when that file changed."""
+    path = os.path.join(hdir, "manifest.json")
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        return 0, 0
+    if memo.get("stamp") != stamp:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                m = json.load(fh)
+        except Exception:
+            return memo.get("got", (0, 0))
+        rows = list(m.get("entries") or []) + list(m.get("body_chunks") or [])
+        memo["stamp"], memo["got"] = stamp, (sum(1 for r in rows if r.get("row") is not None), len(rows))
+    return memo["got"]
+
+
+def build_memory(args) -> int:
+    """One real MCP server on high builds a project's ``high/`` twin through the daemon.
+    ``phys_footprint`` of both, sampled through the run: the daemon holding the model before
+    the build, each build pass, and after the twin is level."""
+    os.environ["HIPPO_EMBED_DAEMON"] = "1"
+    data, project = os.path.abspath(args.data), os.path.abspath(args.project)
+    env = _server_env(data, project, args.idle_s, args.model)
+    from memory import embed_daemon as D
+    from memory import embed_mlx as E
+    from memory.build_index import default_index_dir
+
+    space = E.resolve_high_space()
+    path = D.socket_path()
+    hdir = os.path.join(default_index_dir(os.path.join(project, ".claude", "memory")), "high")
+    memo: dict = {}
+    doc: dict = {"space": space, "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+                 "sample_every_s": args.sample_s, "load_average_at_start": os.getloadavg()[0],
+                 "mlx_cache_cap_mb": E.cache_limit_bytes() // 2**20}
+    _stop_daemon()
+    for stale in glob.glob(os.path.join(data, "warm", "*")):
+        os.unlink(stale)
+    # ---- the daemon alone, holding the model, a few queries served ------------------ #
+    emb = E.high_embedder(space)
+    assert isinstance(emb, D.DaemonEmbedder), type(emb)
+    for i in range(args.queries):
+        list(emb.query_embed([f"what did we decide about deploy lane {i} and its cutover"]))
+    daemon_pid = int(emb.daemon_pid)
+    idle = []
+    for _ in range(10):
+        idle.append(footprints(daemon_pid)[0])
+        time.sleep(0.5)
+    doc["daemon_before_the_build"] = {"mb": summary([x for x in idle if x is not None], "MB"),
+                                      "peak_so_far_mb": footprints(daemon_pid)[1],
+                                      "model_resident_bytes": emb.resident_bytes, "load_ms": emb.load_ms}
+    start_rows, total = _rows_embedded(hdir, memo)
+    doc["rows"] = {"in_the_twin": total, "embedded_before": start_rows}
+    _log(f"daemon {daemon_pid} idle {idle[-1]} MB; twin {start_rows}/{total}")
+    srv = Server(0, project, data, env)
+    samples: list = []
+    passes: list = []
+    t0 = time.monotonic()
+    try:
+        first = srv.prompt("what did we decide about the deploy lanes")
+        doc["server_at_its_first_prompt_mb"] = footprints(srv.proc.pid)[0]
+        doc["first_prompt"] = {"wall_ms": round(first["wall_ms"], 1), "raised": first["raised"],
+                               "served_high": bool((first["hb"].get("high") or {}).get("engaged"))}
+        last_rows, pass_start, pass_d, pass_s = start_rows, time.monotonic(), [], []
+        level_at = None
+        while time.monotonic() - t0 < args.max_s:
+            d_mb, d_peak = footprints(daemon_pid)
+            s_mb, s_peak = footprints(srv.proc.pid)
+            rows, total = _rows_embedded(hdir, memo)
+            samples.append([round(time.monotonic() - t0, 1), d_mb, s_mb, rows])
+            if d_mb is not None:
+                pass_d.append(d_mb)
+            if s_mb is not None:
+                pass_s.append(s_mb)
+            if rows != last_rows:
+                passes.append({"rows": rows - last_rows, "seconds": round(time.monotonic() - pass_start, 1),
+                               "daemon_mb_max_sampled": max(pass_d) if pass_d else None,
+                               "daemon_mb_median": round(pct(0.5)(pass_d), 1) if pass_d else None,
+                               "daemon_peak_so_far_mb": d_peak,
+                               "server_mb_max_sampled": max(pass_s) if pass_s else None,
+                               "server_peak_so_far_mb": s_peak, "load_average": os.getloadavg()[0]})
+                _log(f"pass {len(passes)}: {rows}/{total} {json.dumps(passes[-1])}")
+                last_rows, pass_start, pass_d, pass_s = rows, time.monotonic(), [], []
+            if total and rows >= total and level_at is None:
+                level_at = time.monotonic()
+            if (level_at is not None and time.monotonic() - level_at > 5) or (
+                    args.passes and len(passes) >= args.passes):
+                break
+            time.sleep(args.sample_s)
+        building = [x for x in samples if x[1] is not None]
+        doc["build"] = {
+            "seconds": round(time.monotonic() - t0, 1), "passes": passes, "level": level_at is not None,
+            "rows_embedded": last_rows - start_rows,
+            "daemon_mb": summary([x[1] for x in building], "MB"),
+            "daemon_mb_min": min(x[1] for x in building), "daemon_peak_mb": footprints(daemon_pid)[1],
+            "server_mb": summary([x[2] for x in samples if x[2] is not None], "MB"),
+            "server_mb_min": min(x[2] for x in samples if x[2] is not None),
+            "server_peak_mb": footprints(srv.proc.pid)[1],
+        }
+        # ---- after: served prompts on the finished twin, nothing building ------------ #
+        after_d, after_s, served = [], [], []
+        end = time.monotonic() + args.after_s
+        while time.monotonic() < end:
+            if level_at is not None:
+                served.append(srv.prompt(f"what did we decide about deploy lane {len(served)}"))
+            after_d.append(footprints(daemon_pid)[0])
+            after_s.append(footprints(srv.proc.pid)[0])
+            time.sleep(args.sample_s)
+        doc["after_the_build"] = {
+            "daemon_mb": summary([x for x in after_d if x is not None], "MB"),
+            "server_mb": summary([x for x in after_s if x is not None], "MB"),
+            "prompts": len(served),
+            "served_high": sum(1 for r in served if (r["hb"].get("high") or {}).get("engaged")),
+            "daemon_stats": (D.ping(path, timeout=2.0) or {}).get("stats")}
+    finally:
+        srv.close()
+    doc["samples_t_daemon_mb_server_mb_rows"] = samples
+    doc["load_average_at_end"] = os.getloadavg()[0]
+    _stop_daemon()
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1)
+    _log(f"wrote {args.out}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# two-models: sessions on different high models share one daemon
+# --------------------------------------------------------------------------- #
+def two_models(args) -> int:
+    """Two real MCP servers on one data dir, each on its own high model and project. One
+    daemon serves both, so it holds both models: its ``phys_footprint`` with the first
+    alone, with both, with the second dropped while the first stays busy, and after the idle
+    drop of everything; each server's beside it."""
+    os.environ["HIPPO_EMBED_DAEMON"] = "1"
+    data = os.path.abspath(args.data)
+    from memory.eval_metrics import load_hard_set
+
+    queries = [r["query"] for r in load_hard_set(args.queries) if r.get("query")]
+    rng = random.Random(17)
+    specs = [(os.path.abspath(args.project_a), args.model_a), (os.path.abspath(args.project_b), args.model_b)]
+    envs = [_server_env(data, project, args.idle_s, model) for project, model in specs]
+    os.environ.pop("HIPPO_HIGH_EMBED_MODEL", None)
+    from memory import embed_daemon as D
+
+    path = D.socket_path()
+    doc: dict = {"models": [args.model_a, args.model_b], "idle_s": args.idle_s,
+                 "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+                 "load_average_at_start": os.getloadavg()[0], "steps": []}
+    _stop_daemon()
+    for stale in glob.glob(os.path.join(data, "warm", "*")):
+        os.unlink(stale)
+
+    def engage(srv, timeout=900.0) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if (srv.prompt(rng.choice(queries))["hb"].get("high") or {}).get("engaged"):
+                return True
+            time.sleep(1.0)
+        return False
+
+    def step(what: str, fleet: list) -> None:
+        info = D.ping(path, timeout=2.0) or {}
+        pid = info.get("pid")
+        ds, ss = [], [[] for _ in fleet]
+        for _ in range(args.samples):
+            for i, srv in enumerate(fleet):
+                srv.prompt(rng.choice(queries))
+                ss[i].append(footprints(srv.proc.pid)[0])
+            ds.append(footprints(pid)[0] if pid else None)
+            time.sleep(0.5)
+        rec = {"what": what, "daemon_holds": info.get("loaded"), "daemons": 1 if pid else 0,
+               "daemon_mb": summary([x for x in ds if x is not None], "MB"),
+               "daemon_mb_range": [min(x for x in ds if x is not None), max(x for x in ds if x is not None)],
+               "daemon_peak_so_far_mb": footprints(pid)[1] if pid else None,
+               "server_mb_range": [[min(x for x in col if x is not None), max(x for x in col if x is not None)]
+                                   for col in ss],
+               "served_high": [bool((srv.heartbeat().get("high") or {}).get("engaged")) for srv in fleet],
+               "resident_bytes": [(srv.heartbeat().get("high") or {}).get("resident_bytes") for srv in fleet],
+               "load_ms": [(srv.heartbeat().get("high") or {}).get("load_ms") for srv in fleet]}
+        doc["steps"].append(rec)
+        _log(json.dumps(rec))
+
+    fleet: list = []
+    try:
+        fleet.append(Server(0, specs[0][0], data, envs[0]))
+        assert engage(fleet[0]), "the first server never served high"
+        step(f"one server, on {args.model_a}", fleet)
+        fleet.append(Server(1, specs[1][0], data, envs[1]))
+        assert engage(fleet[1]), "the second server never served high"
+        assert engage(fleet[0]), "the first server stopped serving high"
+        step(f"two servers, on {args.model_a} and {args.model_b}", fleet)
+        pid = (D.ping(path, timeout=2.0) or {}).get("pid")
+        # ---- only the first server prompts: the other's model goes on its own clock --- #
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < args.idle_s + 15:
+            fleet[0].prompt(rng.choice(queries))
+            time.sleep(1.0)
+        time.sleep(2.0)
+        one = D.ping(path, timeout=2.0) or {}
+        doc["after_only_the_first_server_prompted"] = {
+            "for_s": round(time.monotonic() - t0, 1), "daemon_holds": one.get("loaded"),
+            "same_process": one.get("pid") == pid, "daemon_mb": footprints(pid)[0] if pid else None,
+            "first_server_still_served_high": bool((fleet[0].heartbeat().get("high") or {}).get("engaged")),
+            "unloads": (one.get("stats") or {}).get("unloads")}
+        _log(json.dumps(doc["after_only_the_first_server_prompted"]))
+        # ---- nothing asks: every model is dropped, the process stays ----------------- #
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < args.idle_s + 120 and (D.ping(path, timeout=1.0) or {}).get("loaded"):
+            time.sleep(0.5)
+        time.sleep(2.0)
+        after = D.ping(path, timeout=2.0) or {}
+        doc["after_the_idle_drop"] = {"quiet_s": round(time.monotonic() - t0, 1), "daemon_holds": after.get("loaded"),
+                                      "same_process": after.get("pid") == pid,
+                                      "daemon_mb": footprints(pid)[0] if pid else None,
+                                      "unloads": (after.get("stats") or {}).get("unloads")}
+        _log(json.dumps(doc["after_the_idle_drop"]))
+    finally:
+        for srv in fleet:
+            srv.close()
+    _stop_daemon()
+    doc["load_average_at_end"] = os.getloadavg()[0]
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1)
     _log(f"wrote {args.out}")
@@ -701,10 +1107,45 @@ def main(argv=None) -> int:
     p.add_argument("--fault-rounds", type=int, default=3)
     p.add_argument("--hold-s", type=float, default=6.0)
     p.add_argument("--idle-s", type=float, default=60.0,
-                   help="HIPPO_EMBED_DAEMON_IDLE_S for the run (900 as shipped; short, so its exit is seen)")
+                   help="HIPPO_EMBED_DAEMON_IDLE_S for the run: the idle model drop (1,800 as shipped)")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("lifetime")
+    p.add_argument("--project", required=True, help="a scratch project whose high twin is level")
+    p.add_argument("--data", required=True, help="a scratch CLAUDE_PLUGIN_DATA with mlx and fastembed linked in")
+    p.add_argument("--queries", required=True, help="a hard-set YAML whose queries are the prompts")
+    p.add_argument("--trials", type=int, default=20)
+    p.add_argument("--idle-s", type=float, default=8.0, help="HIPPO_EMBED_DAEMON_IDLE_S for the run (1,800 as shipped)")
+    p.add_argument("--expect", choices=("drop", "exit"), default="drop",
+                   help="what the quiet daemon does: stays and drops its model (as shipped), or leaves (EMB-1's rule)")
+    p.add_argument("--settle-s", type=float, default=0.5, help="wait after it went, before the first prompt")
+    p.add_argument("--model", default="", help="HIPPO_HIGH_EMBED_MODEL for the server (default: the profile's)")
+    p.add_argument("--env", action="append", default=[], metavar="K=V", help="more environment for the server and daemon")
+    p.add_argument("--keep-daemon", action="store_true", help="use the daemon already on the socket, and leave it")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("build-memory")
+    p.add_argument("--project", required=True, help="a scratch project whose high twin is missing or behind")
+    p.add_argument("--data", required=True, help="a scratch CLAUDE_PLUGIN_DATA with mlx and fastembed linked in")
+    p.add_argument("--model", default="", help="HIPPO_HIGH_EMBED_MODEL for the server (default: the profile's)")
+    p.add_argument("--passes", type=int, default=0, help="stop after this many build passes (0: until level)")
+    p.add_argument("--max-s", type=float, default=3 * 3600.0)
+    p.add_argument("--after-s", type=float, default=30.0, help="how long to sample once the build is over")
+    p.add_argument("--sample-s", type=float, default=1.0)
+    p.add_argument("--queries", type=int, default=5, help="queries the daemon serves before the build")
+    p.add_argument("--idle-s", type=float, default=1800.0)
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("two-models")
+    p.add_argument("--project-a", required=True, help="a scratch project whose high twin is level in --model-a")
+    p.add_argument("--project-b", required=True, help="another, level in --model-b")
+    p.add_argument("--model-a", default="Qwen/Qwen3-Embedding-4B")
+    p.add_argument("--model-b", default="Qwen/Qwen3-Embedding-8B")
+    p.add_argument("--data", required=True, help="a scratch CLAUDE_PLUGIN_DATA with mlx and fastembed linked in")
+    p.add_argument("--queries", required=True, help="a hard-set YAML whose queries are the prompts")
+    p.add_argument("--samples", type=int, default=10)
+    p.add_argument("--idle-s", type=float, default=20.0, help="HIPPO_EMBED_DAEMON_IDLE_S for the run (short, so the drop is seen)")
     p.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    return {"vectors-local": vectors_local, "vectors-daemon": vectors_daemon, "servers": servers}[args.cmd](args)
+    return {"vectors-local": vectors_local, "vectors-daemon": vectors_daemon, "servers": servers,
+            "lifetime": lifetime, "build-memory": build_memory, "two-models": two_models}[args.cmd](args)
 
 
 if __name__ == "__main__":

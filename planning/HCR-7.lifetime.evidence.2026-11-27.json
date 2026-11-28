@@ -1,0 +1,1589 @@
+{
+ "item": "HCR-7: the daemon's lifetime (open call 3) and what the daemon and a building server hold",
+ "date": "2026-11-27",
+ "what_this_file_is": "Measurements taken to put HCR-7's open call (3) to the owner, the same measurements on what was then built, and the footprints README's cost paragraph had left unmeasured since the model moved into the daemon. Real models (the pinned mxfp8 snapshots), scratch copies of the corpora, real MCP servers, the owner's own sessions running beside the runs. Counts, timings and footprints only.",
+ "method": "bench/embed_daemon.py lifetime, build-memory and two-models. phys_footprint and phys_footprint_peak from `footprint <pid>`; GB here is MB / 1024. Timings carry 95% percentile-bootstrap intervals and counts 95% Wilson intervals; where a run has two or three values the values are given.",
+ "ruling": {
+  "asked": "which lifetime rule the shared embed daemon follows, and how long an unused model is kept",
+  "the_owner_chose": [
+   "(b) Reap + model drop (Recommended)",
+   "1,800 s (Recommended)"
+  ],
+  "put_as": {
+   "(a)": "keep the 900 s idle exit; no code change",
+   "(b)": "stay while a warm server on high is alive, drop the model after the idle window, exit about 60 s after the last server is gone",
+   "(c)": "only a longer idle exit: one constant, exit-only, no heartbeat reading",
+   "windows_offered_s": [
+    900,
+    1800,
+    3600
+   ]
+  }
+ },
+ "before_the_change": {
+  "code": "main at 6853282 (the daemon v1.50.0 ships; its socket's code hash 9327c91d876e): the daemon exits after HIPPO_EMBED_DAEMON_IDLE_S without a load, embed or rerank",
+  "idle_exit_8_s_window": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "exit",
+   "idle_s": 8.0,
+   "trials": 20,
+   "load_average_at_start": 7.8359375,
+   "load_average_at_end": 6.71044921875,
+   "first_prompt_served_lean": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "first_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 57.4,
+    "median_ci95": [
+     55.2,
+     63.5
+    ],
+    "p95": 71.2,
+    "p95_ci95": [
+     65.8,
+     71.2
+    ],
+    "max": 71.2
+   },
+   "first_prompt_wall_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 58.5,
+    "median_ci95": [
+     56.7,
+     64.4
+    ],
+    "p95": 76.3,
+    "p95_ci95": [
+     66.6,
+     76.3
+    ],
+    "max": 76.3
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 20,
+    "unit": "ms",
+    "median": 1854.0,
+    "median_ci95": [
+     1807.7,
+     1884.3
+    ],
+    "p95": 1999.7,
+    "p95_ci95": [
+     1932.1,
+     1999.7
+    ],
+    "max": 1999.7
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 20,
+    "unit": "ms",
+    "median": 1854.0,
+    "median_ci95": [
+     1807.7,
+     1899.3
+    ],
+    "p95": 6154.1,
+    "p95_ci95": [
+     1957.3,
+     6154.1
+    ],
+    "max": 6154.1
+   },
+   "first_high_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 180.9,
+    "median_ci95": [
+     168.3,
+     188.8
+    ],
+    "p95": 201.6,
+    "p95_ci95": [
+     194.9,
+     201.6
+    ],
+    "max": 201.6
+   },
+   "daemon_load_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 1674.7,
+    "median_ci95": [
+     1631.6,
+     1719.9
+    ],
+    "p95": 1837.7,
+    "p95_ci95": [
+     1732.0,
+     1837.7
+    ],
+    "max": 1837.7
+   },
+   "quiet_s_until_the_exit": {
+    "n": 20,
+    "unit": "s",
+    "median": 8.4,
+    "median_ci95": [
+     8.4,
+     8.4
+    ],
+    "p95": 8.5,
+    "p95_ci95": [
+     8.4,
+     8.5
+    ],
+    "max": 8.5
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 20,
+    "unit": "MB",
+    "median": 4818.0,
+    "median_ci95": [
+     4807.0,
+     4822.0
+    ],
+    "p95": 4839.0,
+    "p95_ci95": [
+     4828.0,
+     4839.0
+    ],
+    "max": 4839.0
+   },
+   "daemon_mb_after": {
+    "n": 20,
+    "unit": "MB",
+    "median": 0.0,
+    "median_ci95": [
+     0.0,
+     0.0
+    ],
+    "p95": 0.0,
+    "p95_ci95": [
+     0.0,
+     0.0
+    ],
+    "max": 0.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 1
+  },
+  "idle_exit_as_shipped_900_s": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "exit",
+   "idle_s": 900.0,
+   "trials": 2,
+   "load_average_at_start": 4.685546875,
+   "load_average_at_end": 3.45166015625,
+   "first_prompt_served_lean": {
+    "k": 2,
+    "n": 2,
+    "ci95": [
+     0.3424,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 2,
+    "ci95": [
+     0.0,
+     0.6576
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 2,
+    "ci95": [
+     0.0,
+     0.6576
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 2,
+    "n": 2,
+    "ci95": [
+     0.3424,
+     1.0
+    ]
+   },
+   "first_prompt_server_ms": {
+    "n": 2,
+    "unit": "ms",
+    "median": 85.3,
+    "median_ci95": [
+     34.0,
+     85.3
+    ],
+    "p95": 85.3,
+    "p95_ci95": [
+     34.0,
+     85.3
+    ],
+    "max": 85.3
+   },
+   "first_prompt_wall_ms": {
+    "n": 2,
+    "unit": "ms",
+    "median": 86.0,
+    "median_ci95": [
+     34.4,
+     86.0
+    ],
+    "p95": 86.0,
+    "p95_ci95": [
+     34.4,
+     86.0
+    ],
+    "max": 86.0
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 2,
+    "unit": "ms",
+    "median": 2550.9,
+    "median_ci95": [
+     1893.5,
+     2550.9
+    ],
+    "p95": 2550.9,
+    "p95_ci95": [
+     1893.5,
+     2550.9
+    ],
+    "max": 2550.9
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 2,
+    "unit": "ms",
+    "median": 2551.0,
+    "median_ci95": [
+     1893.5,
+     2551.0
+    ],
+    "p95": 2551.0,
+    "p95_ci95": [
+     1893.5,
+     2551.0
+    ],
+    "max": 2551.0
+   },
+   "first_high_prompt_server_ms": {
+    "n": 2,
+    "unit": "ms",
+    "median": 133.2,
+    "median_ci95": [
+     121.6,
+     133.2
+    ],
+    "p95": 133.2,
+    "p95_ci95": [
+     121.6,
+     133.2
+    ],
+    "max": 133.2
+   },
+   "daemon_load_ms": {
+    "n": 2,
+    "unit": "ms",
+    "median": 2349.9,
+    "median_ci95": [
+     1773.4,
+     2349.9
+    ],
+    "p95": 2349.9,
+    "p95_ci95": [
+     1773.4,
+     2349.9
+    ],
+    "max": 2349.9
+   },
+   "quiet_s_until_the_exit": {
+    "n": 2,
+    "unit": "s",
+    "median": 902.2,
+    "median_ci95": [
+     902.0,
+     902.2
+    ],
+    "p95": 902.2,
+    "p95_ci95": [
+     902.0,
+     902.2
+    ],
+    "max": 902.2
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 2,
+    "unit": "MB",
+    "median": 4824.0,
+    "median_ci95": [
+     4808.0,
+     4824.0
+    ],
+    "p95": 4824.0,
+    "p95_ci95": [
+     4808.0,
+     4824.0
+    ],
+    "max": 4824.0
+   },
+   "daemon_mb_after": {
+    "n": 2,
+    "unit": "MB",
+    "median": 0.0,
+    "median_ci95": [
+     0.0,
+     0.0
+    ],
+    "p95": 0.0,
+    "p95_ci95": [
+     0.0,
+     0.0
+    ],
+    "max": 0.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 0,
+   "query_faults_in_the_run": 0
+  },
+  "idle_exit_as_shipped_900_s_each_trial": [
+   {
+    "quiet_s_until_the_exit": 902.2,
+    "first_server_ms": 85.3,
+    "first_served_high": false,
+    "model_back_ms_after_the_first_prompt_was_sent": 2550.9,
+    "daemon_load_ms": 2349.9
+   },
+   {
+    "quiet_s_until_the_exit": 902.0,
+    "first_server_ms": 34.0,
+    "first_served_high": false,
+    "model_back_ms_after_the_first_prompt_was_sent": 1893.5,
+    "daemon_load_ms": 1773.4
+   }
+  ],
+  "a_fresh_daemons_first_query_failed": {
+   "k": 1,
+   "n": 22,
+   "what": "one freshly spawned daemon of 22 (20 with the 8 s window, 2 with 900 s) answered its first query with a Metal error (the shader compiler service could not be reached); that prompt was served lean, the server held high off 4 s, and the first prompt served high was sent 6.2 s after the idle exit's prompt instead of about 1.9 s"
+  },
+  "a_model_drop_without_an_exit": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "drop",
+   "idle_s": 8.0,
+   "trials": 20,
+   "load_average_at_start": 7.359375,
+   "load_average_at_end": 5.880859375,
+   "first_prompt_served_lean": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "first_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 44.7,
+    "median_ci95": [
+     40.9,
+     49.7
+    ],
+    "p95": 61.8,
+    "p95_ci95": [
+     52.0,
+     61.8
+    ],
+    "max": 61.8
+   },
+   "first_prompt_wall_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 45.3,
+    "median_ci95": [
+     41.6,
+     50.4
+    ],
+    "p95": 62.5,
+    "p95_ci95": [
+     53.0,
+     62.5
+    ],
+    "max": 62.5
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 20,
+    "unit": "ms",
+    "median": 493.9,
+    "median_ci95": [
+     444.2,
+     505.7
+    ],
+    "p95": 545.3,
+    "p95_ci95": [
+     515.3,
+     545.3
+    ],
+    "max": 545.3
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 20,
+    "unit": "ms",
+    "median": 493.9,
+    "median_ci95": [
+     444.2,
+     505.7
+    ],
+    "p95": 545.4,
+    "p95_ci95": [
+     515.3,
+     545.4
+    ],
+    "max": 545.4
+   },
+   "first_high_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 204.0,
+    "median_ci95": [
+     188.4,
+     208.3
+    ],
+    "p95": 287.3,
+    "p95_ci95": [
+     224.1,
+     287.3
+    ],
+    "max": 287.3
+   },
+   "daemon_load_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 464.0,
+    "median_ci95": [
+     418.2,
+     471.3
+    ],
+    "p95": 498.8,
+    "p95_ci95": [
+     477.1,
+     498.8
+    ],
+    "max": 498.8
+   },
+   "quiet_s_until_the_drop": {
+    "n": 20,
+    "unit": "s",
+    "median": 8.2,
+    "median_ci95": [
+     8.2,
+     8.3
+    ],
+    "p95": 8.3,
+    "p95_ci95": [
+     8.3,
+     8.3
+    ],
+    "max": 8.3
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 20,
+    "unit": "MB",
+    "median": 4860.0,
+    "median_ci95": [
+     4856.0,
+     4869.0
+    ],
+    "p95": 4885.0,
+    "p95_ci95": [
+     4870.0,
+     4885.0
+    ],
+    "max": 4885.0
+   },
+   "daemon_mb_after": {
+    "n": 20,
+    "unit": "MB",
+    "median": 199.0,
+    "median_ci95": [
+     195.0,
+     204.0
+    ],
+    "p95": 210.0,
+    "p95_ci95": [
+     206.0,
+     210.0
+    ],
+    "max": 210.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 0,
+   "query_faults_in_the_run": 0,
+   "what": "a scratch prototype, not hippo code: main's daemon with its idle exit replaced by dropping the models and staying; measured to put option (b) to the owner"
+  },
+  "replay_of_recall_timestamps": {
+   "what": "machine-wide recall events (every project log found), replayed against an idle window; a model of the daemon's activity, not a measurement of it: it assumes every recall is a warm prompt on high and ignores index builds",
+   "projects": 7,
+   "window_hours": 56.6,
+   "events": 805,
+   "sessions": 98,
+   "gaps": 804,
+   "windows": {
+    "900": {
+     "prompts_arriving_after_the_model_went": 24,
+     "of": 804,
+     "share": 0.0299,
+     "ci95": [
+      0.0201,
+      0.044
+     ],
+     "hours_the_model_is_held": 29.6,
+     "share_of_the_window_held": 0.523,
+     "if_each_session_were_alone": {
+      "k": 196,
+      "n": 707,
+      "share": 0.2772,
+      "ci95": [
+       0.2455,
+       0.3114
+      ],
+      "hours_held": 86.7,
+      "hours_between_first_and_last_prompt": 358.7
+     }
+    },
+    "1800": {
+     "prompts_arriving_after_the_model_went": 10,
+     "of": 804,
+     "share": 0.0124,
+     "ci95": [
+      0.0068,
+      0.0227
+     ],
+     "hours_the_model_is_held": 33.2,
+     "share_of_the_window_held": 0.586,
+     "if_each_session_were_alone": {
+      "k": 105,
+      "n": 707,
+      "share": 0.1485,
+      "ci95": [
+       0.1242,
+       0.1766
+      ],
+      "hours_held": 123.1,
+      "hours_between_first_and_last_prompt": 358.7
+     }
+    },
+    "3600": {
+     "prompts_arriving_after_the_model_went": 5,
+     "of": 804,
+     "share": 0.0062,
+     "ci95": [
+      0.0027,
+      0.0145
+     ],
+     "hours_the_model_is_held": 36.6,
+     "share_of_the_window_held": 0.646,
+     "if_each_session_were_alone": {
+      "k": 52,
+      "n": 707,
+      "share": 0.0736,
+      "ci95": [
+       0.0565,
+       0.0952
+      ],
+      "hours_held": 162.5,
+      "hours_between_first_and_last_prompt": 358.7
+     }
+    },
+    "7200": {
+     "prompts_arriving_after_the_model_went": 3,
+     "of": 804,
+     "share": 0.0037,
+     "ci95": [
+      0.0013,
+      0.0109
+     ],
+     "hours_the_model_is_held": 40.1,
+     "share_of_the_window_held": 0.708,
+     "if_each_session_were_alone": {
+      "k": 29,
+      "n": 707,
+      "share": 0.041,
+      "ci95": [
+       0.0287,
+       0.0583
+      ],
+      "hours_held": 199.3,
+      "hours_between_first_and_last_prompt": 358.7
+     }
+    }
+   },
+   "read": "With every session sharing the daemon, few prompts arrive after the model went; a session alone on its machine meets a gone model on a quarter of its prompts at 900 s."
+  }
+ },
+ "as_built": {
+  "what": "heartbeat reaping, an idle model drop on each model's own clock (1,800 s as shipped), a served call refused at once when the model is not held, and a daemon whose model keeps failing leaves",
+  "lifetime_8_s_window": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "drop",
+   "idle_s": 8.0,
+   "grace_s": 60.0,
+   "trials": 20,
+   "load_average_at_start": 5.9248046875,
+   "load_average_at_end": 16.14013671875,
+   "first_prompt_served_lean": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.1611
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 20,
+    "n": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ]
+   },
+   "daemon_left_s_after_the_last_server_closed": 60.1,
+   "first_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 48.0,
+    "median_ci95": [
+     44.0,
+     68.7
+    ],
+    "p95": 110.4,
+    "p95_ci95": [
+     76.2,
+     110.4
+    ],
+    "max": 110.4
+   },
+   "first_prompt_wall_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 48.6,
+    "median_ci95": [
+     44.7,
+     71.3
+    ],
+    "p95": 113.5,
+    "p95_ci95": [
+     80.1,
+     113.5
+    ],
+    "max": 113.5
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 20,
+    "unit": "ms",
+    "median": 485.1,
+    "median_ci95": [
+     448.8,
+     539.5
+    ],
+    "p95": 748.1,
+    "p95_ci95": [
+     555.9,
+     748.1
+    ],
+    "max": 748.1
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 20,
+    "unit": "ms",
+    "median": 485.1,
+    "median_ci95": [
+     448.8,
+     539.5
+    ],
+    "p95": 748.1,
+    "p95_ci95": [
+     556.0,
+     748.1
+    ],
+    "max": 748.1
+   },
+   "first_high_prompt_server_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 171.7,
+    "median_ci95": [
+     166.8,
+     194.1
+    ],
+    "p95": 596.7,
+    "p95_ci95": [
+     206.9,
+     596.7
+    ],
+    "max": 596.7
+   },
+   "daemon_load_ms": {
+    "n": 20,
+    "unit": "ms",
+    "median": 452.4,
+    "median_ci95": [
+     421.2,
+     481.2
+    ],
+    "p95": 692.5,
+    "p95_ci95": [
+     492.2,
+     692.5
+    ],
+    "max": 692.5
+   },
+   "quiet_s_until_the_drop": {
+    "n": 20,
+    "unit": "s",
+    "median": 8.2,
+    "median_ci95": [
+     8.2,
+     8.3
+    ],
+    "p95": 8.4,
+    "p95_ci95": [
+     8.3,
+     8.4
+    ],
+    "max": 8.4
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 20,
+    "unit": "MB",
+    "median": 4859.0,
+    "median_ci95": [
+     4853.0,
+     4871.0
+    ],
+    "p95": 4888.0,
+    "p95_ci95": [
+     4874.0,
+     4888.0
+    ],
+    "max": 4888.0
+   },
+   "daemon_mb_after": {
+    "n": 20,
+    "unit": "MB",
+    "median": 199.0,
+    "median_ci95": [
+     194.0,
+     203.0
+    ],
+    "p95": 209.0,
+    "p95_ci95": [
+     206.0,
+     209.0
+    ],
+    "max": 209.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 0,
+   "query_faults_in_the_run": 0,
+   "code": "this change, before its Server class moved to a file of its own (the same statements)"
+  },
+  "lifetime_as_shipped_1800_s": {
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "expect": "drop",
+   "idle_s": 1800.0,
+   "grace_s": 60.0,
+   "trials": 1,
+   "load_average_at_start": 5.02099609375,
+   "load_average_at_end": 61.9365234375,
+   "first_prompt_served_lean": {
+    "k": 1,
+    "n": 1,
+    "ci95": [
+     0.2065,
+     1.0
+    ]
+   },
+   "first_prompt_raised": {
+    "k": 0,
+    "n": 1,
+    "ci95": [
+     0.0,
+     0.7935
+    ]
+   },
+   "breaker_tripped": {
+    "k": 0,
+    "n": 1,
+    "ci95": [
+     0.0,
+     0.7935
+    ]
+   },
+   "first_prompt_answered_with_a_block": {
+    "k": 1,
+    "n": 1,
+    "ci95": [
+     0.2065,
+     1.0
+    ]
+   },
+   "daemon_left_s_after_the_last_server_closed": 60.0,
+   "first_prompt_server_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 97.3,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 97.3,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 97.3
+   },
+   "first_prompt_wall_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 106.8,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 106.8,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 106.8
+   },
+   "model_back_ms_after_the_first_prompt_was_sent": {
+    "n": 1,
+    "unit": "ms",
+    "median": 992.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 992.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 992.2
+   },
+   "first_high_prompt_sent_ms_after_the_first": {
+    "n": 1,
+    "unit": "ms",
+    "median": 992.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 992.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 992.2
+   },
+   "first_high_prompt_server_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 176.7,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 176.7,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 176.7
+   },
+   "daemon_load_ms": {
+    "n": 1,
+    "unit": "ms",
+    "median": 963.0,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 963.0,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 963.0
+   },
+   "quiet_s_until_the_drop": {
+    "n": 1,
+    "unit": "s",
+    "median": 1800.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 1800.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 1800.2
+   },
+   "daemon_mb_holding_the_model": {
+    "n": 1,
+    "unit": "MB",
+    "median": 4805.2,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 4805.2,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 4805.2
+   },
+   "daemon_mb_after": {
+    "n": 1,
+    "unit": "MB",
+    "median": 154.0,
+    "median_ci95": [
+     null,
+     null
+    ],
+    "p95": 154.0,
+    "p95_ci95": [
+     null,
+     null
+    ],
+    "max": 154.0
+   },
+   "trials_with_a_prompt_served_lean_after_the_model_was_back": 0,
+   "query_faults_in_the_run": 0,
+   "code": "this change before an explicit recall's retry was added to the reranker's client; the daemon and the served path are the same statements",
+   "each_trial": [
+    {
+     "quiet_s_until_the_drop": 1800.2,
+     "daemon_mb_after": 154.0,
+     "first_server_ms": 97.3,
+     "first_served_high": false,
+     "model_back_ms_after_the_first_prompt_was_sent": 992.2,
+     "daemon_load_ms": 963.0
+    }
+   ]
+  },
+  "a_daemon_that_lost_metals_compiler": {
+   "what": "the first daemon started for the as-built run answered every query with a Metal error (its compiler service unreachable) while it held the model and answered ready(): 6 queries of 6 failed over about two minutes, every prompt was served lean, none raised, no breaker trip, and nothing restarted the process. The run was stopped; the daemon left by itself once its server was gone. A probe of Metal from the same shell, in the foreground and detached as the daemon is, compiled a kernel both times, and no daemon started afterwards failed. This change's daemon leaves after three failed passes in a row; that rule was written after this was seen and has a test with a fake, not a real-weights run.",
+   "queries_failed": 6,
+   "of": 6,
+   "prompts_raised": 0,
+   "breaker_trips": 0
+  }
+ },
+ "build_memory": {
+  "what": "one real MCP server on high builds a project's high/ twin from nothing through the daemon; both processes' phys_footprint sampled every second, and the kernel's own peak for each",
+  "code": {
+   "corpus_c_4b": "main at 6853282 (the daemon v1.50.0 ships; its socket's code hash 9327c91d876e)",
+   "hippo_4b": "main at 6853282 (the daemon v1.50.0 ships; its socket's code hash 9327c91d876e)",
+   "hippo_8b": "this change, before its Server class moved to a file of its own (the same statements)",
+   "note": "the embedding path and the server's build loop are the same statements in both"
+  },
+  "corpus_c_4b": {
+   "corpus": "corpus-c",
+   "memories": 1070,
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+   "mlx_cache_cap_mb": 512,
+   "sample_every_s": 1.0,
+   "load_average": [
+    3.5,
+    4.5
+   ],
+   "index_rows_embedded": 3778,
+   "document_rows_through_the_daemon": 6657,
+   "build_seconds": 2495.6,
+   "passes": 15,
+   "pass_seconds": [
+    319.2,
+    830.1,
+    311.5,
+    316.5,
+    108.2,
+    60.0,
+    56.8,
+    51.5,
+    43.0,
+    49.4,
+    55.9,
+    75.3,
+    77.3,
+    77.5,
+    57.1
+   ],
+   "level": true,
+   "daemon_gb": {
+    "holding_the_model_before_the_build": 4.32,
+    "building_median": 6.01,
+    "building_median_ci95_mb": [
+     6153.0,
+     6155.0
+    ],
+    "building_p95": 6.28,
+    "building_p95_ci95_mb": [
+     6428.0,
+     6439.0
+    ],
+    "building_sampled_max": 6.4,
+    "samples": 2337,
+    "highest_sample_of_each_pass": [
+     6.11,
+     6.39,
+     6.4,
+     6.37,
+     6.32,
+     6.37,
+     6.38,
+     6.33,
+     6.34,
+     6.32,
+     6.37,
+     6.35,
+     6.36,
+     6.36,
+     6.35
+    ],
+    "peak_phys_footprint_peak": 6.49,
+    "after_the_build_median": 5.14,
+    "after_the_build_median_ci95_mb": [
+     5262.0,
+     5273.0
+    ],
+    "after_the_build_max": 5.16
+   },
+   "building_server_gb": {
+    "at_its_first_prompt": 0.49,
+    "lowest_sample": 0.49,
+    "building_median": 0.85,
+    "highest_sample_of_each_pass": [
+     0.59,
+     0.9,
+     0.87,
+     0.98,
+     1.15,
+     1.22,
+     1.42,
+     1.53,
+     1.66,
+     1.83,
+     1.88,
+     2.1,
+     2.21,
+     2.37,
+     2.41
+    ],
+    "peak_phys_footprint_peak_while_building": 2.46,
+    "after_the_build_median": 4.43,
+    "after_the_build_max": 6.89,
+    "prompts_served_after_the_build": 39,
+    "of_those_served_high": 31
+   }
+  },
+  "hippo_4b": {
+   "corpus": "hippo",
+   "memories": 108,
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+   "mlx_cache_cap_mb": 512,
+   "sample_every_s": 1.0,
+   "load_average": [
+    5.3,
+    4.4
+   ],
+   "index_rows_embedded": 380,
+   "document_rows_through_the_daemon": 380,
+   "build_seconds": 305.6,
+   "passes": 2,
+   "pass_seconds": [
+    253.3,
+    45.8
+   ],
+   "level": true,
+   "daemon_gb": {
+    "holding_the_model_before_the_build": 4.32,
+    "building_median": 5.62,
+    "building_median_ci95_mb": [
+     5760.0,
+     5845.0
+    ],
+    "building_p95": 5.92,
+    "building_p95_ci95_mb": [
+     6042.0,
+     6090.0
+    ],
+    "building_sampled_max": 6.03,
+    "samples": 287,
+    "highest_sample_of_each_pass": [
+     6.0,
+     6.03
+    ],
+    "peak_phys_footprint_peak": 6.07,
+    "after_the_build_median": 4.77,
+    "after_the_build_median_ci95_mb": [
+     4885.0,
+     4890.0
+    ],
+    "after_the_build_max": 4.8
+   },
+   "building_server_gb": {
+    "at_its_first_prompt": 0.31,
+    "lowest_sample": 0.29,
+    "building_median": 0.31,
+    "highest_sample_of_each_pass": [
+     0.34,
+     0.34
+    ],
+    "peak_phys_footprint_peak_while_building": 0.34,
+    "after_the_build_median": 0.35,
+    "after_the_build_max": 0.44,
+    "prompts_served_after_the_build": 15,
+    "of_those_served_high": 15
+   }
+  },
+  "hippo_8b": {
+   "corpus": "hippo",
+   "memories": 108,
+   "space": "Qwen/Qwen3-Embedding-8B",
+   "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+   "mlx_cache_cap_mb": 512,
+   "sample_every_s": 1.0,
+   "load_average": [
+    8.3,
+    3.4
+   ],
+   "index_rows_embedded": 380,
+   "document_rows_through_the_daemon": 380,
+   "build_seconds": 250.3,
+   "passes": 2,
+   "pass_seconds": [
+    165.7,
+    78.5
+   ],
+   "level": true,
+   "daemon_gb": {
+    "holding_the_model_before_the_build": 7.63,
+    "building_median": 9.1,
+    "building_median_ci95_mb": [
+     9298.0,
+     9327.0
+    ],
+    "building_p95": 9.21,
+    "building_p95_ci95_mb": [
+     9415.0,
+     9439.0
+    ],
+    "building_sampled_max": 9.29,
+    "samples": 232,
+    "highest_sample_of_each_pass": [
+     9.29,
+     9.28
+    ],
+    "peak_phys_footprint_peak": 9.37,
+    "after_the_build_median": 8.16,
+    "after_the_build_median_ci95_mb": [
+     8344.0,
+     8360.0
+    ],
+    "after_the_build_max": 8.17
+   },
+   "building_server_gb": {
+    "at_its_first_prompt": 0.3,
+    "lowest_sample": 0.29,
+    "building_median": 0.3,
+    "highest_sample_of_each_pass": [
+     0.34,
+     0.34
+    ],
+    "peak_phys_footprint_peak_while_building": 0.34,
+    "after_the_build_median": 0.41,
+    "after_the_build_max": 0.51,
+    "prompts_served_after_the_build": 14,
+    "of_those_served_high": 14
+   }
+  },
+  "corpus_c_4b_after_the_memo_fix": {
+   "corpus": "corpus-c",
+   "memories": 1070,
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+   "mlx_cache_cap_mb": 512,
+   "sample_every_s": 1.0,
+   "load_average": [
+    26.2,
+    19.2
+   ],
+   "index_rows_embedded": 3778,
+   "document_rows_through_the_daemon": 6657,
+   "build_seconds": 3195.3,
+   "passes": 15,
+   "pass_seconds": [
+    499.4,
+    1069.8,
+    369.4,
+    445.9,
+    138.3,
+    73.3,
+    72.0,
+    71.0,
+    47.8,
+    57.0,
+    69.5,
+    82.5,
+    70.9,
+    68.9,
+    51.5
+   ],
+   "level": true,
+   "daemon_gb": {
+    "holding_the_model_before_the_build": 4.32,
+    "building_median": 6.0,
+    "building_median_ci95_mb": [
+     6141.6,
+     6143.8
+    ],
+    "building_p95": 6.26,
+    "building_p95_ci95_mb": [
+     6407.0,
+     6417.3
+    ],
+    "building_sampled_max": 6.38,
+    "samples": 2672,
+    "highest_sample_of_each_pass": [
+     6.09,
+     6.36,
+     6.34,
+     6.32,
+     6.37,
+     6.34,
+     6.36,
+     6.34,
+     6.38,
+     6.36,
+     6.34,
+     6.35,
+     6.37,
+     6.37,
+     6.29
+    ],
+    "peak_phys_footprint_peak": 6.57,
+    "after_the_build_median": 5.12,
+    "after_the_build_median_ci95_mb": [
+     5245.9,
+     5250.8
+    ],
+    "after_the_build_max": 5.16
+   },
+   "building_server_gb": {
+    "at_its_first_prompt": 0.49,
+    "lowest_sample": 0.4,
+    "building_median": 0.61,
+    "highest_sample_of_each_pass": [
+     0.58,
+     0.74,
+     0.62,
+     0.63,
+     0.63,
+     0.62,
+     0.63,
+     0.63,
+     0.64,
+     0.63,
+     0.64,
+     0.65,
+     0.64,
+     0.64,
+     0.64
+    ],
+    "peak_phys_footprint_peak_while_building": 0.77,
+    "after_the_build_median": 0.49,
+    "after_the_build_max": 0.49,
+    "prompts_served_after_the_build": 120,
+    "of_those_served_high": 120
+   },
+   "code": "this change with recall_warm_high.fresh holding its pair by weak reference; the daemon as built",
+   "note": "taken beside heavy load of the owner's own (load average 2 to 168), so the build took 53 minutes"
+  },
+  "read": "The build's buffers are in the daemon: about 2 GB over the model for either model, back to within 0.8 GB of the idle figure after. The building server is small on a small corpus; on corpus-c it was not until the memo fix (the_server_keeps_every_index_it_loaded), and is 0.49 to 0.77 GB with it."
+ },
+ "two_models_in_one_daemon": {
+  "models": [
+   "Qwen/Qwen3-Embedding-4B",
+   "Qwen/Qwen3-Embedding-8B"
+  ],
+  "idle_s": 20.0,
+  "steps": [
+   {
+    "what": "one server, on Qwen/Qwen3-Embedding-4B",
+    "daemon_holds": [
+     "Qwen/Qwen3-Embedding-4B"
+    ],
+    "daemons": 1,
+    "daemon_mb": {
+     "n": 10,
+     "unit": "MB",
+     "median": 4807.1,
+     "median_ci95": [
+      4806.7,
+      4811.3
+     ],
+     "p95": 4815.9,
+     "p95_ci95": [
+      4807.6,
+      4815.9
+     ],
+     "max": 4815.9
+    },
+    "daemon_mb_range": [
+     4806.2,
+     4815.9
+    ],
+    "daemon_peak_so_far_mb": 5169.2,
+    "server_mb_range": [
+     [
+      363.0,
+      483.2
+     ]
+    ],
+    "served_high": [
+     true
+    ],
+    "resident_bytes": [
+     4148542464
+    ],
+    "load_ms": [
+     1891.2
+    ]
+   },
+   {
+    "what": "two servers, on Qwen/Qwen3-Embedding-4B and Qwen/Qwen3-Embedding-8B",
+    "daemon_holds": [
+     "Qwen/Qwen3-Embedding-4B",
+     "Qwen/Qwen3-Embedding-8B"
+    ],
+    "daemons": 1,
+    "daemon_mb": {
+     "n": 10,
+     "unit": "MB",
+     "median": 12283.4,
+     "median_ci95": [
+      12266.7,
+      12299.2
+     ],
+     "p95": 12304.9,
+     "p95_ci95": [
+      12284.4,
+      12304.9
+     ],
+     "max": 12304.9
+    },
+    "daemon_mb_range": [
+     12265.5,
+     12304.9
+    ],
+    "daemon_peak_so_far_mb": 12605.9,
+    "server_mb_range": [
+     [
+      509.4,
+      632.6
+     ],
+     [
+      373.0,
+      520.5
+     ]
+    ],
+    "served_high": [
+     true,
+     true
+    ],
+    "resident_bytes": [
+     4148542464,
+     7804284928
+    ],
+    "load_ms": [
+     1891.2,
+     1117.6
+    ]
+   }
+  ],
+  "after_only_the_first_server_prompted": {
+   "for_s": 37.6,
+   "daemon_holds": [
+    "Qwen/Qwen3-Embedding-4B"
+   ],
+   "same_process": true,
+   "daemon_mb": 4637.3,
+   "first_server_still_served_high": true,
+   "unloads": 1
+  },
+  "after_the_idle_drop": {
+   "quiet_s": 19.3,
+   "daemon_holds": [],
+   "same_process": true,
+   "daemon_mb": 166.8,
+   "unloads": 2
+  },
+  "code": "this change, before its Server class moved to a file of its own (the same statements)",
+  "load_average": [
+   4.5,
+   4.3
+  ],
+  "read": "Two sessions on different models make one daemon hold both. The model nobody asks for is dropped on its own clock while the other stays busy (a 20 s window for the run)."
+ },
+ "the_server_keeps_every_index_it_loaded": {
+  "status": "found while measuring; FIXED in the same pull request on the owner's word (\"Yes, fix it here\")",
+  "fix": "the memo holds the (lean, high) pair by weak reference and forgets it when either index is gone; a pair that stays loaded is still compared once",
+  "with_the_fix": {
+   "on_corpus_c_the_building_server_gb": "0.49 at its first prompt, 0.58 to 0.74 as each pass's highest sample (median 0.61, peak 0.77), 0.49 through 120 prompts after (all served high)",
+   "ten_ticks_of_refresh_tier_on_the_level_twin_growth_mb": [
+    104,
+    107,
+    111,
+    112,
+    114,
+    116,
+    119,
+    120,
+    122,
+    124
+   ]
+  },
+  "where": "recall_warm_high.fresh (its memo holds every (lean, high) pair it was asked about, up to 65) and refresh_tier (loads both afresh every 30 s and on every served prompt's wake)",
+  "before_the_fix_on_corpus_c_the_building_server_gb": "0.49 at its first prompt, 2.41 by the last of 15 passes, 4.43 median and 6.89 at most in the minute of 39 prompts after",
+  "repro_in_a_test_process_no_model": {
+   "corpus": "corpus-c",
+   "eight_loads_of_the_pair_through_fresh_growth_mb": [
+    128,
+    231,
+    333,
+    435,
+    538,
+    640,
+    742,
+    845
+   ],
+   "the_same_with_the_memo_cleared_each_time_mb": [
+    1,
+    4,
+    5,
+    4,
+    5,
+    5,
+    5,
+    5
+   ],
+   "ten_ticks_of_refresh_tier_on_the_level_twin_growth_mb": [
+    166,
+    306,
+    445,
+    585,
+    724,
+    863,
+    1003,
+    1142,
+    1281,
+    1421
+   ]
+  },
+  "on_hippo": "the same server stayed under 0.45 GB with the 4B and under 0.52 GB with the 8B"
+ },
+ "also_seen_not_changed": [
+  "A high/ build embeds the corpus's digest sections through the big model: 2,879 of the 6,657 document rows of corpus-c's build, about 8 of its 42 minutes (its second pass took 830 s where its neighbours took 312 to 319 s), into a sub-index under high/ that recall does not read. Fixed since in pull request 267; the saving was not re-measured."
+ ],
+ "tests": {
+  "new": "tests/test_embed_daemon_lifetime.py: 18, each seen failing before the code it holds (14 on main; 2 before the failed-passes rule; 1 before the per-model clock; 1 before the explicit recall's retry)",
+  "changed_with_the_rule_they_held": "three tests of tests/test_embed_daemon.py and two fixtures (the idle exit became the grace; a warm rerank is loaded before it is asked for)",
+  "memo": "tests/test_embed_mlx.py: three tests for the freshness memo, two of them failing before the fix",
+  "ran": "the test files the change reaches (named in the pull request), after the rebase onto pull request 267, 37 files: 950 passed, 3 skipped, with a short temp path as Linux CI has"
+ },
+ "not_run": [
+  "A quiet machine: every timing was taken beside the owner's live sessions (load average 2 to 16 in the timed runs, 62 at the end of the 1,800 s one).",
+  "The full test suite.",
+  "The failed-passes rule, the busy refusal for a model dropped between ready() and the query, and the explicit recall's retry, on real weights: tests with fakes cover the three.",
+  "A warm prompt with HIPPO_RERANK=1 after a drop, on real weights.",
+  "The 8B on corpus-c, and an 8B server's footprint on a large corpus.",
+  "Byte-identity and QUA-6 through the daemon were not taken again: the embedding path is unchanged (planning/HCR-7.evidence.2026-11-27.json)."
+ ]
+}

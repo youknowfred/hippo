@@ -300,28 +300,38 @@ Ranking, filtering, trust checks and the injection budget are the same code on a
 Silicon Mac, MLX not installed, weights not fetched, a model that failed to load, a `high/` index
 still catching up after the corpus changed, and warm recall being off. It also covers the daemon:
 not running yet, still loading, too busy to answer in time, or gone in the middle of a call. That
-one prompt is served `lean` and the session carries on; the first prompt after the daemon's idle
-exit is such a prompt, and it brings the daemon back for the next. A rerank that runs past its
-time limit keeps the order it was given. None of these raises or blocks a prompt, recall never
-downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
+one prompt is served `lean` and the session carries on; the first prompt after the daemon dropped
+a model nobody had used for a while is such a prompt, and it brings the model back for the next. A
+rerank that runs past its time limit keeps the order it was given. None of these raises or blocks a
+prompt, recall never downloads, and `/hippo:doctor`'s retrieval-profile line says which of them
+applies.
 
 **Cost.** No money and no network once the weights are on disk. Memory is the cost: one copy of the
-embedder (4.1 GB of unified memory, measured) in a daemon every session's warm server shares, which
-exits after 15 idle minutes (`HIPPO_EMBED_DAEMON_IDLE_S`). The warm reranker (0.6 GB) loads into
-the same daemon, once, when `HIPPO_RERANK=1` is on or the first time `/hippo:recall` or the MCP
-`recall` tool asks for it. The embedder loads in about 2 seconds from a warm disk cache (about 5
-seconds for the first load after a reboot) and the reranker in under half a second. While a warm
-server builds or refreshes its `high/` index it holds 2 to 2.5 GB more (6.0 to 6.5 GB, peaking at
-6.8, measured on a 1,070-memory corpus), and MLX's cache of freed buffers is capped at 512 MB
-(`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build. A first build costs
-about a second per memory. One session builds a project's index at a time, in passes that are kept,
-so closing a session mid-build loses little.
+embedder (4.1 GB of unified memory, measured) in a daemon every session's warm server shares. The
+daemon drops a model nobody has asked for in 30 minutes (`HIPPO_EMBED_DAEMON_IDLE_S`) and keeps
+about 0.2 GB itself while a session is open; a minute after the last session's warm server has
+gone, it exits. The warm reranker (0.6 GB) loads into the same daemon, once, when `HIPPO_RERANK=1`
+is on or the first time `/hippo:recall` or the MCP `recall` tool asks for it. The embedder loads in
+about 2 seconds into a new daemon from a warm disk cache (about 5 seconds for the first load after
+a reboot) and in about half a second into one that had dropped it; the reranker loads in under half
+a second. While a session builds or refreshes its `high/` index the build's buffers are in the
+daemon, not in the session: the daemon held 5.7 to 6.4 GB through the build of a 1,070-memory
+corpus, peaking at 6.6 (4.3 GB before the build, 5.1 GB after it), and MLX's cache of freed buffers
+is capped at 512 MB (`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build.
+A warm server itself holds 0.3 to 0.6 GB on a corpus of about a hundred memories; on the
+1,070-memory corpus the server doing the build held 0.4 to 0.8 GB through it and 0.5 GB after. A
+first build took two to three seconds per memory (5 minutes for 108 memories; 42 minutes for
+1,070, about 8 of them on digest-section rows a build no longer embeds). One session builds a
+project's index at a time, in passes that are kept, so closing a session mid-build loses little.
 
 **The 8B.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model` in the
 plugin's `model.json`) selects Qwen3-Embedding-8B instead; set it before the fetch step so the
-right weights come down (7.8 GB). It holds 7.8 GB per warm server and recalls about half as
-fast. On hippo's corpus it finds more in plain recall (34 of 38) and no more than the 4B on the
-paths `high` serves, which is why the 4B is the default
+right weights come down (7.8 GB). The daemon holds 7.6 GB with it loaded and 9.1 to 9.3 GB while
+an index builds (peak 9.4, measured on a 108-memory corpus); the warm server beside it holds what
+it does with the 4B. It recalls about half as fast. Sessions on different models share the one
+daemon, which then holds both (12.0 GB measured with the 4B and the 8B) until the one nobody is
+using has sat out the 30 minutes. On hippo's corpus it finds more in plain recall (34 of 38) and no
+more than the 4B on the paths `high` serves, which is why the 4B is the default
 ([planning/HCR-6.8b.evidence.2026-11-25.json](planning/HCR-6.8b.evidence.2026-11-25.json)).
 
 **Why not a retrieval platform.** hippo has looked twice at adopting TrustGraph and said no both

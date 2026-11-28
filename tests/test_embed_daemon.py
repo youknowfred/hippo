@@ -46,6 +46,7 @@ def daemon_env(monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
     monkeypatch.delenv(D.ENABLE_ENV, raising=False)
     monkeypatch.setenv(D.IDLE_ENV, "60")
+    monkeypatch.setenv(D.GRACE_ENV, "60")
     monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
     path = D.socket_path()
     assert path.startswith(data)
@@ -105,13 +106,15 @@ def test_vectors_round_trip_and_documents_differ_from_queries(daemon_env):
     assert list(emb.embed([])) == []
 
 
-def test_an_idle_daemon_exits_and_a_served_call_brings_it_back(daemon_env, monkeypatch):
-    monkeypatch.setenv(D.IDLE_ENV, "0.5")
+def test_a_daemon_with_nobody_left_exits_and_a_served_call_brings_it_back(daemon_env, monkeypatch):
+    """HCR-7's eleventh ruling: no live warm server on high (there is no heartbeat here) and
+    nothing asked for the grace. EMB-1's rule was 900 idle seconds whoever was alive."""
+    monkeypatch.setenv(D.GRACE_ENV, "0.5")
     emb = D.DaemonEmbedder(_SPACE, _DIM)
     first = emb.daemon_pid
     E._LOADED[_SPACE] = emb
     try:
-        assert _wait(lambda: not os.path.exists(daemon_env)), "the idle daemon never left"
+        assert _wait(lambda: not os.path.exists(daemon_env)), "the daemon nobody uses never left"
         assert _wait(lambda: not _alive(first))
         t0 = time.monotonic()
         with pytest.raises(B.DenseUnavailable):
@@ -125,8 +128,8 @@ def test_an_idle_daemon_exits_and_a_served_call_brings_it_back(daemon_env, monke
         E._LOADED.pop(_SPACE, None)
 
 
-def test_pings_do_not_keep_an_idle_daemon_alive(daemon_env, monkeypatch):
-    monkeypatch.setenv(D.IDLE_ENV, "1")
+def test_pings_do_not_keep_a_daemon_nobody_uses_alive(daemon_env, monkeypatch):
+    monkeypatch.setenv(D.GRACE_ENV, "1")
     D.DaemonEmbedder(_SPACE, _DIM)
     end = time.monotonic() + 10
     while os.path.exists(daemon_env) and time.monotonic() < end:
@@ -287,6 +290,8 @@ def test_a_reranker_still_scoring_answers_busy_to_another_session(tmp_path):
     try:
         srv.bind()
         threading.Thread(target=srv.serve_forever, daemon=True).start()
+        # Loaded first, as every client does: a warm rerank never waits on a load (HCR-7).
+        assert D.request(path, {"op": "rerank_load", "model": _RR})[0]["ok"]
         req = {"op": "rerank", "model": _RR, "query": "q", "docs": ["a", "b"]}
         first = []
         t = threading.Thread(target=lambda: first.append(D.request(path, req)))

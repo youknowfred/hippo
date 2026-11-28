@@ -11,20 +11,33 @@ session's server swaps only its embedder object for a client of the daemon
 before.
 
   - **Where.** ``<CLAUDE_PLUGIN_DATA>/embedd/<code>.sock``, the directory 0700 and the
-    socket 0600. ``<code>`` hashes this file and ``embed_mlx.py``, so a session still running
+    socket 0600. ``<code>`` hashes the embedding code (``code_id``), so a session still running
     an older hippo after an update gets its own daemon, never vectors from other embedding
     code.
   - **One daemon.** It holds an exclusive ``flock`` on ``<code>.lock`` for its whole life.
     Two spawns that race both start; the one that cannot take the lock exits.
   - **Writes nothing** but its log. Index builds are the sessions' own, under IDX-1 and
     HCR-9's per-twin build lock; the daemon only turns texts into vectors.
-  - **Idle exit.** No load, embed or rerank for ``HIPPO_EMBED_DAEMON_IDLE_S`` seconds (default
-    900): it unlinks its socket and exits, and the memory goes back to the machine. A ping
-    is not activity.
-  - **When it dies** (idle exit, crash, kill): a client's next call fails fast, the client
-    marks itself not alive, ``embed_mlx.loaded`` reads None and the warm server serves lean,
-    its existing degrade. The next served call asks the ``hippo-high`` thread to respawn
-    the daemon and reload, off the serving path.
+  - **It reaps itself** (HCR-7; the owner's eleventh ruling, 2026-11-27). It stays while a
+    warm server on the high profile is alive (``recall_warm.server_states``: a heartbeat
+    with a ``high`` record and a live pid). ``HIPPO_EMBED_DAEMON_GRACE_S`` (60) after the
+    last of them is gone, with nothing in flight, it unlinks its socket and exits. A caller
+    with no heartbeat (a bench, the CLI) keeps it for that grace after each request, and
+    an explicit recall that finds it gone brings it back and asks again.
+  - **An idle model is dropped; the process stays.** A model nobody asked to load, embed or
+    rerank with for ``HIPPO_EMBED_DAEMON_IDLE_S`` seconds (default 1,800) is released and
+    MLX's buffers handed back; with none left the daemon keeps listening at about 0.2 GB
+    (measured 2026-11-27: 195 to 210 MB; the next load takes about 0.5 s, against 1.9 s
+    for a fresh process). Each model has its own clock, so one a single session loaded
+    once goes even while other sessions keep another busy. A ping is not activity, and no
+    drop runs under a request.
+  - **A model that keeps failing ends the daemon.** Three passes in a row that raise (not a
+    caller that stopped waiting, not a load that cannot start) and it exits, so the next
+    call starts a fresh process instead of asking a broken one for days.
+  - **When the model is gone** (dropped, or the daemon exited, crashed or was killed): a
+    served prompt finds out before it attempts high (``DaemonEmbedder.ready``), the warm
+    server serves that prompt lean, its existing degrade, and the ``hippo-high`` thread
+    brings the daemon or the model back, off the serving path.
   - **The reranker too** (EMB-2). The warm Qwen3-Reranker (``rerank_mlx``) loads here once,
     not in every server that served an explicit ``recall`` or ran with ``HIPPO_RERANK`` on.
     HCR-4's rule that a reranker still scoring an earlier call answers "busy" at once (the
@@ -39,7 +52,9 @@ before.
     that time (``busy``) and never runs one whose wait ran out while it queued. A query the
     daemon did not answer marks the prompt's ``attempt``; ``recall_warm`` then throws the
     high attempt away whole and serves the prompt lean, and the time is not charged to the
-    session's breaker. Without the mark a fault served BM25 over the high index.
+    session's breaker. Without the mark a fault served BM25 over the high index. A served
+    query or a warm rerank that reaches a daemon without its model (dropped a moment ago)
+    is refused at once the same way, and the load starts behind it: no prompt waits on one.
   - **A build's pass is one request** (HCR-7), so the daemon cuts the same token slices the
     in-process embedder would and the rows are the same bytes (a batch changes a vector's
     last bits by itself; measured 2026-11-27). A build whose session ended stops at its
@@ -54,20 +69,31 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import select
 import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 ENABLE_ENV = "HIPPO_EMBED_DAEMON"
 IDLE_ENV = "HIPPO_EMBED_DAEMON_IDLE_S"
-DEFAULT_IDLE_S = 900.0
+GRACE_ENV = "HIPPO_EMBED_DAEMON_GRACE_S"
+# HCR-7, the eleventh ruling. Replaying 56 hours of one machine's recall timestamps (805
+# prompts, 98 sessions): were each session alone, 28% of its prompts would arrive more than
+# 900 s after its last one (EMB-1's window), 15% after 1,800 s, 7% after 3,600 s; with every
+# session sharing the daemon, 3.0%, 1.2% and 0.6%. Such a prompt is lean whatever the rule.
+DEFAULT_IDLE_S = 1800.0  # no load, embed or rerank for this long: drop the models, keep listening
+DEFAULT_GRACE_S = 60.0  # no live warm server on high and nothing in flight for this long: exit
+_LIVE_EVERY_S = 5.0  # how often the heartbeats are read
+# A model that raised on this many passes in a row, with none succeeding between: the daemon
+# leaves and the next call starts a fresh one. Seen 2026-11-27: Metal's compiler service gone
+# for one daemon process, which then failed six queries of six while holding the model and
+# answering ready(). EMB-1's idle exit ended such a process within a quiet 15 minutes; one
+# that stays for as long as a session is open would keep every session on lean for days.
+_BROKEN_AFTER = 3
 DIRNAME = "embedd"
 _MAX_LINE = 256 * 2**20  # a request is texts: one build pass of whole memories, at most
 _CONNECT_S = 2.0
@@ -102,20 +128,28 @@ def enabled() -> bool:
     return (os.environ.get(ENABLE_ENV) or "").strip().lower() not in ("0", "off", "false", "no")
 
 
-def idle_seconds() -> float:
+def _positive_seconds(name: str, default: float) -> float:
     try:
-        v = float((os.environ.get(IDLE_ENV) or "").strip() or DEFAULT_IDLE_S)
+        v = float((os.environ.get(name) or "").strip() or default)
     except ValueError:
-        return DEFAULT_IDLE_S
-    return v if v > 0 else DEFAULT_IDLE_S
+        return default
+    return v if v > 0 else default
+
+
+def idle_seconds() -> float:
+    return _positive_seconds(IDLE_ENV, DEFAULT_IDLE_S)
+
+
+def grace_seconds() -> float:
+    return _positive_seconds(GRACE_ENV, DEFAULT_GRACE_S)
 
 
 def code_id() -> str:
-    """Hash of the code that turns text into vectors or scores: this file, ``embed_mlx.py``
-    and ``rerank_mlx.py``."""
+    """Hash of the code that turns text into vectors or scores: this file and its server
+    half, ``embed_mlx.py`` and ``rerank_mlx.py``."""
     h = hashlib.sha256()
     here = os.path.dirname(os.path.abspath(__file__))
-    for name in ("embed_mlx.py", "embed_daemon.py", "rerank_mlx.py"):
+    for name in ("embed_mlx.py", "embed_daemon.py", "embed_daemon_server.py", "rerank_mlx.py"):
         try:
             with open(os.path.join(here, name), "rb") as fh:
                 h.update(fh.read())
@@ -298,9 +332,9 @@ class DaemonEmbedder:
 
     def ready(self) -> bool:
         """HCR-7: the daemon answers and holds this space's model, asked by a served call
-        before it attempts high. No answer in 150 ms, or a daemon without the model (a fresh
-        one another session started): not alive, so this prompt is lean and the
-        ``hippo-high`` thread brings it back."""
+        before it attempts high. No answer in 150 ms, or a daemon without the model (it
+        dropped it while idle, or it is a fresh one another session started): not alive, so
+        this prompt is lean and the ``hippo-high`` thread brings it back."""
         info = ping(self.path, timeout=_READY_S)
         if info is None or self.space not in (info.get("loaded") or []):
             self.alive = False
@@ -410,302 +444,41 @@ class DaemonReranker:
             timeout = min(timeout, mark.deadline - time.monotonic())
             if timeout <= 0:
                 raise RerankUnavailable("no time left in this prompt's budget for the embed daemon")
+        req = {"op": "rerank", "model": self.model_id, "wait_s": wait,
+               "query": str(query), "docs": [str(d) for d in docs]}
         try:
-            hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id, "wait_s": wait,
-                                         "query": str(query), "docs": [str(d) for d in docs]}, timeout)
+            hdr, _ = request(self.path, req, timeout)
         except (OSError, ValueError) as exc:
             self.alive = False
-            raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc
+            if not explicit_surface():
+                raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc
+            # An explicit surface (a 15 s bound) may load, so it brings the daemon back and
+            # asks once more. With no warm server on high (warm recall off, the CLI) the
+            # daemon leaves a grace after each request; without this every recall that came
+            # later than the grace lost its rerank.
+            try:
+                self.revive()
+                hdr, _ = request(self.path, req, timeout)
+            except (OSError, ValueError, RuntimeError) as again:
+                self.alive = False
+                raise RerankUnavailable(f"the shared embed daemon is gone ({again})") from again
         if not hdr.get("ok"):
             raise RerankUnavailable(str(hdr.get("error") or "rerank failed"))
         return [float(x) for x in hdr.get("scores") or []]
 
 
 # --------------------------------------------------------------------------- #
-# Server
+# Server: in ``embed_daemon_server`` (the module-size cap), reached from here as before
 # --------------------------------------------------------------------------- #
-class _Unavailable(RuntimeError):
-    def __init__(self, msg: str, reason: str) -> None:
-        super().__init__(msg)
-        self.reason = reason
+_SERVER_NAMES = frozenset({"Server", "_Unavailable", "_live_servers", "_release_mlx_memory", "_try_send"})
 
 
-class Server:
-    def __init__(self, path: str, backend: Callable[[str, int, str], object], idle_s: float,
-                 rerank_backend: Optional[Callable[[str, str], object]] = None) -> None:
-        self.path, self.backend, self.idle_s = path, backend, idle_s
-        self.rerank_backend = rerank_backend
-        self.models: Dict[str, object] = {}
-        self.rerankers: Dict[str, object] = {}
-        self.loads = 0
-        self.rerank_loads = 0
-        self._scoring: Dict[str, threading.Lock] = {}  # model -> held while it scores
-        self._load_lock = threading.Lock()
-        # One document request at a time. The embedder feeds its one MLX thread slice by
-        # slice, so a query queues behind at most one slice of ONE build, as it did inside a
-        # single session's server. Measured without it: four sessions building at once held a
-        # query for up to 4.3 s, past the warm path's 1.5 s budget.
-        self._doc_lock = threading.Lock()
-        self._lock = threading.Lock()
-        # HCR-7: queries take turns too, so one whose caller's wait ran out while it queued
-        # is never run, and a query that cannot be finished in time is refused at once.
-        self._query_turn = threading.Lock()
-        self._queries = 0  # let in and not finished: waiting for the turn, or embedding
-        self._pass_s = _FIRST_PASS_S  # how long one query pass has been taking
-        self.stats = {"queries": 0, "busy": 0, "expired": 0, "doc_rows": 0, "doc_abandoned": 0}
-        self._inflight = 0
-        self._last = time.monotonic()
-        self._sock: Optional[socket.socket] = None
-        self._ino: Optional[int] = None
+def __getattr__(name: str):
+    if name in _SERVER_NAMES:
+        from . import embed_daemon_server
 
-    def _model(self, space: str):
-        from . import embed_mlx as E
-
-        with self._load_lock:
-            hit = self.models.get(space)
-            if hit is not None:
-                return hit
-            parsed = E.parse_space(space)
-            if parsed is None:
-                raise _Unavailable(f"unknown embedding space {space!r}", "model_mismatch")
-            model, dim = parsed
-            why = E.unavailable_reason(model)
-            if why:
-                raise _Unavailable(why, "model_not_warmed")
-            emb = self.backend(model, dim, E.snapshot_dir(model))
-            self.models[space] = emb
-            self.loads += 1
-            return emb
-
-    def _reranker(self, model: str):
-        from . import rerank_mlx as R
-
-        with self._load_lock:
-            hit = self.rerankers.get(model)
-            if hit is not None:
-                return hit
-            if model not in R.RERANK_MODELS or self.rerank_backend is None:
-                raise _Unavailable(f"not a high reranker: {model!r}", "error")
-            why = R.unavailable_reason(model)
-            if why:
-                raise _Unavailable(why, "model_not_warmed")
-            rr = self.rerank_backend(model, R.snapshot_dir(model))
-            self.rerankers[model] = rr
-            self._scoring[model] = threading.Lock()
-            self.rerank_loads += 1
-            return rr
-
-    def _rerank(self, conn: socket.socket, op: str, req: dict) -> None:
-        model = str(req.get("model") or "")
-        rr = self._reranker(model)
-        if op == "rerank_load":
-            _send(conn, {"ok": True, "pid": os.getpid(), "load_ms": getattr(rr, "load_ms", None),
-                         "resident_bytes": getattr(rr, "resident_bytes", None)})
-            return
-        busy = self._scoring[model]
-        try:
-            wait = min(max(float(req.get("wait_s") or 0.0), 0.0), _EXPLICIT_WAIT_S)
-        except (TypeError, ValueError):
-            wait = 0.0
-        if not (busy.acquire(timeout=wait) if wait else busy.acquire(blocking=False)):
-            raise _Unavailable(f"{model} is still scoring an earlier call", "busy")
-        try:
-            scores = [float(x) for x in rr.score(str(req.get("query") or ""),
-                                                 [str(d) for d in (req.get("docs") or [])])]
-        finally:
-            busy.release()
-        _send(conn, {"ok": True, "scores": scores})
-
-    def _busy(self, delta: int) -> None:
-        with self._lock:
-            self._inflight += delta
-            self._last = time.monotonic()
-
-    def _handle(self, conn: socket.socket) -> None:
-        try:
-            conn.settimeout(_DOC_S)
-            req = _readline(conn.makefile("rb"))
-            op = req.get("op")
-            if op == "ping":
-                _send(conn, {"ok": True, "pid": os.getpid(), "code": code_id(),
-                             "loaded": sorted(self.models), "loads": self.loads,
-                             "rerankers": sorted(self.rerankers), "rerank_loads": self.rerank_loads,
-                             "stats": dict(self.stats), "pass_ms": round(self._pass_s * 1000.0, 1)})
-                return
-            if op in ("rerank_load", "rerank"):
-                self._busy(1)
-                try:
-                    self._rerank(conn, op, req)
-                finally:
-                    self._busy(-1)
-                return
-            if op not in ("load", "embed", "query"):
-                _send(conn, {"ok": False, "error": f"unknown op {op!r}", "reason": "error"})
-                return
-            self._busy(1)
-            try:
-                emb = self._model(str(req.get("space") or ""))
-                if op == "load":
-                    _send(conn, {"ok": True, "pid": os.getpid(), "load_ms": getattr(emb, "load_ms", None),
-                                 "resident_bytes": getattr(emb, "resident_bytes", None)})
-                    return
-                import numpy as np
-
-                texts = [str(t) for t in (req.get("texts") or [])]
-                if op == "query":
-                    vecs = self._query(emb, texts, req.get("wait_ms"))
-                else:
-                    vecs = self._documents(conn, emb, texts)
-                    if vecs is None:
-                        return  # the session that asked is gone; nobody reads a reply
-                mat = (np.stack(vecs) if vecs else np.zeros((0, 1))).astype("<f4")
-                _send(conn, {"ok": True, "n": int(mat.shape[0]), "dim": int(mat.shape[1])}, mat.tobytes())
-            finally:
-                self._busy(-1)
-        except _Unavailable as exc:
-            _try_send(conn, {"ok": False, "error": str(exc), "reason": exc.reason})
-        except Exception as exc:  # one bad request never takes the daemon down
-            _try_send(conn, {"ok": False, "error": f"{type(exc).__name__}: {exc}", "reason": "error"})
-        finally:
-            conn.close()
-
-    def _query(self, emb, texts: List[str], wait_ms) -> list:
-        """HCR-7: one query pass at a time, in turn. ``wait_ms`` is how long the caller will
-        wait (a served prompt; None waits as long as it takes). Refused at once (``busy``)
-        when the passes ahead, at what a pass has been taking, would outlast it; with nothing
-        ahead it is always let in, which is how that estimate recovers. Not run
-        (``expired``) when the wait ran out while it queued, for the turn or behind a build's
-        slice on the MLX thread."""
-        from .embed_mlx import _GIVEN_UP, EmbedAbandoned
-
-        try:
-            deadline = None if wait_ms is None else time.monotonic() + max(0.0, float(wait_ms)) / 1000.0
-        except (TypeError, ValueError):
-            deadline = None
-        with self._lock:
-            ahead = self._queries
-            if ahead and deadline is not None and time.monotonic() + (ahead + 1) * self._pass_s > deadline:
-                self.stats["busy"] += 1
-                raise _Unavailable(f"busy: {ahead} query pass(es) ahead at {self._pass_s * 1000:.0f} ms each", "busy")
-            self._queries += 1
-        try:
-            left = -1 if deadline is None else max(0.0, deadline - time.monotonic())
-            if not (self._query_turn.acquire(timeout=left) if left else self._query_turn.acquire(blocking=False)):
-                self.stats["expired"] += 1
-                raise _Unavailable("expired before it reached the model", "expired")
-            gone = threading.Event()
-            timer = None
-            if deadline is not None:
-                timer = threading.Timer(max(0.0, deadline - time.monotonic()), gone.set)
-                timer.daemon = True
-                timer.start()
-            token = _GIVEN_UP.set(gone)  # the embedder drops a slice whose caller stopped waiting
-            t0 = time.monotonic()
-            try:
-                if gone.is_set():
-                    raise EmbedAbandoned()
-                vecs = list(emb.query_embed(texts))
-            except EmbedAbandoned:
-                self.stats["expired"] += 1
-                raise _Unavailable("expired before it reached the model", "expired") from None
-            finally:
-                _GIVEN_UP.reset(token)
-                if timer is not None:
-                    timer.cancel()
-                self._query_turn.release()
-            took = time.monotonic() - t0  # a wait behind a build's slice is part of it
-            self._pass_s = took if took < self._pass_s else 0.5 * (self._pass_s + took)
-            self.stats["queries"] += len(texts)
-            return vecs
-        finally:
-            with self._lock:
-                self._queries -= 1
-
-    def _documents(self, conn: socket.socket, emb, texts: List[str]) -> Optional[list]:
-        """One build pass (HCR-7: the whole pass, one request). None when the session that
-        sent it hung up: nothing is sent after the request, so a readable socket means
-        exactly that, and the embedder stops at its next slice instead of finishing a pass
-        nobody will read."""
-        from .embed_mlx import _GIVEN_UP, EmbedAbandoned
-
-        gone, done = threading.Event(), threading.Event()
-
-        def watch() -> None:
-            while not done.wait(0.5):
-                try:
-                    readable, _, _ = select.select([conn], [], [], 0)
-                    if readable and conn.recv(1, socket.MSG_PEEK) == b"":
-                        gone.set()
-                        return
-                except (OSError, ValueError):
-                    gone.set()
-                    return
-
-        threading.Thread(target=watch, daemon=True).start()
-        try:
-            while not self._doc_lock.acquire(timeout=0.5):
-                if gone.is_set():
-                    self.stats["doc_abandoned"] += 1
-                    return None
-            token = _GIVEN_UP.set(gone)
-            try:
-                vecs = list(emb.embed(texts))
-            except EmbedAbandoned:
-                self.stats["doc_abandoned"] += 1
-                return None
-            finally:
-                _GIVEN_UP.reset(token)
-                self._doc_lock.release()
-            self.stats["doc_rows"] += len(texts)
-            return vecs
-        finally:
-            done.set()
-
-    def _idle(self) -> bool:
-        with self._lock:
-            return self._inflight == 0 and time.monotonic() - self._last > self.idle_s
-
-    def bind(self) -> None:
-        if os.path.exists(self.path):
-            os.unlink(self.path)  # stale: we hold the lock, so no live daemon owns it
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        old = os.umask(0o177)
-        try:
-            s.bind(self.path)
-        finally:
-            os.umask(old)
-        os.chmod(self.path, 0o600)
-        s.listen(64)
-        s.settimeout(0.5)
-        self._sock, self._ino = s, os.stat(self.path).st_ino
-
-    def serve_forever(self) -> None:
-        assert self._sock is not None
-        try:
-            while not self._idle():
-                try:
-                    conn, _ = self._sock.accept()
-                except socket.timeout:
-                    continue
-                threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
-        finally:
-            self.close()
-
-    def close(self) -> None:
-        try:
-            if self._ino is not None and os.stat(self.path).st_ino == self._ino:
-                os.unlink(self.path)  # first, so a new client spawns a successor
-        except OSError:
-            pass
-        if self._sock is not None:
-            self._sock.close()
-
-
-def _try_send(conn: socket.socket, obj: dict) -> None:
-    try:
-        _send(conn, obj)
-    except OSError:
-        pass
+        return getattr(embed_daemon_server, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _take_lock(path: str, wait_s: float = 5.0):
@@ -788,14 +561,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .rerank_mlx import _MLXReranker
 
         backend, rerank_backend = _MLXEmbedder, _MLXReranker
-    srv = Server(args.socket, backend, idle_seconds(), rerank_backend)
+    from .embed_daemon_server import Server
+
+    srv = Server(args.socket, backend, idle_seconds(), rerank_backend, grace_seconds())
     srv.bind()
     sys.stderr.write(f"[hippo-embedd] pid {os.getpid()} serving {args.socket}\n")
     sys.stderr.flush()
     try:
         srv.serve_forever()
     finally:
-        sys.stderr.write(f"[hippo-embedd] pid {os.getpid()} exiting (idle)\n")
+        why = "its model keeps failing" if srv._broken else "no warm server on high is left"
+        sys.stderr.write(f"[hippo-embedd] pid {os.getpid()} exiting ({why})\n")
         lock.close()
     return 0
 
