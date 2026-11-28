@@ -764,7 +764,7 @@ def test_a_warm_server_serves_high_through_the_shared_daemon_and_survives_its_lo
         first = hb["daemon_pid"]
         assert hb["engaged"] is True and first != os.getpid() and hb["resident_bytes"] == 1234
 
-        os.kill(first, signal.SIGKILL)  # the daemon goes (an idle exit looks the same)
+        os.kill(first, signal.SIGKILL)  # the daemon goes (its own leave looks the same)
         end = time.time() + 5
         while D.ping() is not None and time.time() < end:
             time.sleep(0.02)

@@ -31,8 +31,9 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
 
 Each session's MCP server is its own process. EMB-1: the model itself lives in one shared
 daemon per user (``embed_daemon``); each server holds a client of it, so N sessions hold one
-copy of the weights. When the daemon goes (idle exit, crash) the client reads as not loaded,
-served calls go lean, and the next one asks this thread to bring it back.
+copy of the weights. When the daemon drops its idle model or goes (no warm server left, a
+crash) the client reads as not loaded, served calls go lean, and the next one asks this thread
+to bring it back.
 """
 
 from __future__ import annotations
@@ -312,7 +313,7 @@ def _revive(emb) -> None:
     revive = getattr(emb, "revive", None)
     if revive is None or getattr(emb, "alive", True):
         return
-    _ST.status, _ST.reason = "loading", "the shared embed daemon is restarting"
+    _ST.status, _ST.reason = "loading", "the shared embed daemon is bringing the model back"
     try:
         revive()
         _note_loaded(emb)
@@ -480,9 +481,9 @@ def _plan(lean_load) -> Optional[Dict[str, object]]:
         plan[index_dir] = high
     if not plan:
         return None
-    # HCR-7: asked last, once everything else says high would serve. A daemon that went
-    # since the last call (its idle exit, a crash) is found here, before the attempt, so
-    # this prompt is lean rather than BM25 over the high index, and the thread revives it.
+    # HCR-7: asked last, once everything else says high would serve. A daemon that dropped
+    # its idle model or went since the last call is found here, before the attempt, so this
+    # prompt is lean rather than BM25 over the high index, and the thread brings it back.
     ready = getattr(loaded(space), "ready", None)
     if ready is not None and not ready():
         _ST.revive = True
@@ -504,8 +505,8 @@ def _reset_for_tests() -> None:
 
 def _daemon_state() -> str:
     """HCR-7 (the owner's fourth condition: doctor names the daemon's state). One clause from
-    the daemon itself, asked on its socket: not running, running with nothing loaded, or what
-    it holds. Never starts one. "" when this process's high models do not come from the daemon
+    the daemon itself, asked on its socket: not running, running with nothing loaded yet,
+    running with its idle model dropped, or what it holds. Never starts one. "" when this process's high models do not come from the daemon
     (a backend put in ``embed_mlx.BACKEND``, or the daemon turned off)."""
     try:
         from . import embed_daemon as D
@@ -519,6 +520,9 @@ def _daemon_state() -> str:
     if info is None:
         return "embed daemon not running (the next warm prompt on high is served lean and starts it)"
     held = list(info.get("loaded") or []) + list(info.get("rerankers") or [])
+    if not held and (info.get("stats") or {}).get("unloads"):
+        return (f"embed daemon running (pid {info.get('pid')}), dropped its model after sitting unused "
+                "(the next warm prompt on high is served lean and reloads it)")
     if not held:
         return f"embed daemon running (pid {info.get('pid')}), no model loaded yet"
     return f"embed daemon running (pid {info.get('pid')}), holding {', '.join(held)}: the one copy on this machine"

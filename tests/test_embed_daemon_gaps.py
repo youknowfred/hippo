@@ -99,7 +99,7 @@ def _daemon(backend=_Model, idle_s=60.0):
     """The real server on a thread, at the socket this process's clients resolve."""
     path = D.socket_path()
     D._private_dir(os.path.dirname(path))
-    srv = D.Server(path, backend, idle_s)
+    srv = D.Server(path, backend, idle_s, grace_s=600.0)  # it ends when the test ends it
     srv.bind()
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
@@ -117,7 +117,7 @@ def high(fakes, project, model, monkeypatch):  # noqa: F811
     short = tempfile.mkdtemp(prefix="hd")  # a short data dir: the socket's main path
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", short)
     monkeypatch.delenv(D.ENABLE_ENV, raising=False)
-    monkeypatch.setenv(D.IDLE_ENV, "20")  # a daemon a revive started after teardown leaves by itself
+    monkeypatch.setenv(D.GRACE_ENV, "20")  # a daemon a revive started after teardown leaves by itself
     monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
     monkeypatch.setattr(E, "BACKEND", E._default_backend)
     monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
@@ -173,12 +173,12 @@ def _assert_lean_untripped(sid, out, events_before, p):
 
 
 # --------------------------------------------------------------------------- #
-# Gap 1: the daemon is gone (its idle exit, a crash, a kill) when the prompt arrives
+# Gap 1: the daemon is gone (nobody was left, a crash, a kill) when the prompt arrives
 # --------------------------------------------------------------------------- #
 def test_the_first_prompt_after_the_daemon_goes_is_served_lean(high):
     with _daemon():
         _engage(high)
-    assert D.ping() is None  # gone, as after HIPPO_EMBED_DAEMON_IDLE_S without a call
+    assert D.ping() is None  # gone, as a grace after the last warm server on high
     before = len(_events(high))
     asked = len(_Model.made[0].queries)
     out = _serve_warm("s3", "p3", _ASK)

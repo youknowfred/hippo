@@ -98,7 +98,7 @@ def daemon(tmp_path, monkeypatch):
     monkeypatch.delenv(D.ENABLE_ENV, raising=False)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)  # CI's hermetic lane exports it
     monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
-    monkeypatch.setenv(D.IDLE_ENV, "20")  # a fake daemon the hippo-high thread revives late does not linger
+    monkeypatch.setenv(D.GRACE_ENV, "20")  # a fake daemon the hippo-high thread revives late does not linger
     monkeypatch.setattr(E, "unavailable_reason", lambda model: None)
     for allow in (True, False):
         B._MODEL_CACHE[(B.DEFAULT_MODEL, allow)] = _FakeLean()
@@ -108,7 +108,7 @@ def daemon(tmp_path, monkeypatch):
     H._reset_for_tests()
     path = D.socket_path()
     D._private_dir(os.path.dirname(path))
-    srv = D.Server(path, _Backend, idle_s=600.0)
+    srv = D.Server(path, _Backend, idle_s=600.0, grace_s=600.0)  # it ends when the test ends it
     srv.bind()
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
@@ -131,8 +131,8 @@ def daemon(tmp_path, monkeypatch):
 
 
 def _stop(srv, thread=None):
-    """End the thread daemon the way it ends itself: idle."""
-    srv.idle_s, srv._last = 0.0, 0.0
+    """End the thread daemon the way it ends itself: nobody left to serve."""
+    srv._idle = lambda: True
     if thread is not None:
         thread.join(30)
 
@@ -271,7 +271,7 @@ def _lean_untripped(sid, out):
 
 def test_the_first_prompt_after_the_daemon_went_is_lean_not_bm25_over_high(daemon, project, monkeypatch):
     _serve_high(project, monkeypatch)
-    _stop(daemon)  # its idle exit: nobody has noticed yet, the client still reads alive
+    _stop(daemon)  # it left: nobody has noticed yet, the client still reads alive
     _until(lambda: D.ping(daemon.path, timeout=0.3) is None, what="the daemon to leave")
     assert E.loaded(_SPACE) is not None
     before = len(_events(project))
