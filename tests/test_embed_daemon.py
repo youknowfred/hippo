@@ -224,3 +224,112 @@ def test_a_query_waits_for_one_document_batch_not_every_sessions_build(tmp_path)
             os.unlink(path)
         except OSError:
             pass
+
+
+# --------------------------------------------------------------------------- #
+# EMB-2: the reranker in the same daemon
+# --------------------------------------------------------------------------- #
+from memory import rerank_mlx as R  # noqa: E402
+
+_RR = R.WARM_MODEL
+
+_RERANK_SESSION = textwrap.dedent("""
+    import sys
+    from memory import embed_daemon as D
+    D.SPAWN_ARGS = ["--fake"]
+    rr = D.DaemonReranker(sys.argv[1])
+    print(rr.daemon_pid, rr.score("zebra canary lane", ["zebra canary", "llama billing"]))
+""")
+
+
+def test_n_sessions_share_one_reranker_load(daemon_env):
+    env = dict(os.environ, PYTHONPATH=_PLUGIN)
+    procs = [subprocess.Popen([sys.executable, "-c", _RERANK_SESSION, _RR], env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             for _ in range(5)]
+    outs = [p.communicate(timeout=60) for p in procs]
+    assert all(p.returncode == 0 for p in procs), [o[1] for o in outs]
+    assert len({o[0].split(" ", 1)[0] for o in outs}) == 1
+    assert len({o[0].split(" ", 1)[1] for o in outs}) == 1
+    info = D.ping(daemon_env)
+    assert info["rerank_loads"] == 1 and info["rerankers"] == [_RR] and info["loads"] == 0
+
+
+def test_the_embedder_and_the_reranker_share_one_daemon(daemon_env):
+    emb = D.DaemonEmbedder(_SPACE, _DIM)
+    rr = D.DaemonReranker(_RR)
+    assert emb.daemon_pid == rr.daemon_pid and rr.resident_bytes == 567
+    s = rr.score("zebra canary lane", ["zebra canary lane", "llama billing"])
+    assert s[0] > s[1]
+    info = D.ping(daemon_env)
+    assert info["loads"] == 1 and info["rerank_loads"] == 1
+
+
+def test_a_reranker_still_scoring_answers_busy_to_another_session(tmp_path):
+    """HCR-4's fail-fast rule, across sessions: a second scoring never queues behind one."""
+    import threading
+
+    started = threading.Event()
+
+    class Slow:
+        def __init__(self, *a):
+            self.load_ms = self.resident_bytes = None
+
+        def score(self, query, docs):
+            started.set()
+            time.sleep(0.4)
+            return [1.0 for _ in docs]
+
+    path = tempfile.mktemp(prefix="hr", suffix=".sock")
+    srv = D.Server(path, None, idle_s=60, rerank_backend=Slow)
+    orig = R.unavailable_reason
+    R.unavailable_reason = lambda model: None
+    try:
+        srv.bind()
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        req = {"op": "rerank", "model": _RR, "query": "q", "docs": ["a", "b"]}
+        first = []
+        t = threading.Thread(target=lambda: first.append(D.request(path, req)))
+        t.start()
+        assert started.wait(5)
+        t0 = time.monotonic()
+        hdr, _ = D.request(path, req)
+        assert hdr["ok"] is False and hdr["reason"] == "busy" and time.monotonic() - t0 < 0.3
+        t.join()
+        assert first[0][0] == {"ok": True, "scores": [1.0, 1.0]}
+    finally:
+        R.unavailable_reason = orig
+        srv._idle = lambda: True
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_a_gone_daemon_keeps_the_fused_order_and_a_served_call_revives_it(daemon_env, monkeypatch):
+    monkeypatch.setattr(R, "unavailable_reason", lambda model: None)
+    R._reset_for_tests()
+    try:
+        R.reranker(_RR)  # an explicit surface's first use: loads through the daemon
+        first = R.status(_RR)["daemon_pid"]
+        _kill(daemon_env)
+        assert _wait(lambda: D.ping(daemon_env) is None)
+        t0 = time.monotonic()
+        with pytest.raises(R.RerankUnavailable):
+            R.loaded(_RR).score("zebra", ["zebra"])
+        assert time.monotonic() - t0 < 2.0 and R.loaded(_RR) is None
+        with pytest.raises(R.RerankUnavailable):
+            R.score(_RR, "zebra", ["zebra"])  # the warm path: fused order, no load on the call
+        R.start_loading(_RR)  # what the next served call's kick does
+        assert _wait(lambda: R.loaded(_RR) is not None)
+        assert R.status(_RR)["daemon_pid"] != first
+        assert R.score(_RR, "zebra lane", ["zebra lane", "llama"])[0] == 1.0
+    finally:
+        R._reset_for_tests()
+
+
+def test_off_switch_loads_the_reranker_in_process(monkeypatch):
+    made = []
+    monkeypatch.setattr(R, "_MLXReranker", lambda *a: made.append(a) or "in-process")
+    monkeypatch.setenv(D.ENABLE_ENV, "0")
+    assert R._default_backend(_RR, "/snap") == "in-process" and made

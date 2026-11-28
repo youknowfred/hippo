@@ -18,14 +18,19 @@ before.
     Two spawns that race both start; the one that cannot take the lock exits.
   - **Writes nothing** but its log. Index builds are the sessions' own, under IDX-1 and
     HCR-9's per-twin build lock; the daemon only turns texts into vectors.
-  - **Idle exit.** No load or embed for ``HIPPO_EMBED_DAEMON_IDLE_S`` seconds (default
+  - **Idle exit.** No load, embed or rerank for ``HIPPO_EMBED_DAEMON_IDLE_S`` seconds (default
     900): it unlinks its socket and exits, and the memory goes back to the machine. A ping
     is not activity.
   - **When it dies** (idle exit, crash, kill): a client's next call fails fast, the client
     marks itself not alive, ``embed_mlx.loaded`` reads None and the warm server serves lean,
     its existing degrade. The next served call asks the ``hippo-high`` thread to respawn
     the daemon and reload, off the serving path.
-  - ``HIPPO_EMBED_DAEMON=0`` keeps the in-process load.
+  - **The reranker too** (EMB-2). The warm Qwen3-Reranker (``rerank_mlx``) loads here once,
+    not in every server that served an explicit ``recall`` or ran with ``HIPPO_RERANK`` on.
+    HCR-4's rule that a reranker still scoring an earlier call answers "busy" at once (the
+    seam keeps the fused order) now holds across sessions: the daemon never queues a second
+    scoring behind one a caller may already have abandoned.
+  - ``HIPPO_EMBED_DAEMON=0`` keeps the in-process load of both.
 
 Wire format: one JSON request line; one JSON reply line, and after an ``embed``/``query``
 reply, ``n * dim`` little-endian float32s.
@@ -70,10 +75,11 @@ def idle_seconds() -> float:
 
 
 def code_id() -> str:
-    """Hash of the code that turns text into vectors: this file and ``embed_mlx.py``."""
+    """Hash of the code that turns text into vectors or scores: this file, ``embed_mlx.py``
+    and ``rerank_mlx.py``."""
     h = hashlib.sha256()
     here = os.path.dirname(os.path.abspath(__file__))
-    for name in ("embed_mlx.py", "embed_daemon.py"):
+    for name in ("embed_mlx.py", "embed_daemon.py", "rerank_mlx.py"):
         try:
             with open(os.path.join(here, name), "rb") as fh:
                 h.update(fh.read())
@@ -261,6 +267,46 @@ class DaemonEmbedder:
         return iter(list(self._vectors("query", list(texts), _QUERY_S)))
 
 
+class DaemonReranker:
+    """``rerank_mlx._MLXReranker``'s shape (``score(query, docs)``), served by the shared
+    daemon. ``alive`` and ``revive`` as ``DaemonEmbedder``'s."""
+
+    def __init__(self, model: str, snap: str = "") -> None:
+        self.model_id = model
+        self.path = socket_path()
+        self.alive = False
+        self.load_ms: Optional[float] = None
+        self.resident_bytes: Optional[int] = None
+        self.daemon_pid: Optional[int] = None
+        self.revive()
+
+    def revive(self) -> None:
+        ensure(self.path)
+        t0 = time.monotonic()
+        hdr, _ = request(self.path, {"op": "rerank_load", "model": self.model_id}, timeout=_DOC_S)
+        if not hdr.get("ok"):
+            raise RuntimeError(str(hdr.get("error") or "load failed"))
+        self.load_ms = hdr.get("load_ms")
+        if self.load_ms is None:
+            self.load_ms = (time.monotonic() - t0) * 1000.0
+        self.resident_bytes = hdr.get("resident_bytes")
+        self.daemon_pid = hdr.get("pid")
+        self.alive = True
+
+    def score(self, query: str, docs: List[str]) -> List[float]:
+        from .rerank_mlx import RerankUnavailable
+
+        try:
+            hdr, _ = request(self.path, {"op": "rerank", "model": self.model_id,
+                                         "query": str(query), "docs": [str(d) for d in docs]}, _QUERY_S)
+        except (OSError, ValueError) as exc:
+            self.alive = False
+            raise RerankUnavailable(f"the shared embed daemon is gone ({exc})") from exc
+        if not hdr.get("ok"):
+            raise RerankUnavailable(str(hdr.get("error") or "rerank failed"))
+        return [float(x) for x in hdr.get("scores") or []]
+
+
 # --------------------------------------------------------------------------- #
 # Server
 # --------------------------------------------------------------------------- #
@@ -271,10 +317,15 @@ class _Unavailable(RuntimeError):
 
 
 class Server:
-    def __init__(self, path: str, backend: Callable[[str, int, str], object], idle_s: float) -> None:
+    def __init__(self, path: str, backend: Callable[[str, int, str], object], idle_s: float,
+                 rerank_backend: Optional[Callable[[str, str], object]] = None) -> None:
         self.path, self.backend, self.idle_s = path, backend, idle_s
+        self.rerank_backend = rerank_backend
         self.models: Dict[str, object] = {}
+        self.rerankers: Dict[str, object] = {}
         self.loads = 0
+        self.rerank_loads = 0
+        self._scoring: Dict[str, threading.Lock] = {}  # model -> held while it scores
         self._load_lock = threading.Lock()
         # One document request at a time. The embedder feeds its one MLX thread slice by
         # slice, so a query queues behind at most one slice of ONE build, as it did inside a
@@ -306,6 +357,41 @@ class Server:
             self.loads += 1
             return emb
 
+    def _reranker(self, model: str):
+        from . import rerank_mlx as R
+
+        with self._load_lock:
+            hit = self.rerankers.get(model)
+            if hit is not None:
+                return hit
+            if model not in R.RERANK_MODELS or self.rerank_backend is None:
+                raise _Unavailable(f"not a high reranker: {model!r}", "error")
+            why = R.unavailable_reason(model)
+            if why:
+                raise _Unavailable(why, "model_not_warmed")
+            rr = self.rerank_backend(model, R.snapshot_dir(model))
+            self.rerankers[model] = rr
+            self._scoring[model] = threading.Lock()
+            self.rerank_loads += 1
+            return rr
+
+    def _rerank(self, conn: socket.socket, op: str, req: dict) -> None:
+        model = str(req.get("model") or "")
+        rr = self._reranker(model)
+        if op == "rerank_load":
+            _send(conn, {"ok": True, "pid": os.getpid(), "load_ms": getattr(rr, "load_ms", None),
+                         "resident_bytes": getattr(rr, "resident_bytes", None)})
+            return
+        busy = self._scoring[model]
+        if not busy.acquire(blocking=False):
+            raise _Unavailable(f"{model} is still scoring an earlier call", "busy")
+        try:
+            scores = [float(x) for x in rr.score(str(req.get("query") or ""),
+                                                 [str(d) for d in (req.get("docs") or [])])]
+        finally:
+            busy.release()
+        _send(conn, {"ok": True, "scores": scores})
+
     def _busy(self, delta: int) -> None:
         with self._lock:
             self._inflight += delta
@@ -318,7 +404,15 @@ class Server:
             op = req.get("op")
             if op == "ping":
                 _send(conn, {"ok": True, "pid": os.getpid(), "code": code_id(),
-                             "loaded": sorted(self.models), "loads": self.loads})
+                             "loaded": sorted(self.models), "loads": self.loads,
+                             "rerankers": sorted(self.rerankers), "rerank_loads": self.rerank_loads})
+                return
+            if op in ("rerank_load", "rerank"):
+                self._busy(1)
+                try:
+                    self._rerank(conn, op, req)
+                finally:
+                    self._busy(-1)
                 return
             if op not in ("load", "embed", "query"):
                 _send(conn, {"ok": False, "error": f"unknown op {op!r}", "reason": "error"})
@@ -435,6 +529,17 @@ class _FakeEmbedder:
         return iter([self._vec(t, "q") for t in texts])
 
 
+class _FakeReranker:
+    """``--fake``: scores a doc by the query words it shares (no MLX)."""
+
+    def __init__(self, model: str, snap: str) -> None:
+        self.load_ms, self.resident_bytes = 1.0, 567
+
+    def score(self, query, docs):
+        q = set(query.lower().split())
+        return [len(q & set(d.lower().split())) / (len(q) or 1) for d in docs]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -454,13 +559,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.fake:
         from . import embed_mlx as E
 
+        from . import rerank_mlx as R
+
         E.unavailable_reason = lambda model: None
+        R.unavailable_reason = lambda model: None
         backend: Callable = _FakeEmbedder
+        rerank_backend: Callable = _FakeReranker
     else:
         from .embed_mlx import _MLXEmbedder
+        from .rerank_mlx import _MLXReranker
 
-        backend = _MLXEmbedder
-    srv = Server(args.socket, backend, idle_seconds())
+        backend, rerank_backend = _MLXEmbedder, _MLXReranker
+    srv = Server(args.socket, backend, idle_seconds(), rerank_backend)
     srv.bind()
     sys.stderr.write(f"[hippo-embedd] pid {os.getpid()} serving {args.socket}\n")
     sys.stderr.flush()

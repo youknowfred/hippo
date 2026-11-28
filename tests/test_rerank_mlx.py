@@ -486,3 +486,48 @@ def test_the_real_mlx_reranker_prefers_the_relevant_document(model):
     scores = rr.score("how do we deploy zebra", docs)
     assert scores[0] > 0.5 > scores[1]
     assert rr.score("how do we deploy zebra", docs[:1])[0] == pytest.approx(scores[0], abs=1e-3)
+
+
+def test_warm_high_reranks_through_the_shared_daemon_and_survives_its_loss(fake, warm_project, monkeypatch):
+    """EMB-2: the warm 0.6B lives in the shared daemon; losing it costs the fused order
+    for a prompt, and the next served call brings it back."""
+    import signal
+    import tempfile
+
+    from memory import embed_daemon as D
+
+    data = tempfile.mkdtemp(prefix="hr")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    monkeypatch.delenv(D.ENABLE_ENV, raising=False)
+    monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
+    monkeypatch.setattr(R, "BACKEND", R._default_backend)
+    monkeypatch.setenv("HIPPO_RETRIEVAL_PROFILE", "high")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    prompt = "zebra service canary deploy lane"
+    try:
+        _serve("s1", "p1", prompt)
+        _wait_loaded(_SMALL)
+        out = _serve("s2", "p2", prompt)
+        assert out.index("zebra_canary_deploy") < out.index("zebra_pager_rota")
+        rec = H.status()["rerank"]
+        first = rec["daemon_pid"]
+        assert rec["status"] == "ready" and first != os.getpid() and rec["resident_bytes"] == 567
+
+        os.kill(first, signal.SIGKILL)
+        end = time.time() + 5
+        while D.ping() is not None and time.time() < end:
+            time.sleep(0.02)
+        assert "zebra_canary_deploy" in _serve("s3", "p3", prompt)  # fused order, no error
+        assert "zebra_canary_deploy" in _serve("s4", "p4", prompt)  # asks for the revive
+        end = time.time() + 10
+        while time.time() < end and R.status(_SMALL).get("daemon_pid") in (None, first):
+            time.sleep(0.02)
+        _wait_loaded(_SMALL)
+        assert R.status(_SMALL)["daemon_pid"] != first
+    finally:
+        info = D.ping()
+        if info:
+            os.kill(info["pid"], signal.SIGKILL)
+        import shutil
+
+        shutil.rmtree(data, ignore_errors=True)
