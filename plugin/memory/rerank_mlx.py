@@ -38,9 +38,9 @@ right-padded and the last real position gathered per row (exact for a causal mod
 ``embed_mlx``), so only those rows go through the tied output head. All MLX work runs on
 ``embed_mlx.mlx_executor()``, the process's one MLX thread.
 
-HCR-7: by default that thread is the embedding daemon's, and ``reranker`` hands this process
-a client of it (``embed_remote.RemoteReranker``); a daemon that cannot score in time is one
-more way to ``RerankUnavailable``, and the seam keeps the fused order.
+HCR-7: with ``HIPPO_EMBED_DAEMON=1`` that thread is the embedding daemon's, and ``reranker``
+hands this process a client of it (``embed_remote.RemoteReranker``); a daemon that cannot
+score in time is one more way to ``RerankUnavailable``, and the seam keeps the fused order.
 """
 
 from __future__ import annotations
@@ -298,9 +298,9 @@ class RerankUnavailable(RuntimeError):
 
 
 def _backend() -> Callable[[str, str], object]:
-    """HCR-7: the daemon's client unless a backend was put in ``BACKEND`` or
-    ``HIPPO_EMBED_DAEMON=0`` keeps the model in this process (``embed_mlx.uses_daemon``'s
-    rule). The daemon scores on its one MLX thread; nothing loads here."""
+    """HCR-7: the daemon's client when the daemon is turned on and no backend was put in
+    ``BACKEND`` (``embed_mlx.uses_daemon``'s rule); else ``BACKEND``, in this process. The
+    daemon scores on its one MLX thread; nothing loads here."""
     if BACKEND is _MLXReranker:
         from . import embed_remote
 

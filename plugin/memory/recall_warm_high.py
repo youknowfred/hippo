@@ -36,8 +36,10 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
   whether it holds the model (``_plan``); absent, starting, or with the model dropped while
   idle, the call serves lean. A query embed that fails or runs late mid-call makes
   ``recall_warm`` discard the high attempt and serve that prompt lean (``note_fault``), then
-  hold high off for ``FAULT_HOLD_S`` so the next prompts do not wait on a daemon that is
-  struggling. ``HIPPO_EMBED_DAEMON=0`` loads the model here instead, as before.
+  hold high off for a few seconds (longer each time it happens again) so the next prompts
+  do not wait on a daemon that is struggling. A daemon that says at once it is too busy
+  costs no wait and no hold. This path is ``HIPPO_EMBED_DAEMON=1`` (or ``"embed_daemon":
+  true`` in ``model.json``), off by default: without it the model loads here, as before.
 """
 
 from __future__ import annotations
@@ -56,9 +58,12 @@ _MAX_PASSES = 8  # passes that may chase a moving lean index once every row is e
 # One unbounded pass over a 1,070-memory corpus took ~36 minutes with whole-memory rows and
 # kept nothing until its last row.
 _PASS_ROWS = 256
-# HCR-7: after a daemon fault on a served call, how long this server serves lean without
-# asking. A daemon that was killed is back and loaded well inside it (about 3 s).
-FAULT_HOLD_S = 30.0
+# HCR-7: after a served call waited on the daemon for nothing (a timeout, a dropped
+# connection), how long this server serves lean without asking: this long the first time,
+# twice as long each time it happens again, up to the cap; a prompt served high resets it.
+# A daemon that was killed is back and loaded in about 3 s, so the first hold covers it.
+FAULT_HOLD_S = 4.0
+FAULT_HOLD_MAX_S = 300.0
 
 
 def high_index_dir(index_dir: str) -> str:
@@ -81,7 +86,9 @@ class _State:
         self.fresh_memo: Dict[Tuple[int, int], tuple] = {}
         self.daemon = False  # HCR-7: the embedder is the daemon's client
         self.hold_until = 0.0  # monotonic: no high attempt before this (a daemon fault)
+        self.hold_s = 0.0  # the last hold; the next one doubles it
         self.faults = 0
+        self.busy = 0
         self.fault = ""
 
 
@@ -166,8 +173,8 @@ def status() -> Dict:
     }
     if _ST.daemon:  # HCR-7: the bytes above are the daemon's, not this server's
         out["daemon"] = True
-        if _ST.faults:
-            out["faults"], out["fault"] = _ST.faults, _ST.fault
+        if _ST.faults or _ST.busy:
+            out["faults"], out["busy"], out["fault"] = _ST.faults, _ST.busy, _ST.fault
     if _ST.rerank is not None:
         from .rerank_mlx import status as rerank_status
 
@@ -298,15 +305,26 @@ def _ensure_daemon(ensure, first: bool) -> bool:
     return True
 
 
-def note_fault(reason: str) -> None:
-    """HCR-7: a served call's query embed failed or ran late, and that prompt was served
-    lean. Hold high off for ``FAULT_HOLD_S`` and wake the loader, which restarts a daemon
-    that is gone."""
-    _ST.faults += 1
+def note_fault(reason: str, busy: bool = False) -> None:
+    """HCR-7: a served call's query embed was not answered, and that prompt was served lean.
+    ``busy`` (the daemon refused at once: too many queries ahead) cost no wait, so nothing
+    is held. Anything else waited: hold high off, longer each time in a row, and wake the
+    loader, which restarts a daemon that is gone."""
     _ST.fault = reason
-    _ST.hold_until = time.monotonic() + FAULT_HOLD_S
     _ST.engaged = False
+    if busy:
+        _ST.busy += 1
+        return
+    _ST.faults += 1
+    _ST.hold_s = min(FAULT_HOLD_MAX_S, max(FAULT_HOLD_S, _ST.hold_s * 2))
+    _ST.hold_until = time.monotonic() + _ST.hold_s
     _ST.wake.set()
+
+
+def note_served() -> None:
+    """A served call whose high attempt went through: the next fault's hold starts short."""
+    if _ST.engaged:
+        _ST.hold_s = 0.0
 
 
 def _build_lock(hdir: str):
@@ -516,8 +534,9 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
         bits.append(f"model load {h['load_ms'] / 1000:.1f} s")
     if h.get("resident_bytes") and not h.get("daemon"):
         bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident")
-    if h.get("faults"):
-        bits.append(f"{h['faults']} prompt(s) served lean on a daemon fault (last: {h.get('fault')})")
+    if h.get("faults") or h.get("busy"):
+        bits.append(f"{(h.get('faults') or 0) + (h.get('busy') or 0)} prompt(s) served lean on a daemon "
+                    f"fault or a busy daemon (last: {h.get('fault')})")
     rr = h.get("rerank") if isinstance(h.get("rerank"), dict) else {}
     if rr.get("model"):
         bits.append(f"reranker {rr['model']} {rr.get('status') or 'idle'}"

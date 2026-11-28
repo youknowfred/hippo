@@ -29,9 +29,10 @@ row with no attention mask. All MLX work runs on the process's ONE MLX worker th
 submit there too); a document batch is fed to it in small
 slices so a query waiting behind a background build waits one slice, not the whole batch.
 
-HCR-7: by default that process is the machine's one embedding daemon (``embed_daemon``), and
-``high_embedder`` hands every other process a client of it (``embed_remote``). The classes
-here are what the daemon loads; ``HIPPO_EMBED_DAEMON=0`` loads them in the caller instead.
+HCR-7: with ``HIPPO_EMBED_DAEMON=1`` that process is the machine's one embedding daemon
+(``embed_daemon``), and ``high_embedder`` hands every other process a client of it
+(``embed_remote``). The classes here are what the daemon loads. Off (the default), they load
+in the caller, as before.
 """
 
 from __future__ import annotations
@@ -465,9 +466,9 @@ _LOAD_LOCK = threading.Lock()
 
 def uses_daemon() -> bool:
     """HCR-7: this process's high embedder is the machine's daemon, not a model loaded here.
-    True unless a backend was put in ``BACKEND`` (tests, a bench's own) or
-    ``HIPPO_EMBED_DAEMON=0`` keeps the model in-process (the benches, the byte-identity check).
-    The daemon itself calls ``BACKEND`` directly and never asks."""
+    True when the daemon is turned on (``embed_remote.enabled``: ``HIPPO_EMBED_DAEMON=1`` or
+    the ``embed_daemon`` preset; off by default) and no backend was put in ``BACKEND`` (tests,
+    a bench's own). The daemon itself calls ``BACKEND`` directly and never asks."""
     if BACKEND is not _MLXEmbedder:
         return False
     from .embed_remote import enabled
@@ -477,8 +478,8 @@ def uses_daemon() -> bool:
 
 def high_embedder(space: str):
     """The embedder for ``space`` — offline only; raises ``DenseUnavailable`` (a
-    recall_fallback token) when this machine cannot serve it, never downloads. HCR-7: by
-    default it is the daemon's client (``embed_remote.RemoteEmbedder``), the same shape."""
+    recall_fallback token) when this machine cannot serve it, never downloads. HCR-7: with
+    the daemon on it is the daemon's client (``embed_remote.RemoteEmbedder``), the same shape."""
     from .build_index import DenseUnavailable
 
     parsed = parse_space(space)

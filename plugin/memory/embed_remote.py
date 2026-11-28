@@ -9,8 +9,10 @@ Where it plugs in. ``embed_mlx.BACKEND`` and ``rerank_mlx.BACKEND`` are the seam
 (``(model, dim, snapshot) -> embedder`` and ``(model, snapshot) -> reranker``). While they
 hold their in-process defaults and ``enabled()`` is true, ``embed_mlx.high_embedder`` and
 ``rerank_mlx.reranker`` hand out ``RemoteEmbedder`` / ``RemoteReranker``, which have the same
-shape. ``build_index`` and recall are unchanged. ``HIPPO_EMBED_DAEMON=0`` keeps the models in
-the calling process (the benches set it; the byte-identity check needs both).
+shape. ``build_index`` and recall are unchanged. ``enabled()`` is ``HIPPO_EMBED_DAEMON=1`` or
+``"embed_daemon": true`` in the plugin's ``model.json``; it is off by default (see
+``DEFAULT_ON``), and ``HIPPO_EMBED_DAEMON=0`` keeps the models in the calling process
+whatever the file says (the benches set it; the byte-identity check needs both).
 
 The owner's four conditions (2026-11-26, sixth ruling), as built:
 
@@ -48,16 +50,28 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Callable, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
-ENV = "HIPPO_EMBED_DAEMON"  # unset: DEFAULT_ON. 0: the models load in the calling process
-# planning/HCR-7.evidence.2026-11-27.json: every acceptance point held, so on the high
-# profile the daemon is the path.
-DEFAULT_ON = True
+ENV = "HIPPO_EMBED_DAEMON"  # 1: the daemon. 0: the models load in the calling process
+PRESET_KEY = "embed_daemon"  # the same switch in ${CLAUDE_PLUGIN_DATA}/model.json (true / false)
+# Off until the owner turns it on. planning/HCR-7.evidence.2026-11-27.json: one model copy for
+# ten servers, byte-identical vectors, lean on every fault with no breaker trip, one daemon
+# from simultaneous starts all held; the roadmap's stamp "each server under 0.2 GB" did not
+# (a warm server holds 0.38 to 0.41 GB with the daemon, and 0.31 GB on lean with no daemon).
+DEFAULT_ON = False
 DIRNAME = "embedd"
 
+def _env_seconds(name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.environ.get(name) or default))
+    except ValueError:
+        return default
+
+
 # One served prompt's wait for its query vector. A build's document slice (at most 1,024
-# padded tokens, about 0.76 s on the 4B) may be ahead of it on the daemon's one MLX thread;
-# past this the prompt serves lean. recall_warm's budget arithmetic depends on it.
-QUERY_WAIT_S = 0.75
+# padded tokens, about 0.76 s on the 4B) may be ahead of it on the daemon's one MLX thread,
+# or other sessions' queries (one forward pass each); past this the prompt serves lean.
+# recall_warm keeps HIGH_RESERVE_MS of its budget back for what follows. The env override is
+# the bench's (it measures the wait it ships with against others).
+QUERY_WAIT_S = _env_seconds("HIPPO_EMBED_DAEMON_QUERY_WAIT_S", 0.75)
 HELLO_WAIT_S = 0.15  # the served call's "is it there and loaded" check
 START_WAIT_S = 20.0  # spawn -> the socket answers (an interpreter start and the imports)
 LOAD_WAIT_S = 180.0  # the first load of a model from a cold disk
@@ -83,7 +97,13 @@ def enabled() -> bool:
         return False
     if raw in ("1", "true", "on", "yes"):
         return True
-    return DEFAULT_ON
+    try:
+        from .retrieval_profile import _read_preset  # the shared model.json; never raises
+
+        saved = _read_preset().get(PRESET_KEY)
+    except Exception:
+        saved = None
+    return saved if isinstance(saved, bool) else DEFAULT_ON
 
 
 # --------------------------------------------------------------------------- #
@@ -290,20 +310,23 @@ def _start(space: str) -> None:
             _CHILDREN.append((key, child))
 
 
-def ensure(space: str, *, load: bool = False, wait_s: float = LOAD_WAIT_S) -> dict:
+def ensure(space: str, *, load: bool = False, load_if_started: bool = False,
+           wait_s: float = LOAD_WAIT_S) -> dict:
     """The daemon's ``hello`` once it answers, starting it first when it does not. ``load``
-    (and any start made here) also asks for the embedder and waits up to ``wait_s`` for it.
-    Raises ``DaemonError``. Called off the serving path (a loader thread, a build, setup)."""
+    also asks for the embedder and waits up to ``wait_s`` for it; ``load_if_started`` does
+    that only when this call had to start the daemon (a warm server whose daemon went away
+    wants the model back before its next prompt). Raises ``DaemonError``. Called off the
+    serving path (a loader thread, a build, a bench)."""
     if not paths(space).sock:
         raise DaemonError("no usable socket path on this machine")
     info = hello(space, want=load, timeout=1.0)
     if info is None:
         _start(space)
-        load = True  # something asked for it just now: have the model ready for the next call
+        load = load or load_if_started
         end = time.monotonic() + START_WAIT_S
         while info is None and time.monotonic() < end:
             time.sleep(0.05)
-            info = hello(space, want=True, timeout=1.0)
+            info = hello(space, want=load, timeout=1.0)
         if info is None:
             raise DaemonError(f"the embedding daemon did not start (see {paths(space).log})")
     end = time.monotonic() + wait_s
@@ -324,14 +347,16 @@ def ensure(space: str, *, load: bool = False, wait_s: float = LOAD_WAIT_S) -> di
 # --------------------------------------------------------------------------- #
 class Attempt:
     """What ``recall_warm`` hands a served call: when its daemon waits must end, and whether
-    one of them failed. A mutable object in a ContextVar, so the mark made on
+    one of them failed (``busy``: the daemon said at once that it could not answer in time,
+    so nothing was waited for). A mutable object in a ContextVar, so the mark made on
     ``run_bounded``'s worker thread is read back by the caller."""
 
-    __slots__ = ("deadline", "fault")
+    __slots__ = ("deadline", "fault", "busy")
 
     def __init__(self, budget_s: float) -> None:
         self.deadline = time.monotonic() + max(0.0, budget_s)
         self.fault = ""
+        self.busy = False
 
 
 _ATTEMPT: "ContextVar[Optional[Attempt]]" = ContextVar("hippo_embed_attempt", default=None)
@@ -380,7 +405,7 @@ class RemoteEmbedder:
         return info
 
     def ensure(self, *, load: bool = False, wait_s: float = LOAD_WAIT_S) -> dict:
-        return self._note(ensure(self.space, load=load, wait_s=wait_s))
+        return self._note(ensure(self.space, load=load, load_if_started=True, wait_s=wait_s))
 
     def ready(self) -> bool:
         """The daemon answers and holds the model. Not loaded (just started, or it dropped
@@ -389,13 +414,23 @@ class RemoteEmbedder:
         info = hello(self.space, want=True)
         return bool(info) and self._note(info).get("state") == "loaded"
 
-    def _vectors(self, kind: str, texts: List[str], wait: float, deadline_ms: Optional[float]):
+    def _vectors(self, kind: str, texts: List[str], wait: float, deadline_ms: Optional[float],
+                 *, may_start: bool = False):
         import numpy as np
 
         if not texts:
             return np.zeros((0, self.dim), dtype="float32")
         req = {"op": "embed", "space": self.space, "kind": kind, "texts": texts, "deadline_ms": deadline_ms}
-        resp, data = call(paths(self.space).sock, req, wait)
+        try:
+            resp, data = call(paths(self.space).sock, req, wait)
+        except (OSError, DaemonError) as exc:
+            # Off the serving path (a build, a bench, the floor sweep) nobody else keeps the
+            # daemon up: when it is not there, start it and ask once more. A served prompt
+            # never does this; it serves lean and its loader thread does the starting.
+            if not may_start or isinstance(exc, socket.timeout):
+                raise
+            self.ensure(load=True)
+            resp, data = call(paths(self.space).sock, req, wait)
         n, dim = int(resp.get("n") or 0), int(resp.get("dim") or 0)
         if n != len(texts) or dim != self.dim or len(data) != n * dim * 4:
             raise DaemonError("the daemon's answer does not match the request")
@@ -407,7 +442,7 @@ class RemoteEmbedder:
         texts = list(texts)
         wait = DOC_WAIT_BASE_S + DOC_WAIT_PER_TEXT_S * len(texts)
         try:
-            return iter(self._vectors("doc", texts, wait, None))
+            return iter(self._vectors("doc", texts, wait, None, may_start=True))
         except Exception as exc:
             raise _unavailable(f"{type(exc).__name__}: {exc}") from exc
 
@@ -425,11 +460,12 @@ class RemoteEmbedder:
         try:
             if wait <= 0:
                 raise DaemonError("no time left in this prompt's budget")
-            return iter(self._vectors("query", texts, wait, wait * 1000.0))
+            return iter(self._vectors("query", texts, wait, wait * 1000.0, may_start=mark is None))
         except Exception as exc:
             why = f"{type(exc).__name__}: {exc}"[:200]
             if mark is not None:
                 mark.fault = why
+                mark.busy = isinstance(exc, DaemonError) and "busy:" in str(exc)
             raise _unavailable(why) from exc
 
 
@@ -454,7 +490,7 @@ class RemoteReranker:
 
     def _prime(self) -> None:
         space = self._space()
-        ensure(space)
+        ensure(space)  # the daemon, not the embedder: a reranker alone does not need 4 GB
         wait_ms = RERANK_LOAD_WAIT_S * 1000.0
         resp, _ = call(paths(space).sock, {"op": "load", "model": self.model_id, "wait_ms": wait_ms},
                        RERANK_LOAD_WAIT_S + 5.0)

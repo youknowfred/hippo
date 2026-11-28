@@ -530,7 +530,7 @@ def _failed(d: str, sid: str, sess: _Session, project: str) -> str:
 def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_ref: float) -> str:
     from .embed_remote import attempt
     from .recall_hook import hook_envelope, run_recall
-    from .recall_warm_high import note_fault, serving
+    from .recall_warm_high import note_fault, note_served, serving
 
     _publish(d, sid, sess, state="serving", accept=True)
     prompt = args.get("prompt")
@@ -564,8 +564,10 @@ def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_re
         if tried.fault:
             daemon_ms = (time.time() - t_try) * 1000.0
             held.clear()
-            note_fault(tried.fault)
+            note_fault(tried.fault, tried.busy)
             out = _recall(True)
+        else:
+            note_served()
     except Exception:
         sess.fails += 1
         if sess.fails >= FAIL_TRIP:
@@ -579,8 +581,8 @@ def _serve_warm(d: str, sid: str, sess: _Session, project: str, args: dict, t_re
     sess.last_ms = elapsed
     sess.last_path = "warm"
     # The breaker judges this server's own serving. Time lost to a daemon fault is bounded
-    # above (embed_remote.QUERY_WAIT_S) and stopped by note_fault's hold, and is not a
-    # reason to send the rest of the session to the spawned hook.
+    # above (embed_remote.QUERY_WAIT_S; a busy daemon refuses at once) and stopped by
+    # note_fault's hold, and is not a reason to send the rest of the session to the spawned hook.
     if elapsed - daemon_ms > budget:
         sess.tripped = f"a served recall took {elapsed:.0f} ms (budget {budget:.0f} ms)"
     sess.unfit = "" if sess.tripped else _unfit(project)  # published for the next prompt

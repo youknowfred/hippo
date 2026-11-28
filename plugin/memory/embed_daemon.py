@@ -12,12 +12,20 @@ rerankers. See ``embed_remote`` for the client and the owner's four conditions.
   ``rerank_mlx.BACKEND``), so every forward pass still runs on ``embed_mlx.mlx_executor``,
   in slices of at most 1,024 padded tokens. A build's document slices and every session's
   queries interleave there at slice granularity: a query waits one slice, across sessions.
-* **Queries coalesce.** While a forward pass runs, the queries that arrive queue; the next
-  pass embeds all of them together. ``HIPPO_EMBED_DAEMON_BATCH=0`` runs one query per pass.
+* **One query per forward pass, in arrival order.** A query embedded alone is the same
+  bytes the in-process embedder produces, so the space's floor, gate and count rule carry
+  over unchanged. ``HIPPO_EMBED_DAEMON_BATCH=1`` coalesces instead: the queries that queued
+  while a pass ran share the next one. That is faster under a burst and NOT byte-identical
+  (measured 2026-11-27 on the 4B: a padded batch moves a vector's raw components by up to
+  1.1e-4, cosine to its single-pass self 0.9999998), which is why it is off.
 * **A caller that stopped waiting is dropped.** Each query and rerank carries how long its
   caller will wait. One still queued past that, or whose caller closed the socket, is never
   run: the cross-socket form of ``embed_mlx.abandon_on_timeout``. A build whose session
   ended stops at its next slice.
+* **A query that cannot be answered in time is refused at once.** The daemon knows how many
+  queries are ahead and how long one has been taking; when that is more than the caller
+  will wait it says ``busy`` instead of letting the caller wait for nothing. The prompt is
+  served lean straight away, and the next one asks again.
 * **It reaps itself.** No live warm server on high (``recall_warm.server_states``) and no
   request in flight for ``GRACE_S``: exit. No request for ``IDLE_S``: drop the models and
   keep listening (measured 2026-11-26: the process falls to 166 MB; a reload from a warm
@@ -42,13 +50,14 @@ from typing import Callable, Dict, List, Optional
 
 from . import embed_remote as remote
 
-BATCH_ENV = "HIPPO_EMBED_DAEMON_BATCH"  # 0: one query per forward pass
+BATCH_ENV = "HIPPO_EMBED_DAEMON_BATCH"  # 1: queued queries share a forward pass (not byte-identical)
 IDLE_ENV = "HIPPO_EMBED_DAEMON_IDLE_S"
 GRACE_ENV = "HIPPO_EMBED_DAEMON_GRACE_S"
 IDLE_S = 1800.0  # no request for this long: drop the models (the process stays, small)
 GRACE_S = 60.0  # no live warm server on high and nothing in flight for this long: exit
 LOCK_WAIT_S = 3.0  # how long a start waits for a daemon that holds the lock to answer or go
 LOAD_RETRY_S = 60.0  # a model load that raised is not retried before this
+_FIRST_PASS_S = 0.1  # a query pass, until one has been timed (measured: 60 ms idle, 154 ms loaded)
 _REQUEST_READ_S = 10.0
 
 
@@ -195,7 +204,7 @@ class Daemon:
         self.idle_s = _env_seconds(IDLE_ENV, IDLE_S) if idle_s is None else idle_s
         self.grace_s = _env_seconds(GRACE_ENV, GRACE_S) if grace_s is None else grace_s
         raw = (os.environ.get(BATCH_ENV) or "").strip().lower()
-        self.batch = (raw not in ("0", "false", "off", "no")) if batch is None else batch
+        self.batch = (raw in ("1", "true", "on", "yes")) if batch is None else batch
         self.tick_s = tick_s
         self._lock = threading.Lock()
         self._queue: List[_Query] = []
@@ -207,8 +216,10 @@ class Daemon:
         self._listener: Optional[socket.socket] = None
         self._lockfh = None
         self.started = time.time()
-        self.stats = {"queries": 0, "query_passes": 0, "largest_pass": 0, "expired": 0,
+        self.stats = {"queries": 0, "query_passes": 0, "largest_pass": 0, "expired": 0, "busy": 0,
                       "gone": 0, "doc_requests": 0, "doc_rows": 0, "reranks": 0, "unloads": 0}
+        self._pass_s = _FIRST_PASS_S  # how long one query pass has been taking (a moving average)
+        self._in_pass = 0  # queries in the pass that is running now
 
     # ----------------------------------------------------------------- #
     # Start: the lock, then the socket
@@ -357,7 +368,7 @@ class Daemon:
 
         out = {"ok": True, "pid": os.getpid(), "space": self.space, "version": running_version(),
                "batch": self.batch, "started": round(self.started, 3), "stats": dict(self.stats),
-               "rerankers": {m: s.info() for m, s in self._rerankers.items()}}
+               "rerankers": {m: s.info() for m, s in list(self._rerankers.items())}}
         out.update(self._emb.info())
         return out
 
@@ -430,6 +441,13 @@ class Daemon:
         if req.get("kind") == "query":
             item = _Query(texts, deadline, gone)
             with self._queued:
+                # Admission: the passes ahead of this query (one per queued query, or one for
+                # all of them when coalescing), the one running, and its own.
+                # With nothing ahead it is always let in: that is how the estimate recovers.
+                ahead = (1 if self.batch and self._queue else len(self._queue)) + (1 if self._in_pass else 0)
+                if ahead and deadline is not None and time.monotonic() + (ahead + 1) * self._pass_s > deadline:
+                    self.stats["busy"] += 1
+                    raise RuntimeError(f"busy: {ahead} query pass(es) ahead at {self._pass_s * 1000:.0f} ms each")
                 self._queue.append(item)
                 self._queued.notify()
             self._emb.kick()
@@ -456,8 +474,9 @@ class Daemon:
         return {"ok": True, "n": len(texts), "dim": dim, "nbytes": len(data)}, data
 
     def _coalesce(self) -> None:
-        """The one consumer of the query queue. Whatever queued while the last forward pass
-        ran is embedded together in the next; a query whose caller stopped waiting is not."""
+        """The one consumer of the query queue: one query per forward pass, or (``batch``)
+        everything that queued while the last pass ran, together. A query whose caller
+        stopped waiting is never run."""
         import numpy as np
 
         while not self._stop.is_set():
@@ -491,6 +510,7 @@ class Daemon:
             if not live:
                 continue
             flat = [t for item in live for t in item.texts]
+            self._in_pass, t0 = len(live), time.monotonic()
             try:
                 vecs = np.stack(list(emb.query_embed(flat))) if flat else np.zeros((0, 0), dtype="float32")
             except Exception as exc:
@@ -498,6 +518,10 @@ class Daemon:
                     item.error = f"{type(exc).__name__}: {exc}"
                     item.done.set()
                 continue
+            finally:
+                self._in_pass = 0
+            took = time.monotonic() - t0  # a wait behind a build's slice is part of it
+            self._pass_s = took if took < self._pass_s else 0.5 * (self._pass_s + took)
             self.stats["queries"] += len(flat)
             self.stats["query_passes"] += 1
             self.stats["largest_pass"] = max(self.stats["largest_pass"], len(flat))

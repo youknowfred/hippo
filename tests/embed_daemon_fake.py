@@ -70,7 +70,7 @@ class FakeEmbedder:
             time.sleep(float(order.split()[1]))
         self.entered.set()
         if self.gate is not None:
-            self.gate.wait(10)
+            self.gate.wait(120)
         self.queries.extend(texts)
         self.passes.append(len(texts))
         return iter([self._vec(t) for t in texts])
