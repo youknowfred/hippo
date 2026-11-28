@@ -812,13 +812,21 @@ def test_a_warm_server_serves_high_through_the_shared_daemon_and_survives_its_lo
         first = hb["daemon_pid"]
         assert hb["engaged"] is True and first != os.getpid() and hb["resident_bytes"] == 1234
 
+        # The revive is held until both prompts are served: on a slow machine it could finish
+        # between them, and the second was then served high (a CI run, 2026-11-28).
+        import threading
+
+        released, revive = threading.Event(), D.DaemonEmbedder.revive
+        monkeypatch.setattr(D.DaemonEmbedder, "revive", lambda self: released.wait(30) and revive(self))
         os.kill(first, signal.SIGKILL)  # the daemon goes (its own leave looks the same)
         end = time.time() + 5
         while D.ping() is not None and time.time() < end:
             time.sleep(0.02)
-        assert "zebra_deploy_runbook" in _serve_warm("s3", "p3")  # found it gone: one prompt
-        assert "zebra_deploy_runbook" in _serve_warm("s4", "p4")  # lean, and asks for a revive
+        assert "zebra_deploy_runbook" in _serve_warm("s3", "p3")  # found it gone: lean, asks for a revive
+        assert _heartbeat("s3")["high"]["engaged"] is False
+        assert "zebra_deploy_runbook" in _serve_warm("s4", "p4")  # still coming back: lean
         assert _heartbeat("s4")["high"]["engaged"] is False
+        released.set()
         end = time.time() + 15
         while time.time() < end and not (H.status().get("status") == "ready"
                                           and H.status().get("daemon_pid") not in (None, first)):
