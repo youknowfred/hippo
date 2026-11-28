@@ -15,7 +15,8 @@
 # 2026-11-27: HCR-7's daemon is on main twice over: EMB-1 and EMB-2 (#260, #261) built one
 # and made it the default before an evidence file existed; HCR-7's fallback, bounded wait
 # and one-request builds were then ported onto it, with the evidence file. One acceptance
-# stamp does not hold and the default is the owner's open call (HCR-7's open_for_owner).
+# stamp does not hold; the owner ruled the same day that the daemon stays the default
+# (ninth ruling). Two calls stay open under HCR-7's open_for_owner.
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -175,6 +176,16 @@ meta:
         or (b) replace it with #262's: the owner chose (a). Nothing else was
         ruled: the default EMB-1 set, the idle exit it reaps by, and the
         in-process switch it documents are recorded under HCR-7 as open.
+    - date: 2026-11-27
+      decisions: >-
+        Ninth ruling, on HCR-7's evidence ("Keep it default"). Asked whether
+        the daemon stays high's default path with the "each server under 0.2
+        GB" figure of acceptance point 1 missed (a warm server measured 0.32
+        to 0.39 GB with the daemon in two runs; a lean server with no daemon
+        and no model, 0.29 to 0.31 GB; one copy of the model for ten servers
+        holds, 8.3 to 8.5 GB in all against 41), the owner ruled that it
+        stays the default. Not ruled: the in-process switch named in the
+        user docs, and the 900 s idle exit in place of heartbeat reaping.
 
 workstream:
   - id: HCR
@@ -556,7 +567,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: built           # 2026-11-27: EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, the default is the owner's open call
+        status: built           # 2026-11-27: EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling)
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -755,8 +766,11 @@ workstream:
           classes, the scoring function and every recall, ranking and index
           file are the same bytes on the branch as where they ran.
         open_for_owner: >-
-          OPEN, 2026-11-27, after the eighth ruling ("(a) Port onto main").
-          (1) The default. The acceptance asked for a dated evidence file
+          2026-11-27: (1) is RULED, (2) and (3) are OPEN, (4) lists the
+          builder's calls for the owner to overturn.
+          (1) The default: RULED 2026-11-27, ninth owner ruling ("Keep it
+          default"): the daemon stays high's default path with the 0.2 GB
+          figure missed. What was put: the acceptance asked for a dated evidence file
           before the daemon became high's default path; EMB-1 made it the
           default first. The evidence, taken after, holds on seven of eight
           points and misses one stamp of point 1: a warm server holds 0.37 to
