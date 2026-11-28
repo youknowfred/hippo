@@ -800,3 +800,109 @@ def test_a_twin_is_never_rebuilt_while_its_shared_daemon_is_gone(fakes, project)
     assert H.refresh_tier(project["md"], project["idx"], _SPACE) is False
     assert open(os.path.join(project["high"], B._MANIFEST_NAME), "rb").read() == before
     assert E.loaded(_SPACE) is None
+
+
+# --------------------------------------------------------------------------- #
+# Digest sections: lean's sub-index only, never embedded for the high twin
+# --------------------------------------------------------------------------- #
+_FOLDED = """---
+name: folded-ops
+description: "Folded digest of old ops notes"
+metadata:
+  type: project
+---
+### quokka-pager-rota
+
+Quokka pager rota for the winter on-call weeks and the handover rules
+
+The rota swaps on Tuesdays after the standup; marmalade wombat is a phrase that lives only
+in this section body, far below the digest's description and its opening lines.
+
+### ibis-cache-flush
+
+Ibis cache flush order for the edge nodes before a schema change
+"""
+
+
+def _fold(project):
+    """Give the project a declared fold digest with two sections; returns the texts the
+    lean sub-index embeds for them (each section's row and its opening chunk)."""
+    from memory import index_sections as S
+
+    with open(os.path.join(project["md"], "folded-ops.md"), "w", encoding="utf-8") as fh:
+        fh.write(_FOLDED)
+    with open(os.path.join(project["md"], "hippo.json"), "w", encoding="utf-8") as fh:
+        json.dump({"fold_digests": ["folded-*.md"]}, fh)
+    B.build_index(project["md"], project["idx"])
+    sm = S.read_manifest(project["idx"])
+    assert sm["dense_ready"] and sm["model"] == B.DEFAULT_MODEL and sm["count"] == 2
+    return [e["doc_text"] for e in sm["entries"]] + [c["text"] for c in sm["body_chunks"]]
+
+
+def _section_files(index_dir):
+    return sorted(n for n in os.listdir(index_dir) if n.startswith("sections."))
+
+
+def _bytes(index_dir, names):
+    return {n: open(os.path.join(index_dir, n), "rb").read() for n in names}
+
+
+def test_a_high_twin_embeds_no_digest_section_and_keeps_no_section_sub_index(fakes, project):
+    """Recall reads digest sections from the lean index dir and skips them on a high call
+    (``recall_sections``: ``sec.model != idx.model``), so a sub-index under ``high/`` is
+    never read. The twin's build must not put a section through the big model for one."""
+    section_texts = _fold(project)
+    assert len(section_texts) == 3  # two section rows and the one opening chunk long enough
+    lean_files = _section_files(project["idx"])
+    lean_before = _bytes(project["idx"], lean_files)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    qwen = _FakeQwen.made[0]
+    high = B._read_manifest_json(project["high"])
+    assert not set(section_texts) & set(qwen.docs)
+    assert len(qwen.docs) == len(high["entries"]) + len(high["body_chunks"])  # the twin's own rows, once each
+    assert _section_files(project["high"]) == []
+    # the twin's main manifest still names the slugs, as lean's does: a served call reads
+    # that record off the index it was handed to tell whether a prompt names a section
+    assert high["sections"] == B._read_manifest_json(project["idx"])["sections"]
+    assert sorted(high["sections"]["slugs"]) == ["ibis-cache-flush", "quokka-pager-rota"]
+    # the no-op refresh path reaches the sub-index too (build_index's other call site)
+    with E.using_space(_SPACE):
+        assert B.refresh_index(project["md"], project["high"]) is not None
+    assert not set(section_texts) & set(qwen.docs) and _section_files(project["high"]) == []
+    # lean's sub-index is not the twin's to touch
+    assert _section_files(project["idx"]) == lean_files
+    assert _bytes(project["idx"], lean_files) == lean_before
+
+
+def test_a_twin_holding_an_old_section_sub_index_stays_fresh_and_sheds_it_at_its_next_build(fakes, project):
+    """Twins built before this fix hold a ``sections.json`` that names lean's model over
+    2,560-wide rows. It does not make the twin stale (no rebuild for it); the next build the
+    twin needs anyway removes it, and re-embeds only what changed."""
+    _fold(project)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    from memory import index_sections as S
+
+    old_matrix = "sections.0123456789abcdef.npy"
+    stale = dict(S.read_manifest(project["idx"]), dim=2560, dense_file=old_matrix)
+    assert stale["model"] == B.DEFAULT_MODEL  # what the old build recorded for its 2,560-wide rows
+    with open(os.path.join(project["high"], "sections.json"), "w", encoding="utf-8") as fh:
+        json.dump(stale, fh)
+    np.save(os.path.join(project["high"], old_matrix), np.zeros((3, 2560), dtype="float32"))
+    held = _section_files(project["high"])
+    assert {old_matrix, "sections.json"} <= set(held)
+    qwen = _FakeQwen.made[0]
+    n = len(qwen.docs)
+    main_before = open(os.path.join(project["high"], B._MANIFEST_NAME), "rb").read()
+    assert H.fresh(B.load_index(project["idx"]), B.load_index(project["high"]), _SPACE)
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    # fresh: no build ran, so nothing was embedded, rewritten or removed
+    assert len(qwen.docs) == n and _section_files(project["high"]) == held
+    assert open(os.path.join(project["high"], B._MANIFEST_NAME), "rb").read() == main_before
+    _write_mem(project["md"], "quokka_pager_rota", "Quokka pager rota.")
+    time.sleep(0.01)
+    B.build_index(project["md"], project["idx"])
+    lean_files = _section_files(project["idx"])
+    assert H.refresh_tier(project["md"], project["idx"], _SPACE) is True
+    assert _section_files(project["high"]) == []
+    assert len(qwen.docs) == n + 1 and qwen.docs[-1].startswith("---\nname: quokka_pager_rota")
+    assert _section_files(project["idx"]) == lean_files and len(lean_files) == 2

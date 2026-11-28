@@ -816,6 +816,15 @@ workstream:
           not re-read on memory alone; the evidence run adds one arm, the 8B
           with the warm reranker in hook mode, and no default changes without
           that file.
+          FIXED 2026-11-27, the digest-section defect seen while measuring the
+          daemon's lifetime (item (6) of this list as #266 writes it): a high/
+          build put the corpus's digest sections through the big model (2,879
+          of a 1,070-memory corpus's 6,657 rows) into a sub-index under high/
+          that nothing reads. index_sections.write_sections now embeds and
+          writes none in a high space, and removes the one an earlier build
+          left at the twin's next build (it does not make a fresh twin
+          stale); tests/test_embed_mlx.py holds both. The build-time saving
+          was not re-measured. A high twin for sections is a separate item.
         not_chosen: >-
           Weighed 2026-11-26. Idle unload per server alone: saves nothing when
           a fleet is all prompting, and a cold-disk reload (2-5 s) must serve
