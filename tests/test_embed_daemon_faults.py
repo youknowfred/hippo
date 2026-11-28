@@ -98,6 +98,7 @@ def daemon(tmp_path, monkeypatch):
     monkeypatch.delenv(D.ENABLE_ENV, raising=False)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)  # CI's hermetic lane exports it
     monkeypatch.setattr(D, "SPAWN_ARGS", ["--fake"])
+    monkeypatch.setenv(D.IDLE_ENV, "20")  # a fake daemon the hippo-high thread revives late does not linger
     monkeypatch.setattr(E, "unavailable_reason", lambda model: None)
     for allow in (True, False):
         B._MODEL_CACHE[(B.DEFAULT_MODEL, allow)] = _FakeLean()
