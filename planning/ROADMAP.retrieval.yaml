@@ -17,7 +17,9 @@
 # and one-request builds were then ported onto it, with the evidence file. One acceptance
 # stamp does not hold; the owner ruled the same day that the daemon stays the default
 # (ninth ruling) and that the in-process switch comes out of the user docs (tenth). The
-# idle exit stays open under HCR-7's open_for_owner.
+# idle exit was ruled the same evening, after v1.50.0 (eleventh): the daemon stays while a
+# warm server on high is alive, drops a model nobody asked for in 1,800 s, and leaves 60 s
+# after the last such server. Built with planning/HCR-7.lifetime.evidence.2026-11-27.json.
 #
 # HCR ids are a NEW namespace: no collision with SIG/RUL/RCL/GOV/GRW/RCH,
 # MSR/GRF/SEN/TMB/CLB/IOP, RET/GRA/LIF/CAP/INT/TEA/SEC, DRM, REL/MEA/WRT/OPS/
@@ -196,6 +198,29 @@ meta:
         three. The knob keeps working, and bench/README.md still names it,
         because the benches are what it is for. Not ruled: the 900 s idle
         exit in place of heartbeat reaping.
+    - date: 2026-11-27
+      decisions: >-
+        Eleventh ruling, on HCR-7's open call (3), the daemon's lifetime
+        ("(b) Reap + model drop (Recommended)", and for the idle window
+        "1,800 s (Recommended)"). Put with measurements on main's daemon
+        (v1.50.0's: exit after 900 s with no request), real weights: the
+        first prompt after an idle exit was served lean 20 of 20 [0.84, 1]
+        in 57 ms [55, 64], none raised, no breaker trip, and the model was
+        back 1.85 s [1.81, 1.88] later; a prototype that dropped the model
+        and stayed served that prompt lean too, 20 of 20, with the model
+        back in 0.49 s [0.44, 0.51] and the idle process at 0.19 to 0.21 GB.
+        So no rule makes that prompt high (a served prompt never waits on a
+        load); the rule decides how soon memory comes back and how often a
+        prompt meets a model that has gone. A replay of 56 hours of this
+        machine's recall timestamps (805 prompts, 98 sessions) put that
+        share at 3.0% [2.0, 4.4] for a 900 s window, 1.2% for 1,800 s and
+        0.6% for 3,600 s with every session sharing the daemon, and at 28%
+        [25, 31], 15% [12, 18] and 7% [6, 10] were each session alone on
+        its machine. The three options: (a) keep the 900 s exit; (b) the
+        roadmap's design, stay while a warm server on high is alive, drop
+        the model after the idle window, exit about 60 s after the last
+        server is gone; (c) only a longer idle exit. The owner chose (b)
+        and 1,800 s. Built the same day on main's daemon.
 
 workstream:
   - id: HCR
@@ -577,7 +602,7 @@ workstream:
         title: One embedder per machine — a shared MLX daemon behind the dense seam
         priority: P0
         effort: L
-        status: done            # 2026-11-27: ships in v1.50.0. EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling)
+        status: done            # 2026-11-27: ships in v1.50.0. EMB-1/EMB-2's daemon on main, with HCR-7's fallback and evidence ported onto it (eighth ruling); default ON since EMB-1; acceptance stamp 1 missed, and the owner ruled it stays the default (ninth ruling); the daemon's lifetime was ruled and rebuilt after the release (eleventh ruling)
         gated_on: [HCR-2]
         problem: >-
           Each session's warm server loads its own copy of the high embedder
@@ -711,7 +736,33 @@ workstream:
           (14), tests/test_embed_daemon_gaps.py (8: six written against main
           before the port, five of which failed there, and two for the
           check's changes) beside
-          EMB-1/EMB-2's tests/test_embed_daemon.py (15).
+          EMB-1/EMB-2's tests/test_embed_daemon.py (15). (5) The lifetime, as
+          ruled 2026-11-27 (eleventh ruling), after v1.50.0 shipped steps (1)
+          to (4). The one rule of step (1), exit after 900 s with no request,
+          is replaced. The daemon stays while a warm server on high is alive:
+          a heartbeat under its data dir with a high record and a live pid
+          (recall_warm.server_states, read every 5 s; one not rewritten for a
+          day does not count). It leaves HIPPO_EMBED_DAEMON_GRACE_S (60 s)
+          after the last such server, with nothing in flight; a caller with
+          no heartbeat (a bench, the CLI) keeps it for that grace after each
+          request. A model nobody asked to load, embed or rerank with for
+          HIPPO_EMBED_DAEMON_IDLE_S (now 1,800 s, and no longer an exit) is
+          dropped and MLX's buffers handed back, never under a request, each
+          model on its own clock; the process keeps listening. A served
+          prompt still never waits on a load: its ready() question finds a
+          daemon without the model and that prompt is lean, and a served
+          query or a warm rerank that reaches one in the gap between the
+          question and the call is refused at once (busy: no wait, no hold)
+          while the load starts behind it. A daemon whose model raised on
+          three passes in a row leaves, so the next call starts a fresh one.
+          Doctor's line says when the daemon dropped its model. The Server
+          class moved to embed_daemon_server.py at the module-size cap
+          (embed_daemon.Server still resolves; the socket's code hash covers
+          both files). Tests: tests/test_embed_daemon_lifetime.py (17, each
+          failing first); three tests of tests/test_embed_daemon.py changed
+          with the rule they held (the idle exit became the grace; a warm
+          rerank is loaded before it is asked for), as did the two fixtures
+          that ended a thread daemon by its idle exit.
         ab_result: >-
           planning/HCR-7.evidence.2026-11-27.json, taken after the port, on
           main's daemon as ported (bench/embed_daemon.py,
@@ -775,9 +826,35 @@ workstream:
           in-process arms, the lean servers) hold as carried: the model
           classes, the scoring function and every recall, ranking and index
           file are the same bytes on the branch as where they ran.
+          THE LIFETIME AND THE COST, planning/HCR-7.lifetime.evidence.2026-11-27.json
+          (bench/embed_daemon.py lifetime, build-memory and two-models; real
+          weights, scratch copies, the owner's sessions beside the runs;
+          phys_footprint, GB as MB / 1024). Before the change, on main: the
+          first prompt after an idle exit lean 20 of 20 [0.84, 1] in 57 ms
+          [55, 64], none raised, no trip, the model back 1.85 s [1.81, 1.88]
+          after it; the exit as shipped, twice: gone after 902 s both times,
+          that prompt lean both times, the model back 2.55 s and 1.89 s
+          later. As built: the first prompt after the model was dropped lean
+          20 of 20 [0.84, 1] in 48 ms [44, 69], none raised, no trip, the
+          model back 0.49 s [0.45, 0.54] after it; the idle daemon 0.19 GB
+          (199 MB [194, 203]); it left 60.1 s after its server closed (one
+          run). Memory through a whole build, 4B, corpus-c (1,070 memories,
+          6,657 rows with its digest sections, 42 minutes): the daemon 4.32
+          GB before, 6.01 GB median while building (p95 6.28, highest sample
+          6.40, the kernel's peak 6.49), 5.14 GB after; on hippo (108
+          memories) 5.63 GB median, peak 6.07, 4.77 after. The 8B: 7.63 GB
+          loaded, 9.10 GB median while building hippo (peak 9.37), 8.16
+          after. One daemon holding both models for two sessions: 12.0 GB
+          (11.98 to 12.02, peak 12.31); the 8B dropped on its own clock
+          while the 4B stayed busy (4.53 GB), and 0.16 GB with nothing held.
+          The server that builds: 0.29 to 0.34 GB on hippo, either model; on
+          corpus-c 0.49 GB at its first prompt, 2.41 GB by the last pass and
+          up to 6.89 GB in the minute of prompts after (open_for_owner (5)).
+          Not run: a quiet machine; the full test suite.
         open_for_owner: >-
-          2026-11-27: (1) and (2) are RULED, (3) is OPEN, (4) lists the
-          builder's calls for the owner to overturn.
+          2026-11-27: (1), (2) and (3) are RULED, (4) lists the builder's
+          calls for the owner to overturn, (5) and (6) are defects found
+          while measuring the lifetime and NOT fixed with it.
           (1) The default: RULED 2026-11-27, ninth owner ruling ("Keep it
           default"): the daemon stays high's default path with the 0.2 GB
           figure missed. What was put: the acceptance asked for a dated evidence file
@@ -793,10 +870,12 @@ workstream:
           and STABILITY named HIPPO_EMBED_DAEMON=0. RULED 2026-11-27, tenth
           owner ruling ("Take it out"): taken out of those three; the knob
           works as before and bench/README.md keeps it for the benches. (3) The
-          daemon leaves after 900 s idle, not when no warm heartbeat remains:
-          it outlives its sessions by up to 15 minutes and leaves under live
-          quiet ones (the next prompt is lean while it reloads, about 2.5 s).
-          Left as merged. (4) Three calls from building the port: the 0.75 s
+          lifetime: RULED 2026-11-27, eleventh owner ruling ("(b) Reap + model
+          drop", idle window "1,800 s"). What was put: as merged the daemon
+          left after 900 s idle, not when no warm heartbeat remained, so it
+          outlived its sessions by up to 15 minutes and left under live quiet
+          ones; the options and the measurements are in the ruling. Built
+          (as_built (5)). (4) Three calls from building the port: the 0.75 s
           wait for a query vector (a slice of a build is about 0.76 s; longer
           serves more prompts high during a build and makes a fault's prompt
           slower); the 4 s doubling hold after a wait paid for nothing; and in
@@ -804,7 +883,39 @@ workstream:
           because the daemon's pass-time estimate is deliberately quick to
           recover. (The port merged as #264 and shipped in v1.50.0; before
           it, a slow daemon could hold a served call past the breaker's
-          budget.) The sixth ruling's three calls, as ruled
+          budget.) Four more from building the lifetime, none of them in the
+          ruling's words: (a) a daemon whose model raised on three passes in
+          a row exits. Seen while measuring: one daemon process lost Metal's
+          compiler service and failed six queries of six over two minutes
+          while it held the model and answered ready(), so every prompt was
+          lean and nothing restarted it; EMB-1's rule ended such a process
+          within a quiet 15 minutes, the ruled one would have kept it for as
+          long as a session was open. (b) Each model has its own idle clock,
+          where the ruling said "the model": on one clock a model that one
+          session loaded once is held for as long as other sessions keep the
+          daemon busy (7.3 GB for the 8B). (c) A heartbeat not rewritten for
+          a day is not a live server; that is the age recall_warm's sweep
+          deletes at, and it bounds how long a dead session's reused pid can
+          keep a 0.2 GB process. (d) The grace is 60 s, read from
+          HIPPO_EMBED_DAEMON_GRACE_S, which no user doc names. (5) NOT fixed
+          here: a warm server on high keeps every index it has loaded.
+          recall_warm_high.fresh memoizes on the identity of the (lean, high)
+          pair and holds both objects, up to 65 pairs, and refresh_tier loads
+          both afresh every 30 s and on every served prompt's wake, so each
+          tick pins another pair. On corpus-c that is 100 to 165 MB a tick:
+          the building server went from 0.49 GB to 2.41 GB over 15 passes and
+          to 6.89 GB in the minute of prompts after, and ten ticks of
+          refresh_tier alone added 1.42 GB in a test process (5 MB with the
+          memo cleared each time). On hippo's 108 memories the same server
+          stayed under 0.45 GB, which is why acceptance point 1 read 0.32 to
+          0.39 GB per server. On main since HCR-2, larger since HCR-9's
+          passes; on a large corpus it takes back part of what this item
+          saves. (6) Seen, not changed: a high/ build also embeds the
+          corpus's digest sections through the big model (2,879 of corpus-c's
+          6,657 rows, about eight of the build's 42 minutes) into a sub-index
+          nothing reads: recall reads digest sections from the lean index
+          dir and skips them on a high call. The sixth ruling's three calls,
+          as ruled
           2026-11-26 ("as recommended on all three"): (1) The daemon fits the
           no-server posture on four
           conditions, each binding on the build: hippo spawns and reaps it

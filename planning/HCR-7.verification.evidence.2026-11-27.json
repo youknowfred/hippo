@@ -551,7 +551,7 @@
  "not_checked": [
   "Acceptance 2's queries (228 of 228) and its 380 hippo rows through the daemon, and acceptance 3 (QUA-6 through the daemon): not taken again. The check's two changes do not touch the embed path; 187 of the 567 rows were rebuilt here and agree.",
   "Acceptance 7 (the 8B arms): not taken again; in process, same code (above).",
-  "The shipped 900 s idle exit, a build's peak memory in the daemon, corpus-c, a quiet machine, the full test suite: not run, as in the evidence file.",
+  "corpus-c in the recall arms, a quiet machine, the full test suite: not run, as in the evidence file. (The shipped 900 s idle exit and a build's peak memory in the daemon were run later the same day: planning/HCR-7.lifetime.evidence.2026-11-27.json.)",
   "A served prompt with HIPPO_RERANK=1 on real weights: not run. The shared deadline is covered by a test with fakes."
  ]
 }
