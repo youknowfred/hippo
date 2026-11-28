@@ -764,7 +764,11 @@ workstream:
           failing first); three tests of tests/test_embed_daemon.py changed
           with the rule they held (the idle exit became the grace; a warm
           rerank is loaded before it is asked for), as did the two fixtures
-          that ended a thread daemon by its idle exit.
+          that ended a thread daemon by its idle exit. In the same pull
+          request, on the owner's word: recall_warm_high.fresh holds its
+          memoized pair by weak reference, so a warm server no longer keeps
+          every index it loaded (open_for_owner (5)); three tests in
+          tests/test_embed_mlx.py, two of them failing first.
         ab_result: >-
           planning/HCR-7.evidence.2026-11-27.json, taken after the port, on
           main's daemon as ported (bench/embed_daemon.py,
@@ -854,12 +858,14 @@ workstream:
           while the 4B stayed busy (4.53 GB), and 0.16 GB with nothing held.
           The server that builds: 0.29 to 0.34 GB on hippo, either model; on
           corpus-c 0.49 GB at its first prompt, 2.41 GB by the last pass and
-          up to 6.89 GB in the minute of prompts after (open_for_owner (5)).
-          Not run: a quiet machine; the full test suite.
+          up to 6.89 GB in the minute of prompts after; with
+          open_for_owner (5) fixed, 0.49 to 0.77 GB through the same build
+          and 0.49 GB after. Not run: a quiet machine; the full test suite.
         open_for_owner: >-
           2026-11-27: (1), (2) and (3) are RULED, (4) lists the builder's
           calls for the owner to overturn, (5) and (6) are defects found
-          while measuring the lifetime and NOT fixed with it.
+          while measuring the lifetime, both fixed since: (5) in the same
+          pull request on the owner's word ("Yes, fix it here"), (6) in #267.
           (1) The default: RULED 2026-11-27, ninth owner ruling ("Keep it
           default"): the daemon stays high's default path with the 0.2 GB
           figure missed. What was put: the acceptance asked for a dated evidence file
@@ -908,23 +914,31 @@ workstream:
           warm server on high (warm recall off, the CLI) the daemon now
           leaves 60 s after each request, so every recall later than that
           would have lost its rerank; under EMB-1's rule that happened once
-          per 15 idle minutes. (5) NOT fixed
-          here: a warm server on high keeps every index it has loaded.
-          recall_warm_high.fresh memoizes on the identity of the (lean, high)
-          pair and holds both objects, up to 65 pairs, and refresh_tier loads
+          per 15 idle minutes. (5) FIXED 2026-11-27 in #266: a warm server on
+          high kept every index it had loaded.
+          recall_warm_high.fresh memoized on the identity of the (lean, high)
+          pair and held both objects, up to 65 pairs, and refresh_tier loads
           both afresh every 30 s and on every served prompt's wake, so each
-          tick pins another pair. On corpus-c that is 100 to 165 MB a tick:
+          tick pinned another pair. On corpus-c that was 100 to 165 MB a tick:
           the building server went from 0.49 GB to 2.41 GB over 15 passes and
           to 6.89 GB in the minute of prompts after, and ten ticks of
           refresh_tier alone added 1.42 GB in a test process (5 MB with the
           memo cleared each time). On hippo's 108 memories the same server
           stayed under 0.45 GB, which is why acceptance point 1 read 0.32 to
           0.39 GB per server. On main since HCR-2, larger since HCR-9's
-          passes; on a large corpus it takes back part of what this item
-          saves. (6) Seen, not changed: a high/ build also embeds the
+          passes; on a large corpus it took back part of what this item
+          saves. The memo now holds the pair by weak reference and forgets
+          it when either index is gone; a pair that stays loaded is still
+          compared once. The same build taken again with the fix: the
+          server 0.49 GB at its first prompt, 0.58 to 0.74 GB as each pass's
+          highest sample (median 0.61, peak 0.77), 0.49 GB through 120
+          prompts after; ten ticks of refresh_tier in a test process, 124
+          MB where it was 1,421. The daemon in that second build: 6.00 GB
+          median, peak 6.57, 5.12 after. (6) Seen while measuring, fixed in
+          #267 (the note that ends this list): a high/ build also embedded the
           corpus's digest sections through the big model (2,879 of corpus-c's
           6,657 rows, about eight of the build's 42 minutes) into a sub-index
-          nothing reads: recall reads digest sections from the lean index
+          nothing read: recall reads digest sections from the lean index
           dir and skips them on a high call. The sixth ruling's three calls,
           as ruled
           2026-11-26 ("as recommended on all three"): (1) The daemon fits the

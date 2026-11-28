@@ -1284,7 +1284,109 @@
     "of_those_served_high": 14
    }
   },
-  "read": "The build's buffers are in the daemon: about 2 GB over the model for either model, back to within 0.8 GB of the idle figure after. The building server is small on a small corpus and is not on corpus-c; see the_server_keeps_every_index_it_loaded."
+  "corpus_c_4b_after_the_memo_fix": {
+   "corpus": "corpus-c",
+   "memories": 1070,
+   "space": "Qwen/Qwen3-Embedding-4B",
+   "tool": "footprint <pid>: phys_footprint, phys_footprint_peak",
+   "mlx_cache_cap_mb": 512,
+   "sample_every_s": 1.0,
+   "load_average": [
+    26.2,
+    19.2
+   ],
+   "index_rows_embedded": 3778,
+   "document_rows_through_the_daemon": 6657,
+   "build_seconds": 3195.3,
+   "passes": 15,
+   "pass_seconds": [
+    499.4,
+    1069.8,
+    369.4,
+    445.9,
+    138.3,
+    73.3,
+    72.0,
+    71.0,
+    47.8,
+    57.0,
+    69.5,
+    82.5,
+    70.9,
+    68.9,
+    51.5
+   ],
+   "level": true,
+   "daemon_gb": {
+    "holding_the_model_before_the_build": 4.32,
+    "building_median": 6.0,
+    "building_median_ci95_mb": [
+     6141.6,
+     6143.8
+    ],
+    "building_p95": 6.26,
+    "building_p95_ci95_mb": [
+     6407.0,
+     6417.3
+    ],
+    "building_sampled_max": 6.38,
+    "samples": 2672,
+    "highest_sample_of_each_pass": [
+     6.09,
+     6.36,
+     6.34,
+     6.32,
+     6.37,
+     6.34,
+     6.36,
+     6.34,
+     6.38,
+     6.36,
+     6.34,
+     6.35,
+     6.37,
+     6.37,
+     6.29
+    ],
+    "peak_phys_footprint_peak": 6.57,
+    "after_the_build_median": 5.12,
+    "after_the_build_median_ci95_mb": [
+     5245.9,
+     5250.8
+    ],
+    "after_the_build_max": 5.16
+   },
+   "building_server_gb": {
+    "at_its_first_prompt": 0.49,
+    "lowest_sample": 0.4,
+    "building_median": 0.61,
+    "highest_sample_of_each_pass": [
+     0.58,
+     0.74,
+     0.62,
+     0.63,
+     0.63,
+     0.62,
+     0.63,
+     0.63,
+     0.64,
+     0.63,
+     0.64,
+     0.65,
+     0.64,
+     0.64,
+     0.64
+    ],
+    "peak_phys_footprint_peak_while_building": 0.77,
+    "after_the_build_median": 0.49,
+    "after_the_build_max": 0.49,
+    "prompts_served_after_the_build": 120,
+    "of_those_served_high": 120
+   },
+   "code": "this change with recall_warm_high.fresh holding its pair by weak reference; the daemon as built",
+   "note": "taken beside heavy load of the owner's own (load average 2 to 168), so the build took 53 minutes"
+  },
+  "read": "The build's buffers are in the daemon: about 2 GB over the model for either model, back to within 0.8 GB of the idle figure after. The building server is small on a small corpus; on corpus-c it was not until the memo fix (the_server_keeps_every_index_it_loaded), and is 0.49 to 0.77 GB with it."
  },
  "two_models_in_one_daemon": {
   "models": [
@@ -1411,9 +1513,25 @@
   "read": "Two sessions on different models make one daemon hold both. The model nobody asks for is dropped on its own clock while the other stays busy (a 20 s window for the run)."
  },
  "the_server_keeps_every_index_it_loaded": {
-  "status": "found while measuring; NOT fixed by this change",
+  "status": "found while measuring; FIXED in the same pull request on the owner's word (\"Yes, fix it here\")",
+  "fix": "the memo holds the (lean, high) pair by weak reference and forgets it when either index is gone; a pair that stays loaded is still compared once",
+  "with_the_fix": {
+   "on_corpus_c_the_building_server_gb": "0.49 at its first prompt, 0.58 to 0.74 as each pass's highest sample (median 0.61, peak 0.77), 0.49 through 120 prompts after (all served high)",
+   "ten_ticks_of_refresh_tier_on_the_level_twin_growth_mb": [
+    104,
+    107,
+    111,
+    112,
+    114,
+    116,
+    119,
+    120,
+    122,
+    124
+   ]
+  },
   "where": "recall_warm_high.fresh (its memo holds every (lean, high) pair it was asked about, up to 65) and refresh_tier (loads both afresh every 30 s and on every served prompt's wake)",
-  "on_corpus_c_the_building_server_gb": "0.49 at its first prompt, 2.41 by the last of 15 passes, 4.43 median and 6.89 at most in the minute of 39 prompts after",
+  "before_the_fix_on_corpus_c_the_building_server_gb": "0.49 at its first prompt, 2.41 by the last of 15 passes, 4.43 median and 6.89 at most in the minute of 39 prompts after",
   "repro_in_a_test_process_no_model": {
    "corpus": "corpus-c",
    "eight_loads_of_the_pair_through_fresh_growth_mb": [
@@ -1452,12 +1570,13 @@
   "on_hippo": "the same server stayed under 0.45 GB with the 4B and under 0.52 GB with the 8B"
  },
  "also_seen_not_changed": [
-  "A high/ build embeds the corpus's digest sections through the big model: 2,879 of the 6,657 document rows of corpus-c's build, about 8 of its 42 minutes (its second pass took 830 s where its neighbours took 312 to 319 s), into a sub-index under high/ that recall does not read."
+  "A high/ build embeds the corpus's digest sections through the big model: 2,879 of the 6,657 document rows of corpus-c's build, about 8 of its 42 minutes (its second pass took 830 s where its neighbours took 312 to 319 s), into a sub-index under high/ that recall does not read. Fixed since in pull request 267; the saving was not re-measured."
  ],
  "tests": {
   "new": "tests/test_embed_daemon_lifetime.py: 18, each seen failing before the code it holds (14 on main; 2 before the failed-passes rule; 1 before the per-model clock; 1 before the explicit recall's retry)",
   "changed_with_the_rule_they_held": "three tests of tests/test_embed_daemon.py and two fixtures (the idle exit became the grace; a warm rerank is loaded before it is asked for)",
-  "ran": "35 test files the change reaches (named in the pull request): 755 passed, 3 skipped, with a short temp path as Linux CI has"
+  "memo": "tests/test_embed_mlx.py: three tests for the freshness memo, two of them failing before the fix",
+  "ran": "the test files the change reaches (named in the pull request), after the rebase onto pull request 267, 37 files: 950 passed, 3 skipped, with a short temp path as Linux CI has"
  },
  "not_run": [
   "A quiet machine: every timing was taken beside the owner's live sessions (load average 2 to 16 in the timed runs, 62 at the end of the 1,800 s one).",

@@ -316,14 +316,13 @@ about 2 seconds into a new daemon from a warm disk cache (about 5 seconds for th
 a reboot) and in about half a second into one that had dropped it; the reranker loads in under half
 a second. While a session builds or refreshes its `high/` index the build's buffers are in the
 daemon, not in the session: the daemon held 5.7 to 6.4 GB through the build of a 1,070-memory
-corpus, peaking at 6.5 (4.3 GB before the build, 5.1 GB after it), and MLX's cache of freed buffers
+corpus, peaking at 6.6 (4.3 GB before the build, 5.1 GB after it), and MLX's cache of freed buffers
 is capped at 512 MB (`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build.
-A warm server itself holds 0.3 to 0.6 GB on a corpus of about a hundred memories. On the
-1,070-memory corpus the server doing the build held 0.5 GB when it began, 2.4 GB by its last pass
-and up to 6.9 GB in the minute after: a warm server on `high` keeps indexes it has already
-replaced, a defect that is measured and not yet fixed. A first build took two to three seconds per
-memory (42 minutes for 1,070 memories, 5 minutes for 108). One session builds a project's index at
-a time, in passes that are kept, so closing a session mid-build loses little.
+A warm server itself holds 0.3 to 0.6 GB on a corpus of about a hundred memories; on the
+1,070-memory corpus the server doing the build held 0.4 to 0.8 GB through it and 0.5 GB after. A
+first build took two to three seconds per memory (5 minutes for 108 memories; 42 minutes for
+1,070, about 8 of them on digest-section rows a build no longer embeds). One session builds a
+project's index at a time, in passes that are kept, so closing a session mid-build loses little.
 
 **The 8B.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model` in the
 plugin's `model.json`) selects Qwen3-Embedding-8B instead; set it before the fetch step so the
