@@ -187,8 +187,9 @@ def pin_blas_threads(environ=None) -> bool:
 
 
 def _kick_rerank() -> None:
-    """High profile with ``HIPPO_RERANK`` on: the warm reranker loads once per process, in
-    the background. Off (the default), nothing loads, so the 0.6 GB and its load stay unpaid."""
+    """High profile with ``HIPPO_RERANK`` on: the warm reranker loads in the background, into
+    the shared daemon (EMB-2) unless ``HIPPO_EMBED_DAEMON=0``. Off (the default), nothing
+    loads, so the 0.6 GB and its load stay unpaid."""
     from .recall_rank import _rerank_enabled
 
     if not _rerank_enabled():
