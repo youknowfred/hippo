@@ -29,7 +29,10 @@ How the two paths coexist (the roadmap's warm-first rule, made concrete):
   failed load: the status records why (the heartbeat carries it; doctor reports it) and the
   server keeps serving lean. Recall never downloads.
 
-Each session's MCP server is its own process, so each loads its own copy of the model.
+Each session's MCP server is its own process. EMB-1: the model itself lives in one shared
+daemon per user (``embed_daemon``); each server holds a client of it, so N sessions hold one
+copy of the weights. When the daemon goes (idle exit, crash) the client reads as not loaded,
+served calls go lean, and the next one asks this thread to bring it back.
 """
 
 from __future__ import annotations
@@ -62,6 +65,8 @@ class _State:
         self.space: Optional[str] = None
         self.load_ms: Optional[float] = None
         self.resident_bytes: Optional[int] = None
+        self.daemon_pid: Optional[int] = None  # EMB-1: the shared embed daemon serving it
+        self.revive = False  # EMB-1: a served call found the daemon gone; reload it
         self.tiers: List[Tuple[str, str]] = []
         self.engaged = False
         self.thread: Optional[threading.Thread] = None
@@ -149,6 +154,8 @@ def status() -> Dict:
         "load_ms": round(_ST.load_ms, 1) if _ST.load_ms is not None else None,
         "resident_bytes": _ST.resident_bytes,
     }
+    if _ST.daemon_pid is not None:
+        out["daemon_pid"] = _ST.daemon_pid
     if _ST.rerank is not None:
         from .rerank_mlx import status as rerank_status
 
@@ -216,6 +223,9 @@ def kick(memory_dir) -> None:
     with _ST.lock:
         _ST.tiers = _tiers(memory_dir)
         if _ST.thread is not None and _ST.thread.is_alive() and _ST.space == space:
+            emb = E._LOADED.get(space)
+            if emb is not None and not getattr(emb, "alive", True):
+                _ST.revive = True  # EMB-1: the shared daemon went; this prompt serves lean
             _ST.wake.set()
             return
         if _ST.status == "failed" and _ST.space == space:
@@ -235,13 +245,13 @@ def _run(space: str) -> None:
 
     try:
         emb = E.high_embedder(space)
-        _ST.load_ms = getattr(emb, "load_ms", None)
-        _ST.resident_bytes = getattr(emb, "resident_bytes", None)
-        _ST.status = "ready"
+        _note_loaded(emb)
     except Exception as exc:
         _ST.status, _ST.reason = "failed", f"model load failed: {exc}"
         return
     while _ST.space == space:
+        if _ST.revive:
+            _revive(emb)
         for memory_dir, index_dir in list(_ST.tiers):
             try:
                 refresh_tier(memory_dir, index_dir, space)
@@ -249,6 +259,29 @@ def _run(space: str) -> None:
                 pass  # the next pass retries; serving stays lean meanwhile
         _ST.wake.wait(REFRESH_EVERY_S)
         _ST.wake.clear()
+
+
+def _note_loaded(emb) -> None:
+    _ST.load_ms = getattr(emb, "load_ms", None)
+    _ST.resident_bytes = getattr(emb, "resident_bytes", None)
+    _ST.daemon_pid = getattr(emb, "daemon_pid", None)
+    _ST.status, _ST.reason = "ready", ""
+
+
+def _revive(emb) -> None:
+    """EMB-1: respawn the shared daemon and reload the model, on this thread. Only a served
+    call sets the flag, so a session nobody prompts never keeps an idle daemon alive. A
+    failure leaves the flag down; the next served call raises it again."""
+    _ST.revive = False
+    revive = getattr(emb, "revive", None)
+    if revive is None or getattr(emb, "alive", True):
+        return
+    _ST.status, _ST.reason = "loading", "the shared embed daemon is restarting"
+    try:
+        revive()
+        _note_loaded(emb)
+    except Exception as exc:
+        _ST.reason = f"the shared embed daemon did not come back: {exc}"
 
 
 def _build_lock(hdir: str):
@@ -284,6 +317,13 @@ def refresh_tier(memory_dir: str, index_dir: str, space: str) -> bool:
         return True  # an empty tier (see _plan): nothing to embed, and no twin is made for it
     if fresh(lean, load_index(hdir), space):
         return True
+    from .embed_mlx import _LOADED
+
+    emb = _LOADED.get(space)
+    if emb is not None and not getattr(emb, "alive", True):
+        # EMB-1: the shared daemon is gone. A build now would fail every embed and write the
+        # twin back with no rows; it waits for a served call to bring the daemon back.
+        return False
     lock = _build_lock(hdir)
     if lock is None:
         return False  # another session is building this twin; the next wake reads its result
@@ -434,7 +474,8 @@ def doctor_meaning(lean: str, profile: str) -> Tuple[str, str]:
     if h.get("load_ms") is not None:
         bits.append(f"model load {h['load_ms'] / 1000:.1f} s")
     if h.get("resident_bytes"):
-        bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident")
+        bits.append(f"{h['resident_bytes'] / 2**30:.1f} GiB resident"
+                    + (f" in the shared embed daemon (pid {h['daemon_pid']})" if h.get("daemon_pid") else ""))
     rr = h.get("rerank") if isinstance(h.get("rerank"), dict) else {}
     if rr.get("model"):
         bits.append(f"reranker {rr['model']} {rr.get('status') or 'idle'}"
