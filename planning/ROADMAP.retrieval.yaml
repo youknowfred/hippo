@@ -675,8 +675,21 @@ workstream:
           next slice. Not ported from #262, because main's daemon already
           answers them its own way: heartbeat reaping, the space-and-version
           socket key, coalescing (never built on main; measured not
-          byte-identical and no faster), a doctor line asked of the daemon
-          itself. Tests: tests/test_embed_daemon_faults.py (13) beside
+          byte-identical and no faster). (4) An independent check of the port
+          by a second session, the same day, added two things it found short
+          of the ruling: a served prompt's rerank ends with the prompt's
+          attempt, as its query embed does (each had its own bound, 0.75 s
+          and 0.8 s, together past the 1.5 s budget; only with
+          HIPPO_RERANK=1), and doctor's retrieval-profile line asks the
+          daemon on its socket (not running, running with nothing loaded, or
+          what it holds), where it had named the daemon only through a warm
+          server's heartbeat. It also found six of the port's fault tests
+          erroring at setup on Linux, never run there (two fixtures made one
+          directory once the socket path was short enough to sit under it),
+          and fixed the fixture. Tests: tests/test_embed_daemon_faults.py
+          (14), tests/test_embed_daemon_gaps.py (8: six written against main
+          before the port, five of which failed there, and two for the
+          check's changes) beside
           EMB-1/EMB-2's tests/test_embed_daemon.py (15).
         ab_result: >-
           planning/HCR-7.evidence.2026-11-27.json, taken after the port, on
@@ -721,7 +734,26 @@ workstream:
           "Keep the 4B", and no default changed. (8) No internet socket open
           in the daemon, one unix socket at 0600 under the data dir, nothing
           installed; with its idle exit set to 60 s for the run it left by
-          itself 47 s after the last server.
+          itself 47 s after the last server. CHECKED the same day by a second
+          session (planning/HCR-7.verification.evidence.2026-11-27.json), on
+          the branch with the check's two changes. The server run taken
+          again agrees on every count: one copy, the daemon 4.70 GB to the
+          megabyte, servers 0.32 to 0.39 GB (three read 0.32, seven 0.37 to
+          0.39), none raised, no trip and none over budget in 300 burst
+          prompts [0, 0.013] and in 30 of each fault [0, 0.11], all 90 fault
+          prompts lean, 20 of 20 starts one daemon, 33 of 33 kills revived by
+          the servers; burst median 116 ms [107, 127], p95 795 ms [708, 825],
+          slowest 990 ms, 113 served high, at a lower load average (3.8 to
+          4.8). Ten lean warm servers re-measured on the port's code: 0.29 to
+          0.30 GB. Main's daemon before the port, built with real weights:
+          182 of 187 rows byte-identical to in-process [0.939, 0.989] (five
+          golden rows differ in their last bits); the port, 187 of 187. The
+          warm reranker through the daemon, not run before: 180 of 180 scores
+          identical to in-process [0.979, 1], the daemon holding the reranker
+          alone (0.57 GB). The three carried sets (the 8B arms, the
+          in-process arms, the lean servers) hold as carried: the model
+          classes, the scoring function and every recall, ranking and index
+          file are the same bytes on the branch as where they ran.
         open_for_owner: >-
           OPEN, 2026-11-27, after the eighth ruling ("(a) Port onto main").
           (1) The default. The acceptance asked for a dated evidence file

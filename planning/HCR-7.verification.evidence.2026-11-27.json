@@ -1,0 +1,557 @@
+{
+ "item": "HCR-7: an independent check of planning/HCR-7.evidence.2026-11-27.json",
+ "date": "2026-11-27",
+ "what_this_file_is": "A second session took the server run again, measured main's daemon before the port, ran the reranker through the daemon and re-measured the lean servers, to check the evidence file beside this one. Counts, timings and byte comparisons only: no query text, no memory name, no path.",
+ "code": "the branch after the check's two changes (the reranker client's wait ends with the prompt's attempt; doctor's line asks the daemon). The first run was taken before them, on the same embed, query and serve lines.",
+ "method": "bench/embed_daemon.py servers with its defaults (ten real MCP servers, thirty rounds, three fault rounds, twenty start trials, a 60 s idle exit), its own scratch project and data dir, one MLX model process at a time, the owner's sessions running beside it. Proportions carry 95% Wilson intervals; medians and p95s carry 95% bootstrap intervals; a slowest call is the observed one.",
+ "load_average": {
+  "this_run": [
+   4.8,
+   3.8
+  ],
+  "the_first_run": [
+   2.9,
+   7.0
+  ]
+ },
+ "acceptance_1_one_copy": {
+  "this_run": {
+   "server_phys_footprint_gb": [
+    0.318,
+    0.321,
+    0.321,
+    0.371,
+    0.372,
+    0.373,
+    0.373,
+    0.376,
+    0.387,
+    0.387
+   ],
+   "server_mb": {
+    "n": 10,
+    "unit": "MB",
+    "median": 382.0,
+    "median_ci95": [
+     329.0,
+     396.0
+    ],
+    "p95": 396.0,
+    "p95_ci95": [
+     382.0,
+     396.0
+    ],
+    "max": 396.0
+   },
+   "daemon_phys_footprint_gb": 4.697,
+   "copies_of_the_model": 1,
+   "servers_mapping_an_mlx_library": 0,
+   "servers_under_0_2_gb": 0,
+   "all_eleven_processes_gb": 8.3
+  },
+  "the_first_run": {
+   "server_phys_footprint_gb": [
+    0.369,
+    0.369,
+    0.371,
+    0.371,
+    0.377,
+    0.377,
+    0.377,
+    0.382,
+    0.383,
+    0.384
+   ],
+   "daemon_phys_footprint_gb": 4.697,
+   "all_eleven_processes_gb": 8.46
+  },
+  "ten_lean_warm_servers_no_daemon": {
+   "re_measured_on_the_ports_code_gb": [
+    0.292,
+    0.292,
+    0.292,
+    0.293,
+    0.294,
+    0.294,
+    0.294,
+    0.296,
+    0.296,
+    0.298
+   ],
+   "as_carried_in_the_evidence_file_gb": [
+    0.294,
+    0.295,
+    0.296,
+    0.297,
+    0.303,
+    0.307,
+    0.307,
+    0.308,
+    0.312,
+    0.313
+   ],
+   "breaker_trips": 0
+  },
+  "read": "One copy, and the same daemon footprint to the megabyte. Three servers of this run read 0.32 GB where the first run's lowest read 0.37; the other seven read 0.37 to 0.39 GB, the first run's ten 0.37 to 0.38. Every server of both runs is over 0.2 GB, and so is every lean server with no daemon: the figure in the roadmap's acceptance is missed as the evidence file says, and cannot be met by any warm server."
+ },
+ "acceptance_4_faults": {
+  "absent_then_starting": {
+   "this_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 94.2,
+    "median_ci95": [
+     78.8,
+     106.9
+    ],
+    "p95_ms": 126.2,
+    "p95_ci95": [
+     116.0,
+     145.5
+    ],
+    "slowest_ms": 145.5
+   },
+   "the_first_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 164.4,
+    "median_ci95": [
+     148.4,
+     176.7
+    ],
+    "p95_ms": 205.6,
+    "p95_ci95": [
+     188.8,
+     242.3
+    ],
+    "slowest_ms": 242.3
+   }
+  },
+  "slow": {
+   "this_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 71.8,
+    "median_ci95": [
+     65.2,
+     96.1
+    ],
+    "p95_ms": 819.2,
+    "p95_ci95": [
+     813.8,
+     824.7
+    ],
+    "slowest_ms": 824.7,
+    "refused_busy_by_the_daemon": 21,
+    "prompts_that_waited_and_timed_out": 9
+   },
+   "the_first_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 92.7,
+    "median_ci95": [
+     80.2,
+     115.8
+    ],
+    "p95_ms": 825.4,
+    "p95_ci95": [
+     814.3,
+     830.0
+    ],
+    "slowest_ms": 830.0,
+    "refused_busy_by_the_daemon": 23,
+    "prompts_that_waited_and_timed_out": 7
+   }
+  },
+  "killed_mid_call": {
+   "this_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 250.4,
+    "median_ci95": [
+     244.0,
+     253.0
+    ],
+    "p95_ms": 266.9,
+    "p95_ci95": [
+     257.9,
+     275.7
+    ],
+    "slowest_ms": 275.7,
+    "prompts_whose_wait_was_cut_by_the_kill": 30,
+    "daemon_restarted": {
+     "by_the_servers": 33,
+     "by_this_bench": 0
+    }
+   },
+   "the_first_run": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "median_ms": 299.7,
+    "median_ci95": [
+     291.7,
+     308.3
+    ],
+    "p95_ms": 346.8,
+    "p95_ci95": [
+     323.7,
+     408.7
+    ],
+    "slowest_ms": 408.7,
+    "prompts_whose_wait_was_cut_by_the_kill": 30,
+    "daemon_restarted": {
+     "by_the_servers": 33,
+     "by_this_bench": 0
+    }
+   }
+  }
+ },
+ "acceptance_5_burst": {
+  "this_run": {
+   "prompts": 300,
+   "raised": 0,
+   "raised_ci95": [
+    0.0,
+    0.0126
+   ],
+   "breaker_tripped": 0,
+   "breaker_tripped_ci95": [
+    0.0,
+    0.0126
+   ],
+   "over_budget": 0,
+   "over_budget_ci95": [
+    0.0,
+    0.0126
+   ],
+   "served_high": 113,
+   "served_high_ci95": [
+    0.3237,
+    0.4327
+   ],
+   "served_lean": 187,
+   "median_ms": 116.2,
+   "median_ci95": [
+    106.6,
+    126.7
+   ],
+   "p95_ms": 795.4,
+   "p95_ci95": [
+    707.6,
+    825.1
+   ],
+   "slowest_ms": 989.7,
+   "daemon": {
+    "queries": 121,
+    "busy": 129,
+    "expired": 4
+   },
+   "load_average": 4.14697265625
+  },
+  "the_first_run": {
+   "prompts": 300,
+   "raised": 0,
+   "raised_ci95": [
+    0.0,
+    0.0126
+   ],
+   "breaker_tripped": 0,
+   "breaker_tripped_ci95": [
+    0.0,
+    0.0126
+   ],
+   "over_budget": 0,
+   "over_budget_ci95": [
+    0.0,
+    0.0126
+   ],
+   "served_high": 106,
+   "served_high_ci95": [
+    0.3014,
+    0.409
+   ],
+   "served_lean": 194,
+   "median_ms": 192.2,
+   "median_ci95": [
+    173.0,
+    214.0
+   ],
+   "p95_ms": 873.9,
+   "p95_ci95": [
+    739.7,
+    890.8
+   ],
+   "slowest_ms": 1154.1,
+   "daemon": {
+    "queries": 118,
+    "busy": 97,
+    "expired": 5
+   },
+   "load_average": 6.20654296875
+  }
+ },
+ "acceptance_6_one_daemon": {
+  "this_run": {
+   "trials": 20,
+   "left_exactly_one_daemon": 20,
+   "ci95": [
+    0.8389,
+    1.0
+   ],
+   "and_it_had_loaded_nothing": 20
+  },
+  "the_first_run": {
+   "trials": 20,
+   "left_exactly_one_daemon": 20,
+   "ci95": [
+    0.8389,
+    1.0
+   ],
+   "and_it_had_loaded_nothing": 20
+  },
+  "daemons_after_ten_simultaneous_first_prompts": [
+   1,
+   1
+  ]
+ },
+ "acceptance_8_conditions": {
+  "this_run": {
+   "socket_no_port": {
+    "daemon_internet_sockets": 0,
+    "daemon_unix_sockets": 1,
+    "socket_mode": "0o600",
+    "socket_dir_mode": "0o700",
+    "socket_under_plugin_data": true
+   },
+   "left_by_itself": {
+    "daemons_left": 0,
+    "seconds_after_the_last_server_exited": 47.1
+   },
+   "every_server_still_accepting": 10,
+   "doctor_line": {
+    "names_the_daemon": true,
+    "the_daemons_own_word_on_its_state": true,
+    "note": ""
+   },
+   "doctor_line_as_printed": "dense Qwen/Qwen3-Embedding-4B via MLX in the shared embed daemon, for every warm server (the spawned hook serves lean: dense lean); embed daemon running (pid N), holding Qwen/Qwen3-Embedding-4B: the one copy on this machine; warm server ready, serving high, model load 1.0 s, 3.9 GiB resident in the shared embed daemon (pid N), 19 prompt(s) served lean because the embed daemon did not answer (last: DenseUnavailable: the shared embed daemon is gone (embed daemon closed the connection))"
+  },
+  "the_first_run": {
+   "socket_no_port": {
+    "daemon_internet_sockets": 0,
+    "daemon_unix_sockets": 1,
+    "socket_mode": "0o600",
+    "socket_dir_mode": "0o700",
+    "socket_under_plugin_data": true
+   },
+   "left_by_itself": {
+    "daemons_left": 0,
+    "seconds_after_the_last_server_exited": 47.4
+   }
+  }
+ },
+ "acceptance_2_builds_before_and_after_the_port": {
+  "what": "the golden corpus and the starter packs built through the daemon and compared, row by row, with the in-process rows the evidence file uses",
+  "main_at_d74c560_32_documents_per_request": {
+   "byte_identical": 182,
+   "of": 187,
+   "ci95": [
+    0.9389,
+    0.9885
+   ],
+   "by_corpus": {
+    "golden": "95/100",
+    "packs": "87/87"
+   },
+   "largest_component_difference_on_unit_vectors": 4.675239324569702e-07
+  },
+  "this_branch_one_request_per_pass": {
+   "byte_identical": 187,
+   "of": 187,
+   "ci95": [
+    0.9799,
+    1.0
+   ],
+   "by_corpus": {
+    "golden": "100/100",
+    "packs": "87/87"
+   },
+   "largest_component_difference_on_unit_vectors": 0.0
+  },
+  "read": "The 32-per-request builds were not byte-identical: five rows of the golden corpus differ in their last bits (cosine to the in-process row 0.9999998). The packs' rows are long enough to be one slice each either way. One request per pass gives the in-process bytes on both."
+ },
+ "the_reranker_through_the_daemon": {
+  "what": "each golden hard-set query against ten memories, scored in-process and then through the daemon; the evidence file lists this as not run",
+  "model": "Qwen/Qwen3-Reranker-0.6B",
+  "pairs": 180,
+  "scores_identical": 180,
+  "identical_ci95": [
+   0.9791,
+   1.0
+  ],
+  "largest_score_difference": 0.0,
+  "the_daemon_held": [
+   "Qwen/Qwen3-Reranker-0.6B"
+  ],
+  "embedders_it_loaded_for_this": 0,
+  "reranker_resident_gb": 0.572,
+  "mlx_modules_imported_by_the_client_process": []
+ },
+ "carried_numbers": {
+  "what": "the evidence file carries three sets from runs taken on the first build's branch (pull request 262) with the models in process: the 8B with the warm reranker in hook mode, the in-process arms, and the lean servers",
+  "checked_by": "a diff of plugin/ and bench/ between the commit those runs used and this branch",
+  "holds": true,
+  "why": "The embedder and reranker classes, the scoring function, every recall, ranking and index file and bench/space_calibration.py are the same bytes. What differs is which object the two backend seams hand out, and those runs set HIPPO_EMBED_DAEMON=0, which picks the in-process class on both. The lean servers were re-measured anyway (above)."
+ },
+ "tests": {
+  "gap_tests_written_against_main_before_the_port": "tests/test_embed_daemon_gaps.py: five of six failed on main at d74c560; all six pass on this branch, also with a short temp dir (Linux's socket path)",
+  "found_in_ci": "six of the port's fault tests errored at setup on Linux and had not run there: two fixtures made the same directory once the socket path was short enough to sit under it. Fixed; they pass."
+ },
+ "agreement": {
+  "counts": "identical in both runs: 0 raised, 0 breaker trips and 0 over budget in 300 burst prompts and in 30 prompts of each fault; all 90 fault prompts lean; 20 of 20 starts left one daemon; one daemon after ten simultaneous first prompts; 33 of 33 kills revived by the servers; no internet socket; socket 0600 in a 0700 directory",
+  "differences": {
+   "burst_served_high": [
+    113,
+    106
+   ],
+   "burst_median_ms": [
+    116.2,
+    192.2
+   ],
+   "burst_slowest_ms": [
+    989.7,
+    1154.1
+   ],
+   "slow_refused_at_once": [
+    21,
+    23
+   ],
+   "read": "this run then the first. Timings are lower here at a lower load average; nothing changes side."
+  }
+ },
+ "not_checked": [
+  "Acceptance 2's queries (228 of 228) and its 380 hippo rows through the daemon, and acceptance 3 (QUA-6 through the daemon): not taken again. The check's two changes do not touch the embed path; 187 of the 567 rows were rebuilt here and agree.",
+  "Acceptance 7 (the 8B arms): not taken again; in process, same code (above).",
+  "The shipped 900 s idle exit, a build's peak memory in the daemon, corpus-c, a quiet machine, the full test suite: not run, as in the evidence file.",
+  "A served prompt with HIPPO_RERANK=1 on real weights: not run. The shared deadline is covered by a test with fakes."
+ ]
+}
