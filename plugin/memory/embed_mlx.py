@@ -453,18 +453,8 @@ class _MLXEmbedder:
         return iter(self._encode([query_text(t) for t in texts]))
 
 
-def _default_backend(model: str, dim: int, snap: str):
-    """EMB-1: a client of the per-user shared daemon (``embed_daemon``), so N sessions hold
-    one copy of the weights; ``HIPPO_EMBED_DAEMON=0`` loads in this process as before."""
-    from . import embed_daemon
-
-    if embed_daemon.enabled():
-        return embed_daemon.DaemonEmbedder(model, dim, snap)
-    return _MLXEmbedder(model, dim, snap)
-
-
 # Tests replace this with a deterministic fake: (model, dim, snapshot_dir) -> embedder.
-BACKEND: Callable[[str, int, str], object] = _default_backend
+BACKEND: Callable[[str, int, str], object] = _MLXEmbedder
 _LOADED: Dict[str, object] = {}
 _LOAD_LOCK = threading.Lock()
 
@@ -491,7 +481,5 @@ def high_embedder(space: str):
 
 
 def loaded(space: str):
-    """The embedder already in memory for ``space``, or None — never loads. EMB-1: a daemon
-    client whose daemon has gone (idle exit, crash) reads as None until it is revived."""
-    hit = _LOADED.get(space)
-    return hit if hit is not None and getattr(hit, "alive", True) else None
+    """The embedder already in memory for ``space``, or None — never loads."""
+    return _LOADED.get(space)

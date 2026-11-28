@@ -37,11 +37,6 @@ Scoring is the model card's, exactly: a causal LM reads
 right-padded and the last real position gathered per row (exact for a causal model, as in
 ``embed_mlx``), so only those rows go through the tied output head. All MLX work runs on
 ``embed_mlx.mlx_executor()``, the process's one MLX thread.
-
-EMB-2: the model itself loads once per user, in the shared daemon (``embed_daemon``) beside
-the embedder; ``BACKEND`` hands each process a client of it. A client whose daemon has gone
-reads as not loaded: the warm path keeps the fused order and its next served call revives it
-in the background; an explicit surface revives it on the call, as it would load it.
 """
 
 from __future__ import annotations
@@ -287,18 +282,8 @@ class _MLXReranker:
         return out
 
 
-def _default_backend(model: str, snap: str):
-    """EMB-2: a client of the per-user shared daemon (``embed_daemon``), so every session's
-    server shares one copy; ``HIPPO_EMBED_DAEMON=0`` loads in this process as before."""
-    from . import embed_daemon
-
-    if embed_daemon.enabled():
-        return embed_daemon.DaemonReranker(model, snap)
-    return _MLXReranker(model, snap)
-
-
 # Tests replace this with a deterministic fake: (model, snapshot_dir) -> reranker.
-BACKEND: Callable[[str, str], object] = _default_backend
+BACKEND: Callable[[str, str], object] = _MLXReranker
 _LOADED: Dict[str, object] = {}
 _STATUS: Dict[str, Dict] = {}  # model -> {"status": loading|ready|failed, "reason", ...}
 _LOAD_LOCK = threading.Lock()
@@ -309,45 +294,20 @@ class RerankUnavailable(RuntimeError):
 
 
 def loaded(model: str):
-    """The reranker already in memory, or None — never loads. EMB-2: a daemon client whose
-    daemon has gone reads as None until it is revived."""
-    hit = _LOADED.get(model)
-    return hit if hit is not None and getattr(hit, "alive", True) else None
-
-
-def _record(model: str, rr) -> None:
-    _STATUS[model] = {
-        "status": "ready",
-        "reason": "",
-        "load_ms": getattr(rr, "load_ms", None),
-        "resident_bytes": getattr(rr, "resident_bytes", None),
-    }
-    if getattr(rr, "daemon_pid", None) is not None:
-        _STATUS[model]["daemon_pid"] = rr.daemon_pid
-
-
-def _revive(model: str, rr) -> None:
-    """EMB-2: bring a gone daemon back and reload ``model`` in it. Raises
-    ``RerankUnavailable``; unlike a failed load, a failed revive is not remembered."""
-    try:
-        rr.revive()
-    except Exception as exc:
-        raise RerankUnavailable(f"the shared embed daemon did not come back: {exc}") from exc
-    _record(model, rr)
+    """The reranker already in memory, or None — never loads."""
+    return _LOADED.get(model)
 
 
 def reranker(model: str):
     """The loaded reranker for ``model``, loading it from the pinned snapshot if needed —
     offline only. Raises ``RerankUnavailable``; a failed load is remembered, so later
     calls in this process fall back to the MiniLM instead of retrying a broken load."""
-    hit = loaded(model)
+    hit = _LOADED.get(model)
     if hit is not None:
         return hit
     with _LOAD_LOCK:
         hit = _LOADED.get(model)
         if hit is not None:
-            if not getattr(hit, "alive", True):
-                _revive(model, hit)  # an explicit surface, which may load: it may revive
             return hit
         reason = unavailable_reason(model)
         if reason:
@@ -359,7 +319,12 @@ def reranker(model: str):
             _STATUS[model] = {"status": "failed", "reason": f"model load failed: {exc}"}
             raise RerankUnavailable(str(exc)) from exc
         _LOADED[model] = rr
-        _record(model, rr)
+        _STATUS[model] = {
+            "status": "ready",
+            "reason": "",
+            "load_ms": getattr(rr, "load_ms", None),
+            "resident_bytes": getattr(rr, "resident_bytes", None),
+        }
         return rr
 
 
@@ -367,13 +332,6 @@ def start_loading(model: str) -> None:
     """Load ``model`` on a daemon thread, once per process (the warm server's path: the
     cold load never lands on a served call). Unservable here: recorded, nothing started."""
     with _LOAD_LOCK:
-        hit = _LOADED.get(model)
-        if hit is not None and not getattr(hit, "alive", True) and model not in _REVIVING:
-            # EMB-2: the shared daemon went. A served call asked for the model, so bring it
-            # back off the serving path; this call keeps the fused order meanwhile.
-            _REVIVING.add(model)
-            threading.Thread(target=_bg_revive, args=(model, hit), name="hippo-rerank", daemon=True).start()
-            return
         if model in _LOADED or model in _STATUS:
             return
         reason = unavailable_reason(model)
@@ -389,21 +347,6 @@ def start_loading(model: str) -> None:
             pass  # recorded in _STATUS; serving keeps today's behavior
 
     threading.Thread(target=_bg, name="hippo-rerank", daemon=True).start()
-
-
-_REVIVING: set = set()
-
-
-def _bg_revive(model: str, rr) -> None:
-    """Without ``_LOAD_LOCK``: a served call's ``start_loading`` takes that lock, and must not
-    wait out a reload. A revive racing an explicit surface's is harmless (both idempotent)."""
-    try:
-        if not getattr(rr, "alive", True):
-            _revive(model, rr)
-    except Exception:
-        pass  # the next served call tries again
-    finally:
-        _REVIVING.discard(model)
 
 
 def status(model: str) -> Dict:
@@ -444,7 +387,6 @@ def score(model: str, query: str, docs: List[str]) -> List[float]:
 
 
 def _reset_for_tests() -> None:
-    _REVIVING.clear()
     _LOADED.clear()
     _STATUS.clear()
     _BUSY.update({m: threading.Lock() for m in RERANK_MODELS})  # a leftover scoring keeps its old one

@@ -1045,11 +1045,6 @@ where a setting can live (environment, plugin option, `hippo.json`) and which wi
   doctor warns while it is set.
 - `HIPPO_MLX_CACHE_MB` — the cap on MLX's buffer cache in a process that loads a `high`
   model (default 512; `0` keeps no cache). Uncapped, an index build grew it by gigabytes.
-- `HIPPO_EMBED_DAEMON=0` — load the `high` embedder and the Qwen3 reranker inside each process
-  that uses them instead of in the one shared daemon (`embed_daemon`, a 0600 Unix socket under
-  `${CLAUDE_PLUGIN_DATA}/embedd/`). On by default.
-- `HIPPO_EMBED_DAEMON_IDLE_S` — seconds without a load, embed or rerank before the shared daemon exits
-  and gives its memory back (default 900). The next prompt that wants `high` brings it back.
 - `HIPPO_RERANK=1` — rerank on the per-prompt path (fastembed's MiniLM on `lean`, the warm
   Qwen3-Reranker-0.6B on `high`). Off by default on every profile.
 - `HIPPO_RERANK_TIMEOUT` — seconds before a rerank gives up and the fused order stands.
