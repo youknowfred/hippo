@@ -7,6 +7,71 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.50.1 — 2026-11-27 — "Only what is used"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**.
+Nothing re-indexes.
+
+**Operator action: none required.** Restart open sessions to load it. It matters only on the
+`high` profile. If you set `HIPPO_EMBED_DAEMON_IDLE_S`, read the first item: it now means
+something else.
+
+**Changed**
+- **The shared embed daemon's lifetime, as the owner ruled it.** In v1.50.0 the daemon exited
+  after 15 minutes with no request, so every session on `high` met a cold reload about once per
+  quiet quarter hour. Now:
+  - it stays while any warm server on `high` is alive, and leaves 60 s after the last one goes,
+    with nothing in flight;
+  - a model nobody has asked for in 30 minutes is dropped and its memory handed back, while the
+    process keeps listening at about 0.2 GB. Each model has its own clock.
+    `HIPPO_EMBED_DAEMON_IDLE_S` keeps its name and now sets this window (default 1,800 s); in
+    v1.50.0 it was when the process exited;
+  - a daemon whose model fails three passes in a row leaves, so the next call starts a fresh
+    one. Seen while measuring: a daemon that had lost Metal's compiler service failed every
+    query while still answering that it was ready.
+
+  A served prompt still never waits on a load: the first one after a drop is served `lean`
+  (20 of 20 [0.84, 1] on real weights, 48 ms [44, 69]) and the model is back 0.49 s
+  [0.45, 0.54] after it, against 1.85 s [1.81, 1.88] for v1.50.0's restart. Replaying 56 hours of
+  one machine's prompts, the share that meet a dropped model falls from 3.0% [2.0, 4.4] to
+  1.2% [0.7, 2.3] (a model of daemon activity, not a measurement of it).
+- **An explicit recall (`/hippo:recall`, the MCP `recall` tool) brings back a daemon that has
+  left and asks again.** It used to keep the fused order for that call. With no warm server on
+  `high` (warm recall off, the CLI) the daemon now leaves a minute after each request, so
+  without this most such recalls would have lost their rerank.
+- `/hippo:doctor`'s retrieval-profile line says when the daemon has dropped its model.
+
+**Fixed**
+- **On `high`, a warm server kept every index it had loaded.** Its freshness check held each
+  (`lean`, `high`) pair of indexes it compared, up to 65 pairs, and the server reloads both every
+  30 s and on every prompt's wake. On a 1,070-memory corpus that held 100 to 165 MB more each
+  time: the building server went from 0.49 GB to 2.41 GB over a build and to 6.89 GB in the
+  minute of prompts after. It now forgets a pair once either index is gone. The same build
+  taken again on real weights with the fix: the building server at 0.49 GB at its first prompt,
+  0.58 to 0.74 GB as each pass's highest sample (median 0.61, peak 0.77), and 0.49 GB through 120
+  prompts after (one build each way).
+- **On `high`, building the `high/` index no longer embeds digest sections that nothing reads.**
+  The `high/` build ran the same digest-section step as the `lean` build, so every `### <slug>`
+  section of a fold digest went through the big model too. Recall never reads sections from
+  `high/`: it reads them from the `lean` index, and skips them on a call served `high`, because
+  they are in `lean`'s embedding space. On a 1,070-memory corpus that was 2,879 of the build's
+  6,657 rows and about 8 of its 42 minutes (one run, measured before the fix; the saving was
+  not re-measured after it). Now a `high/` build embeds and writes no sections. The `lean`
+  index's sections are untouched, and what recall returns does not change. A `high/` index built
+  before this holds `sections.*` files under `high/`; its next build removes them, and nothing is
+  rebuilt to remove them sooner.
+- README's cost of `high` is re-measured through the daemon: holding the 4B, 4.32 GB; while
+  building a 1,070-memory corpus, 6.01 GB median (peak 6.49); the 8B, 7.63 GB held and 9.10 GB
+  median while building. One daemon holding both models for two sessions, 12.0 GB.
+
+**Not changed:** the spawned recall hook, the `lean` and `floor` profiles, and digest sections
+on a `high` call (still not served; a `high` index of their own is a separate item).
+
+Built as #266 (the daemon's lifetime, the explicit recall's retry, the warm server's indexes,
+the cost paragraph; evidence `planning/HCR-7.lifetime.evidence.2026-11-27.json`) and #267 (the
+digest sections).
+
 ## v1.50.0 — 2026-11-27 — "One embedder per machine"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
