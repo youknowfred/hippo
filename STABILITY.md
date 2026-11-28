@@ -99,7 +99,7 @@ These may change at any release without a major bump — do not build on them:
   `retrieval_profile` key in the plugin's `model.json` (`floor`, `lean`, `high`), the high
   profile's `HIPPO_HIGH_EMBED_MODEL` / `HIPPO_HIGH_EMBED_DIM` and their preset keys,
   `HIPPO_MLX_CACHE_MB` (the cap on MLX's buffer cache in a process that loads a high model),
-  `HIPPO_EMBED_DAEMON` / `HIPPO_EMBED_DAEMON_IDLE_S` (the shared embedder and reranker daemon, from v1.50), the
+  `HIPPO_EMBED_DAEMON_IDLE_S` (the idle exit of the shared embedder and reranker daemon, from v1.50), the
   `high/` index beside the main one, and the `hippo setup --profile` flags. Also the two
   places the high embedding space's calibration shows: the `floor_sweep.high.json` report
   `hippo eval --floor-sweep` writes beside `floor_sweep.json` on a high-profile machine (a

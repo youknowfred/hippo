@@ -101,7 +101,7 @@ def project(tmp_path, monkeypatch):
     with open(os.path.join(md, "MEMORY.md"), "w", encoding="utf-8") as fh:
         fh.write("# Memory Index\n\n## User\n")
     data = str(tmp_path / "data")
-    os.makedirs(data)
+    os.makedirs(data, exist_ok=True)  # a fixture before this one may have put the daemon's socket dir in it
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", project)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))

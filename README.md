@@ -288,30 +288,34 @@ three to five corpora. To compare the profiles on your own corpus, run `python -
 
 ### How `high` behaves
 
-**What `high` changes, and what it does not.** Only the session's warm server loads the big
-models. It keeps a second index, `high/`, beside the usual one and serves from it once that index
-has caught up. The spawned recall hook is untouched: on every profile it serves the `lean` index
-with the `lean` model, inside the same budget as before. Ranking, filtering, trust checks and the
-injection budget are the same code on all three profiles.
+**What `high` changes, and what it does not.** Only warm recall uses the big models, and they load
+once: in one daemon per user, which hippo starts when a warm server first needs it and every
+session's warm server shares (a private Unix socket under the plugin's data directory; no port,
+nothing to install). Each warm server keeps a second index, `high/`, beside the usual one and
+serves from it once that index has caught up. The spawned recall hook is untouched: on every
+profile it serves the `lean` index with the `lean` model, inside the same budget as before.
+Ranking, filtering, trust checks and the injection budget are the same code on all three profiles.
 
 **When `high` cannot serve, recall serves `lean`.** That covers a machine that is not an Apple
 Silicon Mac, MLX not installed, weights not fetched, a model that failed to load, a `high/` index
-still catching up after the corpus changed, and warm recall being off. A rerank that runs past its
+still catching up after the corpus changed, and warm recall being off. It also covers the daemon:
+not running yet, still loading, too busy to answer in time, or gone in the middle of a call. That
+one prompt is served `lean` and the session carries on; the first prompt after the daemon's idle
+exit is such a prompt, and it brings the daemon back for the next. A rerank that runs past its
 time limit keeps the order it was given. None of these raises or blocks a prompt, recall never
 downloads, and `/hippo:doctor`'s retrieval-profile line says which of them applies.
 
-**Cost.** No money and no network once the weights are on disk. Memory is the cost: one copy of
-the embedder (4.1 GB of unified memory, measured) in a daemon every session's warm server shares,
-which exits after 15 idle minutes (`HIPPO_EMBED_DAEMON_IDLE_S`; `HIPPO_EMBED_DAEMON=0` loads a copy
-per session instead). The warm reranker (0.6 GB) loads into the same daemon, once, when
-`HIPPO_RERANK=1` is on or the first time `/hippo:recall` or the MCP `recall` tool asks for it.
-The embedder loads in about 2 seconds from a warm disk cache (about 5 seconds for the first load
-after a reboot) and the reranker in under half a second. While a warm server builds or
-refreshes its `high/` index it holds 2 to 2.5 GB more (6.0 to 6.5 GB, peaking at 6.8, measured
-on a 1,070-memory corpus), and MLX's cache of freed buffers is capped at 512 MB
-(`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build. A first build
-costs about a second per memory. One session builds a project's index at a time, in passes that
-are kept, so closing a session mid-build loses little.
+**Cost.** No money and no network once the weights are on disk. Memory is the cost: one copy of the
+embedder (4.1 GB of unified memory, measured) in a daemon every session's warm server shares, which
+exits after 15 idle minutes (`HIPPO_EMBED_DAEMON_IDLE_S`). The warm reranker (0.6 GB) loads into
+the same daemon, once, when `HIPPO_RERANK=1` is on or the first time `/hippo:recall` or the MCP
+`recall` tool asks for it. The embedder loads in about 2 seconds from a warm disk cache (about 5
+seconds for the first load after a reboot) and the reranker in under half a second. While a warm
+server builds or refreshes its `high/` index it holds 2 to 2.5 GB more (6.0 to 6.5 GB, peaking at
+6.8, measured on a 1,070-memory corpus), and MLX's cache of freed buffers is capped at 512 MB
+(`HIPPO_MLX_CACHE_MB`); uncapped, that cache grew by gigabytes during a build. A first build costs
+about a second per memory. One session builds a project's index at a time, in passes that are kept,
+so closing a session mid-build loses little.
 
 **The 8B.** `HIPPO_HIGH_EMBED_MODEL=Qwen/Qwen3-Embedding-8B` (or `high_embed_model` in the
 plugin's `model.json`) selects Qwen3-Embedding-8B instead; set it before the fetch step so the

@@ -107,7 +107,26 @@ OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.mmr_eval --space lean
   --rows description --work SCRATCH --live LABEL=DIR ... --questions PRIVATE_DIR/questions.jsonl \
   --gold PRIVATE_DIR/gold.json --selection PRIVATE_DIR/selection.json --dups PRIVATE_DIR \
   --out PRIVATE_DIR/mmr.json
+
+# HCR-7: the embedding daemon against the in-process embedder. Three commands, one MLX process
+# at a time, over space_calibration's --work copies: the in-process vectors, the same through
+# the daemon (bytes compared: queries alone, ten at once, whole index builds), then real MCP
+# servers on high against one scratch project (one daemon from simultaneous starts, each
+# process's footprint, a burst of prompts, the three daemon faults). `--rerank` on
+# space_calibration reads a space with the warm reranker on (the 8B arm of HCR-7's evidence).
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon vectors-local \
+  --work SCRATCH [--live LABEL] [--heldout PRIVATE_DIR/questions.jsonl] --out PRIVATE_DIR/local.npz
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon vectors-daemon \
+  --work SCRATCH [--live LABEL] [--heldout ...] --local PRIVATE_DIR/local.npz --out PRIVATE_DIR/vectors.json
+OPENBLAS_NUM_THREADS=1 PYTHONPATH=plugin:. python -m bench.embed_daemon servers \
+  --project SCRATCH_PROJECT --data SCRATCH_PLUGIN_DATA --queries HARD_SET.yaml \
+  [--servers 10 --rounds 30] --out PRIVATE_DIR/servers.json
 ```
+
+Every bench loads its models in its own process (`bench/__init__.py` sets
+`HIPPO_EMBED_DAEMON=0`), as every evidence file before HCR-7 was read; `bench.embed_daemon`
+and a run with `HIPPO_EMBED_DAEMON=1` in the environment are the ones that go through the
+shared daemon.
 
 These used to run as `python -m memory.eval_recall --calibrate` and `--ab HIPPO_DREAM`; those
 flags now print where the tool lives. The other `--ab` arms (`HIPPO_SALIENCE`,

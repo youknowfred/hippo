@@ -1,0 +1,1504 @@
+{
+ "item": "HCR-7: one embedder per machine (a shared MLX daemon behind the dense seam)",
+ "date": "2026-11-27",
+ "what_this_file_is": "Counts, timings and byte comparisons from the roadmap's acceptance run. No query text, no memory name, no path. Private corpora are labelled hippo (this repository's own), corpus-b and corpus-c.",
+ "code": "branch claude/hcr-7-port-onto-shared-daemon on main at d74c560 (EMB-1 and EMB-2's daemon, with HCR-7's fallback, bounded wait and one-request builds ported onto it)",
+ "re_measured": {
+  "against_the_ported_daemon": "acceptance 1, 4, 5, 6 and 8 (bench.embed_daemon servers); in acceptance 2 the queries through the daemon and the rows built through it; in acceptance 3 the daemon arm",
+  "not_re_measured_in_process_and_unchanged": "the in-process vectors and twins of acceptance 2, the in-process arm of acceptance 3, all four arms of acceptance 7, and the lean warm servers of acceptance 1: they were run on v1.49.1's in-process embedder, whose code is the same on main",
+  "not_carried_over": "the first build of HCR-7 (pull request 262, closed unmerged) had its own daemon; none of its daemon-side numbers are in this file except the coalescing comparison in acceptance 2, marked there"
+ },
+ "machine": {
+  "hardware": "Apple Silicon Mac, 128 GB unified memory",
+  "space": "Qwen/Qwen3-Embedding-4B",
+  "weights": "mlx-community/Qwen3-Embedding-4B-mxfp8 at its pinned revision",
+  "load": "The owner's own sessions were running throughout (26 warm servers of the installed v1.49.1, each with its own in-process 4B, plus another project's MLX server). The load average is stamped on every timed section; byte comparisons and counts do not depend on it.",
+  "load_average": {
+   "server_run_start": 2.9,
+   "server_run_end": 7.0,
+   "burst": 6.2
+  }
+ },
+ "method": "bench/embed_daemon.py (vectors-local, vectors-daemon, servers) and bench/space_calibration.py, one MLX model process at a time, against scratch copies with CLAUDE_PLUGIN_DATA pointed at scratch. Proportions carry 95% Wilson intervals; medians, p95s and paired differences carry 95% bootstrap intervals.",
+ "corpora": {
+  "golden": {
+   "index_rows": 100,
+   "queries": 18
+  },
+  "packs": {
+   "index_rows": 87,
+   "queries": 32
+  },
+  "hippo": {
+   "index_rows": 380,
+   "queries": 98
+  },
+  "corpus-b": {
+   "index_rows": 432,
+   "queries": 80
+  }
+ },
+ "acceptance": {
+  "1_ten_servers_hold_one_copy": {
+   "roadmap": "Ten warm servers on high hold ONE copy of the model (each server under 0.2 GB, the daemon ~4.6 GB)",
+   "servers": 10,
+   "copies_of_the_model": 1,
+   "server_phys_footprint_gb": [
+    0.369,
+    0.369,
+    0.371,
+    0.371,
+    0.377,
+    0.377,
+    0.377,
+    0.382,
+    0.383,
+    0.384
+   ],
+   "server_mb": {
+    "n": 10,
+    "unit": "MB",
+    "median": 386.0,
+    "median_ci95": [
+     380.0,
+     392.0
+    ],
+    "p95": 393.0,
+    "p95_ci95": [
+     386.0,
+     393.0
+    ],
+    "max": 393.0
+   },
+   "servers_under_0_2_gb": 0,
+   "servers_mapping_an_mlx_library": 0,
+   "daemon_phys_footprint_gb": 4.697,
+   "daemon_model_resident_gb": 3.864,
+   "all_eleven_processes_gb": 8.46,
+   "before_this_change_gb": "ten servers at 4.12 GB of model each (roadmap, measured 2026-11-26): 41 GB",
+   "a_lean_warm_server_for_comparison": {
+    "servers": 10,
+    "mb": [
+     301.0,
+     302.0,
+     303.0,
+     304.0,
+     310.0,
+     314.0,
+     314.0,
+     315.0,
+     319.0,
+     321.0
+    ],
+    "what": "the same project and prompts on the lean profile, no daemon: a warm server's own floor (interpreter, numpy, onnxruntime and bge-small, the indexes)"
+   },
+   "holds": {
+    "one_copy": true,
+    "daemon_about_4_6_gb": true,
+    "each_server_under_0_2_gb": false
+   },
+   "miss": "each server measured 0.37 to 0.38 GB against 'under 0.2 GB': over by 0.17 to 0.18 GB. No warm server can meet that stamp: on lean, with no daemon and no MLX, one measures 0.29 to 0.31 GB."
+  },
+  "2_vectors_byte_identical": {
+   "roadmap": "vectors byte-identical to the in-process embedder on the golden set (if batching breaks byte-identity, queries run unbatched or the floor is re-checked)",
+   "queries_through_the_daemon_one_at_a_time": {
+    "byte_identical": 228,
+    "of": 228,
+    "ci95": [
+     0.9834,
+     1.0
+    ]
+   },
+   "queries_through_the_daemon_ten_arriving_at_once": {
+    "byte_identical": 228,
+    "of": 228,
+    "ci95": [
+     0.9834,
+     1.0
+    ]
+   },
+   "ten_at_once_wait_ms": {
+    "golden": {
+     "n": 18,
+     "unit": "ms",
+     "median": 900.39,
+     "median_ci95": [
+      550.62,
+      1225.32
+     ],
+     "p95": 1690.91,
+     "p95_ci95": [
+      1225.84,
+      1690.91
+     ],
+     "max": 1690.91
+    },
+    "packs": {
+     "n": 32,
+     "unit": "ms",
+     "median": 925.65,
+     "median_ci95": [
+      607.16,
+      1265.38
+     ],
+     "p95": 1825.98,
+     "p95_ci95": [
+      1597.87,
+      1992.52
+     ],
+     "max": 1992.52
+    },
+    "hippo": {
+     "n": 98,
+     "unit": "ms",
+     "median": 1027.82,
+     "median_ci95": [
+      854.11,
+      1231.15
+     ],
+     "p95": 2672.08,
+     "p95_ci95": [
+      2087.29,
+      3085.22
+     ],
+     "max": 3298.99
+    },
+    "corpus-b": {
+     "n": 80,
+     "unit": "ms",
+     "median": 820.15,
+     "median_ci95": [
+      690.27,
+      993.56
+     ],
+     "p95": 1499.72,
+     "p95_ci95": [
+      1456.85,
+      1584.75
+     ],
+     "max": 1603.99
+    }
+   },
+   "index_rows_built_through_the_daemon": {
+    "byte_identical": 567,
+    "of": 567,
+    "ci95": [
+     0.9933,
+     1.0
+    ],
+    "corpora": "golden, packs, hippo, each pass one request (corpus-b's twin was not rebuilt through the daemon)"
+   },
+   "in_process_checks": {
+    "the_same_query_embedded_twice": {
+     "byte_identical": 228,
+     "of": 228,
+     "ci95": [
+      0.9834,
+      1.0
+     ]
+    },
+    "in_process_twin_rebuilt_today_vs_the_twin_built_for_v1_49_0": {
+     "byte_identical": 999,
+     "of": 999,
+     "ci95": [
+      0.9962,
+      1.0
+     ]
+    }
+   },
+   "why_a_build_pass_is_one_request": {
+    "in_process_batches_of_ten_vs_single": {
+     "byte_identical": 0,
+     "of": 228,
+     "ci95": [
+      0.0,
+      0.0166
+     ]
+    },
+    "largest_raw_component_difference": 0.00014084577560424805,
+    "lowest_cosine_to_the_single_pass_vector": 0.9999998211860657,
+    "raw_vector_norm_about": 128,
+    "a_batch_changes_bits_by_itself": "the same query twice in one pass, and four different queries of one token length with no padding, each differ from the query embedded alone (0 of 4 identical)",
+    "read": "What shares a forward pass changes a vector's last bits. EMB-1 sent a build 32 texts per request, which cuts other token slices than the in-process embedder; the port sends a pass in one request, and the rows above are the result. Queries run one per pass on this daemon, as in-process.",
+    "coalescing_queries_measured_on_pull_request_262_only": "sharing a pass between queued queries was built and measured there (18 of 228 identical; ten at once waited a median 1.15 to 1.5 s coalesced against 0.5 to 0.9 s one per pass, at load over 100). main's daemon never coalesces, so there is nothing to switch off."
+   },
+   "single_query_ms_through_the_daemon": {
+    "n": 228,
+    "unit": "ms",
+    "median": 177.53,
+    "median_ci95": [
+     174.89,
+     183.01
+    ],
+    "p95": 265.87,
+    "p95_ci95": [
+     260.05,
+     278.44
+    ],
+    "max": 356.95
+   },
+   "mlx_modules_imported_by_the_client_process": [],
+   "holds": true
+  },
+  "3_qua6_counts_unchanged": {
+   "roadmap": "QUA-6 counts unchanged against the in-process arm",
+   "cell": "the committed table: floor 0.44, gate 0.60/0.60, count 0.12/0.14, band 0.002",
+   "by_corpus": {
+    "golden": {
+     "explicit": {
+      "in_process": "18/18",
+      "daemon": "18/18",
+      "mrr_in_process": 0.9537,
+      "mrr_daemon": 0.9537,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "5/6",
+       "generic": "12/12",
+       "adjacent": "12/12"
+      },
+      "abstained_daemon": {
+       "fixture": "5/6",
+       "generic": "12/12",
+       "adjacent": "12/12"
+      }
+     },
+     "hook": {
+      "in_process": "18/18",
+      "daemon": "18/18",
+      "mrr_in_process": 0.9537,
+      "mrr_daemon": 0.9537,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "5/6",
+       "generic": "12/12",
+       "adjacent": "12/12"
+      },
+      "abstained_daemon": {
+       "fixture": "5/6",
+       "generic": "12/12",
+       "adjacent": "12/12"
+      },
+      "served_rows_in_process": {
+       "median": 3,
+       "mean": 4.28
+      },
+      "served_rows_daemon": {
+       "median": 3,
+       "mean": 4.28
+      }
+     }
+    },
+    "hippo": {
+     "explicit": {
+      "in_process": "89/98",
+      "daemon": "89/98",
+      "mrr_in_process": 0.683,
+      "mrr_daemon": 0.683,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "7/11",
+       "generic": "10/12",
+       "adjacent": "8/12"
+      },
+      "abstained_daemon": {
+       "fixture": "7/11",
+       "generic": "10/12",
+       "adjacent": "8/12"
+      }
+     },
+     "hook": {
+      "in_process": "76/98",
+      "daemon": "76/98",
+      "mrr_in_process": 0.612,
+      "mrr_daemon": 0.612,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "7/11",
+       "generic": "10/12",
+       "adjacent": "9/12"
+      },
+      "abstained_daemon": {
+       "fixture": "7/11",
+       "generic": "10/12",
+       "adjacent": "9/12"
+      },
+      "served_rows_in_process": {
+       "median": 10,
+       "mean": 9.74
+      },
+      "served_rows_daemon": {
+       "median": 10,
+       "mean": 9.74
+      }
+     }
+    },
+    "packs": {
+     "explicit": {
+      "in_process": "32/32",
+      "daemon": "32/32",
+      "mrr_in_process": 0.8042,
+      "mrr_daemon": 0.8042,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "6/6",
+       "generic": "11/12",
+       "adjacent": "11/12"
+      },
+      "abstained_daemon": {
+       "fixture": "6/6",
+       "generic": "11/12",
+       "adjacent": "11/12"
+      }
+     },
+     "hook": {
+      "in_process": "30/32",
+      "daemon": "30/32",
+      "mrr_in_process": 0.7667,
+      "mrr_daemon": 0.7667,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "6/6",
+       "generic": "11/12",
+       "adjacent": "11/12"
+      },
+      "abstained_daemon": {
+       "fixture": "6/6",
+       "generic": "11/12",
+       "adjacent": "11/12"
+      },
+      "served_rows_in_process": {
+       "median": 5,
+       "mean": 5.75
+      },
+      "served_rows_daemon": {
+       "median": 5,
+       "mean": 5.75
+      }
+     }
+    },
+    "corpus-b": {
+     "explicit": {
+      "in_process": "79/80",
+      "daemon": "79/80",
+      "mrr_in_process": 0.8553,
+      "mrr_daemon": 0.8553,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "0/0",
+       "generic": "11/12",
+       "adjacent": "7/12"
+      },
+      "abstained_daemon": {
+       "fixture": "0/0",
+       "generic": "11/12",
+       "adjacent": "7/12"
+      }
+     },
+     "hook": {
+      "in_process": "10/80",
+      "daemon": "10/80",
+      "mrr_in_process": 0.0844,
+      "mrr_daemon": 0.0844,
+      "rows_whose_rank_differs": 0,
+      "abstained_in_process": {
+       "fixture": "0/0",
+       "generic": "11/12",
+       "adjacent": "7/12"
+      },
+      "abstained_daemon": {
+       "fixture": "0/0",
+       "generic": "11/12",
+       "adjacent": "7/12"
+      },
+      "served_rows_in_process": {
+       "median": 5,
+       "mean": 5.37
+      },
+      "served_rows_daemon": {
+       "median": 5,
+       "mean": 5.37
+      }
+     }
+    },
+    "all_rows": {
+     "explicit": {
+      "rows": 228,
+      "rows_whose_rank_differs": 0,
+      "differs_ci95": [
+       0.0,
+       0.0166
+      ]
+     },
+     "hook": {
+      "rows": 228,
+      "rows_whose_rank_differs": 0,
+      "differs_ci95": [
+       0.0,
+       0.0166
+      ]
+     }
+    }
+   },
+   "also_equal_to": "the v1.49.0 release run on these four corpora (golden 18/18 and hook 18, packs 32/32 and 30, hippo 89/98 and 76, corpus-b 79/80 and 10)",
+   "holds": true
+  },
+  "4_daemon_faults_serve_lean": {
+   "roadmap": "daemon absent, slow, or killed mid-call serves lean with no breaker trip and no raised error",
+   "absent_then_starting": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "served_lean_ci95": [
+     0.8865,
+     1.0
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "budget_ms": 1500.0,
+    "server_measured_ms": {
+     "n": 30,
+     "unit": "ms",
+     "median": 164.4,
+     "median_ci95": [
+      148.4,
+      176.7
+     ],
+     "p95": 205.6,
+     "p95_ci95": [
+      188.8,
+      242.3
+     ],
+     "max": 242.3
+    },
+    "what": "the daemon is killed, then every server gets a prompt at once (it is absent, then starting)"
+   },
+   "slow": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "served_lean_ci95": [
+     0.8865,
+     1.0
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "budget_ms": 1500.0,
+    "server_measured_ms": {
+     "n": 30,
+     "unit": "ms",
+     "median": 92.7,
+     "median_ci95": [
+      80.2,
+      115.8
+     ],
+     "p95": 825.4,
+     "p95_ci95": [
+      814.3,
+      830.0
+     ],
+     "max": 830.0
+    },
+    "what": "the daemon's query turn is held for several seconds by one long request; every server gets a prompt at once meanwhile",
+    "refused_busy_by_the_daemon": 23,
+    "prompts_that_waited_and_timed_out": 7,
+    "not_run_because_the_wait_ran_out": 7
+   },
+   "killed_mid_call": {
+    "prompts": 30,
+    "raised": 0,
+    "raised_ci95": [
+     0.0,
+     0.1135
+    ],
+    "breaker_tripped": 0,
+    "breaker_tripped_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_high": 0,
+    "served_high_ci95": [
+     0.0,
+     0.1135
+    ],
+    "served_lean": 30,
+    "served_lean_ci95": [
+     0.8865,
+     1.0
+    ],
+    "over_budget": 0,
+    "over_budget_ci95": [
+     0.0,
+     0.1135
+    ],
+    "budget_ms": 1500.0,
+    "server_measured_ms": {
+     "n": 30,
+     "unit": "ms",
+     "median": 299.7,
+     "median_ci95": [
+      291.7,
+      308.3
+     ],
+     "p95": 346.8,
+     "p95_ci95": [
+      323.7,
+      408.7
+     ],
+     "max": 408.7
+    },
+    "what": "a prompt's query is waiting in the daemon when the daemon is killed (SIGKILL)",
+    "daemon_restarted": {
+     "by_the_servers": 33,
+     "by_this_bench": 0
+    },
+    "prompts_whose_wait_was_cut_by_the_kill": 30
+   },
+   "every_server_still_accepting_at_the_end": 10,
+   "holds": true
+  },
+  "5_burst_of_ten_inside_the_budget": {
+   "prompts": 300,
+   "raised": 0,
+   "raised_ci95": [
+    0.0,
+    0.0126
+   ],
+   "breaker_tripped": 0,
+   "breaker_tripped_ci95": [
+    0.0,
+    0.0126
+   ],
+   "served_high": 106,
+   "served_high_ci95": [
+    0.3014,
+    0.409
+   ],
+   "served_lean": 194,
+   "served_lean_ci95": [
+    0.591,
+    0.6986
+   ],
+   "over_budget": 0,
+   "over_budget_ci95": [
+    0.0,
+    0.0126
+   ],
+   "budget_ms": 1500.0,
+   "server_measured_ms": {
+    "n": 300,
+    "unit": "ms",
+    "median": 192.2,
+    "median_ci95": [
+     173.0,
+     214.0
+    ],
+    "p95": 873.9,
+    "p95_ci95": [
+     739.7,
+     890.8
+    ],
+    "max": 1154.1
+   },
+   "rounds": 30,
+   "simultaneous": 10,
+   "daemon": {
+    "queries": 118,
+    "busy": 97,
+    "expired": 5
+   },
+   "load_average": 6.20654296875,
+   "roadmap": "warm served recall stays inside SERVE_BUDGET_MS at a measured burst of 10 simultaneous prompts",
+   "query_wait_s": 0.75,
+   "read": "Thirty rounds of ten prompts fired at the same instant, back to back. Every prompt was answered inside the budget; the ones the daemon could not embed inside the wait were served lean (refused at once when the daemon saw it could not, after the wait otherwise).",
+   "holds": true
+  },
+  "6_one_daemon_from_simultaneous_starts": {
+   "roadmap": "two sessions starting together spawn one daemon",
+   "two_starts_at_once": {
+    "trials": 20,
+    "left_exactly_one_daemon": 20,
+    "ci95": [
+     0.8389,
+     1.0
+    ],
+    "and_it_had_loaded_nothing": 20
+   },
+   "ten_servers_first_prompt_at_once": {
+    "servers": 10,
+    "daemons_alive_after": 1,
+    "first_prompts": {
+     "prompts": 10,
+     "raised": 0,
+     "raised_ci95": [
+      0.0,
+      0.2775
+     ],
+     "breaker_tripped": 0,
+     "breaker_tripped_ci95": [
+      0.0,
+      0.2775
+     ],
+     "served_high": 0,
+     "served_high_ci95": [
+      0.0,
+      0.2775
+     ],
+     "served_lean": 10,
+     "served_lean_ci95": [
+      0.7225,
+      1.0
+     ],
+     "over_budget": 0,
+     "over_budget_ci95": [
+      0.0,
+      0.2775
+     ],
+     "budget_ms": 4000.0,
+     "server_measured_ms": {
+      "n": 10,
+      "unit": "ms",
+      "median": 2146.4,
+      "median_ci95": [
+       2137.6,
+       2236.1
+      ],
+      "p95": 2295.6,
+      "p95_ci95": [
+       2214.5,
+       2295.6
+      ],
+      "max": 2295.6
+     }
+    }
+   },
+   "holds": true
+  },
+  "7_f3_arm_8b_with_the_warm_reranker_in_hook_mode": {
+   "roadmap": "the evidence file carries the F3 arm (the 8B with the warm reranker, read in hook mode); no default changes without it",
+   "rows": "four corpora: the QUA-6 golden corpus, the starter packs, hippo and corpus-b, their hard sets plus HCR-8's held-out questions; in-process models; the committed thresholds of each space",
+   "arms": {
+    "4B, whole rows (high as shipped)": {
+     "cell": "floor=0.44|gate=0.6/0.6|count=0.12/0.14|band=0.002",
+     "rows_embed": "whole",
+     "reranker": null,
+     "by_corpus": {
+      "golden": {
+       "explicit": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 0.9537,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        }
+       },
+       "hook": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 0.9537,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        },
+        "injecting_prompts": 18,
+        "served_rows": {
+         "median": 3,
+         "mean": 4.28
+        },
+        "leaked_probes": 1,
+        "leaked_probe_rows": 1
+       }
+      },
+      "hippo": {
+       "explicit": {
+        "hits": 89,
+        "n": 98,
+        "mrr": 0.683,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "8/12"
+        }
+       },
+       "hook": {
+        "hits": 76,
+        "n": 98,
+        "mrr": 0.612,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "9/12"
+        },
+        "injecting_prompts": 98,
+        "served_rows": {
+         "median": 10,
+         "mean": 9.74
+        },
+        "leaked_probes": 9,
+        "leaked_probe_rows": 43
+       }
+      },
+      "packs": {
+       "explicit": {
+        "hits": 32,
+        "n": 32,
+        "mrr": 0.8042,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "11/12",
+         "adjacent": "11/12"
+        }
+       },
+       "hook": {
+        "hits": 30,
+        "n": 32,
+        "mrr": 0.7667,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "11/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 32,
+        "served_rows": {
+         "median": 5,
+         "mean": 5.75
+        },
+        "leaked_probes": 2,
+        "leaked_probe_rows": 6
+       }
+      },
+      "corpus-b": {
+       "explicit": {
+        "hits": 79,
+        "n": 80,
+        "mrr": 0.8553,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        }
+       },
+       "hook": {
+        "hits": 10,
+        "n": 80,
+        "mrr": 0.0844,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        },
+        "injecting_prompts": 79,
+        "served_rows": {
+         "median": 5,
+         "mean": 5.37
+        },
+        "leaked_probes": 6,
+        "leaked_probe_rows": 16
+       }
+      }
+     },
+     "explicit": {
+      "hits": 218,
+      "n": 228,
+      "hit_rate": 0.9561,
+      "hit_rate_ci95": [
+       0.9212,
+       0.976
+      ],
+      "mrr": 0.7819,
+      "mrr_ci95": [
+       0.7379,
+       0.8253
+      ]
+     },
+     "hook": {
+      "hits": 134,
+      "n": 228,
+      "hit_rate": 0.5877,
+      "hit_rate_ci95": [
+       0.5229,
+       0.6496
+      ],
+      "mrr": 0.4756,
+      "mrr_ci95": [
+       0.4141,
+       0.5357
+      ]
+     }
+    },
+    "4B, whole rows, warm reranker on": {
+     "cell": "floor=0.44|gate=0.6/0.6|count=0.12/0.14|band=0.002",
+     "rows_embed": "whole",
+     "reranker": "Qwen/Qwen3-Reranker-0.6B",
+     "by_corpus": {
+      "golden": {
+       "explicit": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 1.0,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        }
+       },
+       "hook": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 1.0,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        },
+        "injecting_prompts": 18,
+        "served_rows": {
+         "median": 3,
+         "mean": 4.28
+        },
+        "leaked_probes": 1,
+        "leaked_probe_rows": 1
+       }
+      },
+      "hippo": {
+       "explicit": {
+        "hits": 89,
+        "n": 98,
+        "mrr": 0.6982,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "8/12"
+        }
+       },
+       "hook": {
+        "hits": 79,
+        "n": 98,
+        "mrr": 0.6299,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "9/12"
+        },
+        "injecting_prompts": 98,
+        "served_rows": {
+         "median": 10,
+         "mean": 9.72
+        },
+        "leaked_probes": 9,
+        "leaked_probe_rows": 45
+       }
+      },
+      "packs": {
+       "explicit": {
+        "hits": 32,
+        "n": 32,
+        "mrr": 0.7911,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "11/12",
+         "adjacent": "11/12"
+        }
+       },
+       "hook": {
+        "hits": 30,
+        "n": 32,
+        "mrr": 0.7495,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "11/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 32,
+        "served_rows": {
+         "median": 5,
+         "mean": 5.72
+        },
+        "leaked_probes": 2,
+        "leaked_probe_rows": 6
+       }
+      },
+      "corpus-b": {
+       "explicit": {
+        "hits": 79,
+        "n": 80,
+        "mrr": 0.7946,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        }
+       },
+       "hook": {
+        "hits": 10,
+        "n": 80,
+        "mrr": 0.0854,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        },
+        "injecting_prompts": 79,
+        "served_rows": {
+         "median": 6,
+         "mean": 5.72
+        },
+        "leaked_probes": 6,
+        "leaked_probe_rows": 24
+       }
+      }
+     },
+     "explicit": {
+      "hits": 218,
+      "n": 228,
+      "hit_rate": 0.9561,
+      "hit_rate_ci95": [
+       0.9212,
+       0.976
+      ],
+      "mrr": 0.7689,
+      "mrr_ci95": [
+       0.7235,
+       0.8127
+      ]
+     },
+     "hook": {
+      "hits": 137,
+      "n": 228,
+      "hit_rate": 0.6009,
+      "hit_rate_ci95": [
+       0.5361,
+       0.6623
+      ],
+      "mrr": 0.4849,
+      "mrr_ci95": [
+       0.4247,
+       0.5448
+      ]
+     }
+    },
+    "8B, description rows": {
+     "cell": "floor=0.4|gate=0.5/0.48|count=0.11/0.12|band=0.002",
+     "rows_embed": "description",
+     "reranker": null,
+     "by_corpus": {
+      "golden": {
+       "explicit": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 0.963,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        }
+       },
+       "hook": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 0.963,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 18,
+        "served_rows": {
+         "median": 7,
+         "mean": 5.89
+        },
+        "leaked_probes": 2,
+        "leaked_probe_rows": 2
+       }
+      },
+      "hippo": {
+       "explicit": {
+        "hits": 90,
+        "n": 98,
+        "mrr": 0.6585,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "10/12"
+        }
+       },
+       "hook": {
+        "hits": 76,
+        "n": 98,
+        "mrr": 0.5858,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "10/12"
+        },
+        "injecting_prompts": 98,
+        "served_rows": {
+         "median": 10,
+         "mean": 9.83
+        },
+        "leaked_probes": 8,
+        "leaked_probe_rows": 31
+       }
+      },
+      "packs": {
+       "explicit": {
+        "hits": 32,
+        "n": 32,
+        "mrr": 0.8112,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        }
+       },
+       "hook": {
+        "hits": 31,
+        "n": 32,
+        "mrr": 0.78,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 32,
+        "served_rows": {
+         "median": 5,
+         "mean": 5.84
+        },
+        "leaked_probes": 1,
+        "leaked_probe_rows": 5
+       }
+      },
+      "corpus-b": {
+       "explicit": {
+        "hits": 73,
+        "n": 80,
+        "mrr": 0.7879,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        }
+       },
+       "hook": {
+        "hits": 10,
+        "n": 80,
+        "mrr": 0.0896,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        },
+        "injecting_prompts": 79,
+        "served_rows": {
+         "median": 6,
+         "mean": 6.04
+        },
+        "leaked_probes": 6,
+        "leaked_probe_rows": 20
+       }
+      }
+     },
+     "explicit": {
+      "hits": 213,
+      "n": 228,
+      "hit_rate": 0.9342,
+      "hit_rate_ci95": [
+       0.8943,
+       0.9597
+      ],
+      "mrr": 0.7494,
+      "mrr_ci95": [
+       0.7024,
+       0.7948
+      ]
+     },
+     "hook": {
+      "hits": 135,
+      "n": 228,
+      "hit_rate": 0.5921,
+      "hit_rate_ci95": [
+       0.5273,
+       0.6539
+      ],
+      "mrr": 0.4687,
+      "mrr_ci95": [
+       0.4092,
+       0.5282
+      ]
+     }
+    },
+    "8B, description rows, warm reranker on (the F3 arm)": {
+     "cell": "floor=0.4|gate=0.5/0.48|count=0.11/0.12|band=0.002",
+     "rows_embed": "description",
+     "reranker": "Qwen/Qwen3-Reranker-0.6B",
+     "by_corpus": {
+      "golden": {
+       "explicit": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 1.0,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "12/12"
+        }
+       },
+       "hook": {
+        "hits": 18,
+        "n": 18,
+        "mrr": 1.0,
+        "abstained": {
+         "fixture": "5/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 18,
+        "served_rows": {
+         "median": 7,
+         "mean": 5.89
+        },
+        "leaked_probes": 2,
+        "leaked_probe_rows": 2
+       }
+      },
+      "hippo": {
+       "explicit": {
+        "hits": 90,
+        "n": 98,
+        "mrr": 0.7244,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "10/12"
+        }
+       },
+       "hook": {
+        "hits": 76,
+        "n": 98,
+        "mrr": 0.6333,
+        "abstained": {
+         "fixture": "7/11",
+         "generic": "10/12",
+         "adjacent": "10/12"
+        },
+        "injecting_prompts": 98,
+        "served_rows": {
+         "median": 10,
+         "mean": 9.69
+        },
+        "leaked_probes": 8,
+        "leaked_probe_rows": 35
+       }
+      },
+      "packs": {
+       "explicit": {
+        "hits": 32,
+        "n": 32,
+        "mrr": 0.7961,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        }
+       },
+       "hook": {
+        "hits": 31,
+        "n": 32,
+        "mrr": 0.7649,
+        "abstained": {
+         "fixture": "6/6",
+         "generic": "12/12",
+         "adjacent": "11/12"
+        },
+        "injecting_prompts": 32,
+        "served_rows": {
+         "median": 6,
+         "mean": 5.91
+        },
+        "leaked_probes": 1,
+        "leaked_probe_rows": 5
+       }
+      },
+      "corpus-b": {
+       "explicit": {
+        "hits": 73,
+        "n": 80,
+        "mrr": 0.784,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        }
+       },
+       "hook": {
+        "hits": 10,
+        "n": 80,
+        "mrr": 0.0917,
+        "abstained": {
+         "fixture": "0/0",
+         "generic": "11/12",
+         "adjacent": "7/12"
+        },
+        "injecting_prompts": 79,
+        "served_rows": {
+         "median": 7,
+         "mean": 6.16
+        },
+        "leaked_probes": 6,
+        "leaked_probe_rows": 30
+       }
+      }
+     },
+     "explicit": {
+      "hits": 213,
+      "n": 228,
+      "hit_rate": 0.9342,
+      "hit_rate_ci95": [
+       0.8943,
+       0.9597
+      ],
+      "mrr": 0.7771,
+      "mrr_ci95": [
+       0.7318,
+       0.8201
+      ]
+     },
+     "hook": {
+      "hits": 135,
+      "n": 228,
+      "hit_rate": 0.5921,
+      "hit_rate_ci95": [
+       0.5273,
+       0.6539
+      ],
+      "mrr": 0.4907,
+      "mrr_ci95": [
+       0.4316,
+       0.5507
+      ]
+     }
+    }
+   },
+   "paired_differences": {
+    "F3 arm minus 4B as shipped": {
+     "hook": {
+      "rows": 228,
+      "hits_gained": 5,
+      "hits_lost": 4,
+      "hit_rate_diff": 0.0044,
+      "hit_rate_diff_ci95": [
+       -0.0219,
+       0.0307
+      ],
+      "mrr_diff": 0.0151,
+      "mrr_diff_ci95": [
+       -0.022,
+       0.0536
+      ]
+     },
+     "explicit": {
+      "rows": 228,
+      "hits_gained": 5,
+      "hits_lost": 10,
+      "hit_rate_diff": -0.0219,
+      "hit_rate_diff_ci95": [
+       -0.057,
+       0.0088
+      ],
+      "mrr_diff": -0.0048,
+      "mrr_diff_ci95": [
+       -0.05,
+       0.0397
+      ]
+     }
+    },
+    "F3 arm minus 8B without the reranker": {
+     "hook": {
+      "rows": 228,
+      "hits_gained": 3,
+      "hits_lost": 3,
+      "hit_rate_diff": 0.0,
+      "hit_rate_diff_ci95": [
+       -0.0219,
+       0.0219
+      ],
+      "mrr_diff": 0.0219,
+      "mrr_diff_ci95": [
+       -0.008,
+       0.0529
+      ]
+     },
+     "explicit": {
+      "rows": 228,
+      "hits_gained": 0,
+      "hits_lost": 0,
+      "hit_rate_diff": 0.0,
+      "hit_rate_diff_ci95": [
+       0.0,
+       0.0
+      ],
+      "mrr_diff": 0.0277,
+      "mrr_diff_ci95": [
+       -0.0096,
+       0.0655
+      ]
+     }
+    },
+    "8B minus 4B as shipped": {
+     "hook": {
+      "rows": 228,
+      "hits_gained": 6,
+      "hits_lost": 5,
+      "hit_rate_diff": 0.0044,
+      "hit_rate_diff_ci95": [
+       -0.0219,
+       0.0351
+      ],
+      "mrr_diff": -0.0069,
+      "mrr_diff_ci95": [
+       -0.0315,
+       0.0172
+      ]
+     },
+     "explicit": {
+      "rows": 228,
+      "hits_gained": 5,
+      "hits_lost": 10,
+      "hit_rate_diff": -0.0219,
+      "hit_rate_diff_ci95": [
+       -0.057,
+       0.0088
+      ],
+      "mrr_diff": -0.0325,
+      "mrr_diff_ci95": [
+       -0.0611,
+       -0.0056
+      ]
+     }
+    },
+    "4B with the reranker minus 4B as shipped": {
+     "hook": {
+      "rows": 228,
+      "hits_gained": 5,
+      "hits_lost": 2,
+      "hit_rate_diff": 0.0132,
+      "hit_rate_diff_ci95": [
+       -0.0088,
+       0.0351
+      ],
+      "mrr_diff": 0.0093,
+      "mrr_diff_ci95": [
+       -0.0263,
+       0.0452
+      ]
+     },
+     "explicit": {
+      "rows": 228,
+      "hits_gained": 0,
+      "hits_lost": 0,
+      "hit_rate_diff": 0.0,
+      "hit_rate_diff_ci95": [
+       0.0,
+       0.0
+      ],
+      "mrr_diff": -0.013,
+      "mrr_diff_ci95": [
+       -0.05,
+       0.0247
+      ]
+     }
+    }
+   },
+   "holds": true
+  },
+  "8_the_four_f1_conditions_as_built": {
+   "roadmap": "no install step or launchd entry, no port, lean on any daemon fault, a doctor line",
+   "hippo_spawns_and_reaps_it": {
+    "started_by": "embed_daemon.ensure (python -m memory.embed_daemon --detach, its own session, no install step)",
+    "leaves_when": "no load, embed or rerank for HIPPO_EMBED_DAEMON_IDLE_S (900 s as shipped; 60.0 s in this run so the exit is seen). The roadmap's design said: when no live warm heartbeat remains, with the model dropped after an idle window.",
+    "launchd_entries_added": 0,
+    "launchd_note": "one launchd job on this machine names hippo before and after the run (the owner's own, unrelated); nothing here writes a plist or calls launchctl",
+    "reaped_itself": {
+     "daemons_left": 0,
+     "seconds_after_the_last_server_exited": 47.4
+    }
+   },
+   "socket_no_port": {
+    "daemon_internet_sockets": 0,
+    "daemon_unix_sockets": 1,
+    "socket_mode": "0o600",
+    "socket_dir_mode": "0o700",
+    "socket_under_plugin_data": true
+   },
+   "lean_on_any_fault": "acceptance 4, above",
+   "high_only_and_a_doctor_line": {
+    "names_the_daemon": true,
+    "note": "",
+    "text": "dense Qwen/Qwen3-Embedding-4B via MLX in the warm server (the spawned hook serves lean: dense lean); warm server ready, serving high, model load 1.8 s, 3.9 GiB resident in the shared embed daemon (pid N), 20 prompt(s) served lean because the embed daemon did not answer (last: DenseUnavailable: the shared embed daemon is gone (embed daemon closed the connection))"
+   },
+   "holds": true
+  }
+ },
+ "verdict": {
+  "acceptance_points_held": {
+   "1_ten_servers_hold_one_copy": false,
+   "2_vectors_byte_identical": true,
+   "3_qua6_counts_unchanged": true,
+   "4_daemon_faults_serve_lean": true,
+   "5_burst_of_ten_inside_the_budget": true,
+   "6_one_daemon_from_simultaneous_starts": true,
+   "7_f3_arm_8b_with_the_warm_reranker_in_hook_mode": true,
+   "8_the_four_f1_conditions_as_built": true
+  },
+  "default": "ON, as EMB-1 made it on main (HIPPO_EMBED_DAEMON=0 loads in process). This change does not move it.",
+  "what_happened": "EMB-1 and EMB-2 made the daemon high's default path on 2026-11-27 before any evidence file existed; the roadmap required one first. This file is that evidence, taken afterwards, on their daemon with HCR-7's pieces ported onto it (owner, 2026-11-27: \"(a) Port onto main\").",
+  "what_it_shows": "Seven of the eight acceptance points hold. Point 1 holds in what it is for (one copy of the model for ten servers) and misses one stamp: each server measured 0.37 to 0.38 GB against 'under 0.2 GB': over by 0.17 to 0.18 GB. No warm server can meet that stamp: on lean, with no daemon and no MLX, one measures 0.29 to 0.31 GB.",
+  "for_the_owner": "Whether the default stays on with that stamp read as an estimate that left out what a warm server holds on every profile, or the stamp is read as written and the default goes back off (embed_daemon.enabled)."
+ },
+ "not_run": [
+  "corpus-c (1,070 memories): not in any arm here; its 8B twin alone is the longest build of the set.",
+  "corpus-b's twin was not rebuilt through the daemon (its queries were compared; 567 index rows of three corpora were).",
+  "The full test suite: the test files the change reaches ran instead (named in the pull request).",
+  "A quiet machine: every timing was taken beside the owner's live sessions.",
+  "The warm reranker through the daemon on real weights (EMB-2's tests cover it with fakes; F3 was read in-process).",
+  "A build's peak memory inside the daemon was not sampled.",
+  "The daemon's shipped 900 s idle exit: the server run used a shorter one so the exit could be seen."
+ ]
+}
